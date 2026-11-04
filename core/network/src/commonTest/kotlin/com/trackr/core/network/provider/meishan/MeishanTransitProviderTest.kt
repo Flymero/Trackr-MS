@@ -54,8 +54,8 @@ private val nearbyJson = """
     ],"redPackets":[]}}
 """.trimIndent()
 
-/** 线路详情的车辆位置按命中次数前移，模拟车辆在 3 秒里走了约 30 米（≈36 km/h） */
-private fun lineDetailJson(hit: Int): String {
+/** 线路详情的车辆位置按命中次数前移，模拟车辆在 3 秒里走了约 30 米（≈36 km/h）；b_sd 可注入 */
+private fun lineDetailJson(hit: Int, bsd: Double = 0.0): String {
     val lat = if (hit <= 1) "30.065" else "30.06527"
     return """
     {"code":101,"result":{
@@ -71,7 +71,7 @@ private fun lineDetailJson(hit: Int): String {
       ],
       "busList":[
         {"b_id":0,"l_copy_id":11,"b_plate_num":"川Z10091D","index":2,"state":0,
-         "isArriveSite":0,"b_latitude":$lat,"b_longitude":103.825,"b_sd":0.0,"areaId":1}
+         "isArriveSite":0,"b_latitude":$lat,"b_longitude":103.825,"b_sd":$bsd,"areaId":1}
       ]
     }}
     """.trimIndent()
@@ -90,12 +90,15 @@ class MeishanTransitProviderTest {
         val hits = HashMap<String, Int>()
         var byIdHits = 0
 
+        /** 注入车辆 b_sd（服务端下发的实时速度）；默认 0 模拟字段无效 */
+        var byIdBsd = 0.0
+
         val httpClient = mockHttpClient { request ->
             val path = request.encodedPath.substringAfterLast('/')
             hits[path] = (hits[path] ?: 0) + 1
             when (path) {
                 "list" -> MockReply(lineListJson)
-                "byId" -> MockReply(lineDetailJson(++byIdHits))
+                "byId" -> MockReply(lineDetailJson(++byIdHits, byIdBsd))
                 "site" -> MockReply(stopLinesJson)
                 "siteAndRedPacket" -> MockReply(nearbyJson)
                 else -> MockReply("""{"code":102}""")
@@ -178,7 +181,7 @@ class MeishanTransitProviderTest {
     }
 
     @Test
-    fun speed_computedFromConsecutiveFrames() = runBlocking {
+    fun speed_reportedBsdPreferred_deltaAsFallback() = runBlocking {
         var now = 0L
         val backend = MockBackend()
         val provider = MeishanTransitProvider(
@@ -188,15 +191,21 @@ class MeishanTransitProviderTest {
         )
         val request = LineDetailRequest(lineId = "ms:1_1_0")
 
-        // 第一帧：无上一帧可比，速度 0
+        // b_sd 无效（0，可能是停运时段没填）+ 无上一帧：速度 0
         assertEquals(0.0, provider.getLineDetail(city, request).buses[0].speedKmh)
 
-        // 3 秒后车挪了约 30 米 → 约 36 km/h；b_sd 仍是 0，不采用
+        // b_sd 仍无效，但 3 秒里车挪了约 30 米 → 用相邻帧位移兜底出约 36 km/h
         now = 3_000L
-        val speed = provider.getLineDetail(city, request).buses[0].speedKmh
-        assertTrue(speed in 10.0..70.0, "相邻帧位移应算出合理速度，实际 $speed")
+        val fallback = provider.getLineDetail(city, request).buses[0].speedKmh
+        assertTrue(fallback in 10.0..70.0, "位移兜底应算出合理速度，实际 $fallback")
 
-        // 时间差过大（>120s）：放弃计算，回 0
+        // b_sd 有效（运营时段服务端下发）时优先用字段，不走位移估算
+        backend.byIdBsd = 25.0
+        now = 6_000L
+        assertEquals(25.0, provider.getLineDetail(city, request).buses[0].speedKmh)
+
+        // 时间差过大（>120s）且 b_sd 无效：放弃估算，回 0
+        backend.byIdBsd = 0.0
         now = 300_000L
         assertEquals(0.0, provider.getLineDetail(city, request).buses[0].speedKmh)
     }

@@ -472,7 +472,7 @@ class MeishanTransitProvider(
         )
     }
 
-    /** 车辆快照解析 + 相邻帧实测速度（b_sd 恒 0，不采用） */
+    /** 车辆快照解析：速度优先用数据源自带的 b_sd，字段无效（0/缺失）时用相邻帧位移兜底 */
     private fun JSONObject.parseBuses(ref: MeishanIds.Ref, busList: JSONArray): List<LiveBus> {
         val nowMs = monotonicClock.elapsedMillis()
         val cacheKey = "${ref.areaId}_${ref.lId}_${ref.state}"
@@ -488,15 +488,21 @@ class MeishanTransitProvider(
             val lat = bus.optDouble("b_latitude", 0.0)
             val lng = bus.optDouble("b_longitude", 0.0)
 
-            var speedKmh = 0.0
-            val prev = previous?.get(plate)
-            if (prev != null) {
-                val dtSec = (nowMs - prev.timeMs) / 1000.0
-                if (dtSec in SPEED_DT_MIN..SPEED_DT_MAX) {
-                    val meters = RouteProjectionMath.calculateDistanceMeters(prev.lat, prev.lng, lat, lng)
-                    if (meters != null) {
-                        val kmh = (meters / dtSec) * 3.6
-                        if (kmh in SPEED_NOISE_KMH..SPEED_MAX_KMH) speedKmh = kmh
+            // 速度：b_sd 是服务端下发的实时速度，有效就直接用；
+            // 为 0 可能是车真停着（等灯/归场），也可能是字段没填——
+            // 此时若上一帧位置可比且间隔合理，用 GPS 位移兜底算一次
+            val reported = bus.optDouble("b_sd", 0.0)
+            var speedKmh = reported.takeIf { it > 0.0 } ?: 0.0
+            if (speedKmh <= 0.0) {
+                val prev = previous?.get(plate)
+                if (prev != null) {
+                    val dtSec = (nowMs - prev.timeMs) / 1000.0
+                    if (dtSec in SPEED_DT_MIN..SPEED_DT_MAX) {
+                        val meters = RouteProjectionMath.calculateDistanceMeters(prev.lat, prev.lng, lat, lng)
+                        if (meters != null) {
+                            val kmh = (meters / dtSec) * 3.6
+                            if (kmh in SPEED_NOISE_KMH..SPEED_MAX_KMH) speedKmh = kmh
+                        }
                     }
                 }
             }
