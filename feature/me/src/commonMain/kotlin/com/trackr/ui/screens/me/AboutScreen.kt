@@ -85,6 +85,7 @@ import com.trackr.feature.me.resources.me_about_up_to_date
 import com.trackr.feature.me.resources.me_about_version
 import com.trackr.feature.me.resources.me_about_version_unknown
 import com.trackr.feature.me.resources.me_app_name
+import com.trackr.feature.me.resources.me_edition_label
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
 
@@ -158,12 +159,21 @@ fun AboutScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Text(
-                    text = stringResource(MeRes.string.me_app_name),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = stringResource(MeRes.string.me_app_name),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(MeRes.string.me_edition_label),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 3.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 

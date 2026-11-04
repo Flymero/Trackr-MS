@@ -49,6 +49,7 @@ class LineListViewModelTest {
         dispatcherHolder.install()
         meishanLines = FakeMeishanLineRepository()
         realtime = FakeRealtimeRepository()
+        settings = FakeSettingsRepository(city)
     }
 
     @AfterTest
@@ -56,9 +57,11 @@ class LineListViewModelTest {
         dispatcherHolder.reset()
     }
 
+    private lateinit var settings: FakeSettingsRepository
+
     private fun createViewModel(): LineListViewModel = LineListViewModel(
         meishanLines = meishanLines,
-        settings = FakeSettingsRepository(city),
+        settings = settings,
         realtime = realtime
     )
 
@@ -75,6 +78,25 @@ class LineListViewModelTest {
         assertTrue(!state.isLoading)
         assertTrue(!state.loadFailed)
         assertEquals(listOf(MeishanArea.MEISHAN), meishanLines.calls)
+    }
+
+    @Test
+    fun `城市切换后线路页跟随切换区域`() = runTest(dispatcherHolder.dispatcher) {
+        // 页签的 ViewModel 常驻：城市从眉山换到仁寿后，列表要跟着换成仁寿
+        meishanLines.result = Result.success(sampleLines())
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        settings.selectCity(TransitCity(cityId = "", cityName = "仁寿", province = "四川"))
+        advanceUntilIdle()
+
+        assertEquals(MeishanArea.RENSHOU, viewModel.uiState.value.area)
+        assertEquals(listOf(MeishanArea.MEISHAN, MeishanArea.RENSHOU), meishanLines.calls)
+
+        // 换到非眉山系城市（如上海）：线路页保持当前区域不动
+        settings.selectCity(TransitCity(cityId = "034", cityName = "上海", province = "直辖市"))
+        advanceUntilIdle()
+        assertEquals(MeishanArea.RENSHOU, viewModel.uiState.value.area)
     }
 
     @Test

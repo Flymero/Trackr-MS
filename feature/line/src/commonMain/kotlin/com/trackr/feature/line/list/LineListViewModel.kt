@@ -86,6 +86,14 @@ class LineListViewModel(
         // 默认区域跟着当前城市走：选仁寿就默认仁寿，否则默认眉山
         val initialArea = MeishanArea.forCityName(settings.selectedCity.value.cityName) ?: MeishanArea.MEISHAN
         loadLines(initialArea)
+        // 页签的 ViewModel 会一直活着（entry 常驻返回栈），城市切换后必须跟着换区域，
+        // 否则切到仁寿后进「线路」页还是上一次的眉山列表
+        viewModelScope.launch {
+            settings.selectedCity.collect { city ->
+                val mapped = MeishanArea.forCityName(city.cityName) ?: return@collect
+                if (mapped != _uiState.value.area) loadLines(mapped)
+            }
+        }
     }
 
     fun onEvent(event: LineListEvent) {

@@ -12,29 +12,49 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.scene.Scene
 
 /**
- * 页面转场，和第 16 步之前 `MainActivity` 里用户实际看到的一样：进栈、出栈、预测返回都是横向滑动 + 淡入淡出（300ms）。
+ * 页面转场：进栈、出栈、预测返回是横向滑动 + 淡入淡出（300ms）；
+ * 页签根页之间的切换用 220ms 淡入淡出——页签是平级关系，左右滑动会有「进子页」的错觉。
  *
- * 旧代码里有一段「两个页签根页之间切换用 220ms 淡入淡出」的判断，但它用 `initialState.key is ScreenKey.Home`，
- * 而 Scene.key 是字符串 `"$key:${key::class}"`，判断永远为假，所以页签切换一直是滑动。第 16 步按「无用户可见变化」
- * 删掉这段死代码；以后要改成淡入淡出另开一步。
+ * （历史：第 16 步前旧代码有一段页签切换淡入淡出的判断，但条件写错永远为假，页签切换一直是
+ * 滑动，当时按「无用户可见变化」删掉；现在用场景栈顶 key 正确判定，真正改成淡入淡出。）
  */
 object TrackrTransitions {
     private const val SLIDE_MILLIS = 300
+    private const val TAB_FADE_MILLIS = 220
 
     val push: AnimatedContentTransitionScope<Scene<NavKey>>.() -> ContentTransform = {
+        if (isTabRootSwitch()) tabFade() else slidePush()
+    }
+
+    val pop: AnimatedContentTransitionScope<Scene<NavKey>>.() -> ContentTransform = {
+        if (isTabRootSwitch()) tabFade() else popSlide()
+    }
+
+    val predictivePop: AnimatedContentTransitionScope<Scene<NavKey>>.(Int) -> ContentTransform = { _ ->
+        // 预测返回手势只发生在页内（页签根页的返回是退出应用），固定走 pop 滑动
+        popSlide()
+    }
+
+    /**
+     * 是否为「页签根页 ↔ 页签根页」的切换：两个场景的栈顶都是页签根页且不是同一个。
+     * 切页签时 NavDisplay 显示的是目标页签那条栈，栈顶就是它的根页。
+     */
+    private fun AnimatedContentTransitionScope<Scene<NavKey>>.isTabRootSwitch(): Boolean {
+        val from = initialState.entries.lastOrNull()?.contentKey
+        val to = targetState.entries.lastOrNull()?.contentKey
+        return from is ScreenKey && to is ScreenKey && from != to &&
+            from in TopLevel.tabs && to in TopLevel.tabs
+    }
+
+    private fun tabFade(): ContentTransform =
+        fadeIn(animationSpec = tween(TAB_FADE_MILLIS)) togetherWith
+            fadeOut(animationSpec = tween(TAB_FADE_MILLIS))
+
+    private fun slidePush(): ContentTransform =
         (slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(SLIDE_MILLIS)) +
             fadeIn(animationSpec = tween(SLIDE_MILLIS))) togetherWith
             (slideOutHorizontally(targetOffsetX = { -it / 3 }, animationSpec = tween(SLIDE_MILLIS)) +
                 fadeOut(animationSpec = tween(SLIDE_MILLIS)))
-    }
-
-    val pop: AnimatedContentTransitionScope<Scene<NavKey>>.() -> ContentTransform = {
-        popSlide()
-    }
-
-    val predictivePop: AnimatedContentTransitionScope<Scene<NavKey>>.(Int) -> ContentTransform = { _ ->
-        popSlide()
-    }
 
     private fun popSlide(): ContentTransform =
         (slideInHorizontally(initialOffsetX = { -it / 3 }, animationSpec = tween(SLIDE_MILLIS)) +

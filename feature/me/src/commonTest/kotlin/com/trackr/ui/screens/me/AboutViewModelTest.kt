@@ -42,8 +42,8 @@ class AboutViewModelTest {
         )
 
         assertEquals(AboutUpdateUiState.Idle, viewModel.uiState.value.update)
-        // Android：有检查更新，版本号来自安装包
-        assertTrue(viewModel.uiState.value.canCheckUpdates)
+        // 眉山特化：检查更新暂时关闭（更新通道指向原版仓库），有 checker 也不显示这一行
+        assertFalse(viewModel.uiState.value.canCheckUpdates)
         assertTrue(viewModel.uiState.value.showLiveUpdateNote)
         assertEquals("0.0.2", viewModel.uiState.value.versionName)
     }

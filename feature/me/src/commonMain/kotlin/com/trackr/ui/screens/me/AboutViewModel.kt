@@ -78,7 +78,9 @@ class AboutViewModel(
     private val _uiState = MutableStateFlow(
         AboutUiState(
             versionName = versionProvider().second,
-            canCheckUpdates = updateChecker != null,
+            // 眉山特化：暂时关闭应用内「检查更新」——更新通道指向原版仓库的 release，
+            // 对这个 fork 无意义（会把用户引回原版包），等有自己的发布通道再开
+            canCheckUpdates = false,
             showLiveUpdateNote = updateChecker != null
         )
     )

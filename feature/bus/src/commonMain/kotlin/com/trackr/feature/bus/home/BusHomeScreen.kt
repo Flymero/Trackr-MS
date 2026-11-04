@@ -223,7 +223,8 @@ private fun BusHomeTopBar(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(vertical = 4.dp)
+                    // 圆形底两端弧线会压到字，横向留够内边距
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Text(text = cityName, fontWeight = FontWeight.Bold)
                     Icon(

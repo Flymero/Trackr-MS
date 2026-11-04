@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
@@ -91,6 +92,8 @@ fun LineListScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // 顶部留白和公交 / 设置页一致：内容从状态栏下方开始
+            .statusBarsPadding()
             .padding(horizontal = 18.dp)
     ) {
         Spacer(modifier = Modifier.height(12.dp))

@@ -3,6 +3,7 @@
 <resources>
     <string name="me_about_title">关于</string>
     <string name="me_app_name">追客</string>
+    <string name="me_edition_label">眉山特别版</string>
     <string name="me_about_version_unknown">版本未知</string>
     <string name="me_about_version">版本 v%1$s</string>
     <string name="me_about_license">开源协议</string>
