@@ -12,6 +12,7 @@
     <string name="bus_city_located_name">定位: %1$s</string>
     <string name="bus_city_selected_name">已选: %1$s</string>
     <string name="bus_city_province_count">%1$s · 共 %2$s 城</string>
+    <string name="bus_city_special_adapted">特别适配</string>
     <string name="bus_home_switch_city">换城市</string>
     <string name="bus_home_settings">设置</string>
     <string name="bus_home_search_hint">搜线路、车站</string>

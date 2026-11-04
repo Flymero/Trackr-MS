@@ -47,6 +47,7 @@ import com.trackr.core.designsystem.resources.action_relocate
 import com.trackr.core.designsystem.resources.ic_close
 import com.trackr.core.designsystem.resources.ic_my_location
 import com.trackr.core.designsystem.resources.ic_search
+import com.trackr.core.designsystem.resources.ic_star_filled
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TransitCity
@@ -60,6 +61,7 @@ import com.trackr.feature.bus.resources.bus_city_province_count
 import com.trackr.feature.bus.resources.bus_city_search
 import com.trackr.feature.bus.resources.bus_city_search_hint
 import com.trackr.feature.bus.resources.bus_city_selected_name
+import com.trackr.feature.bus.resources.bus_city_special_adapted
 import com.trackr.feature.bus.resources.bus_city_subtitle
 import com.trackr.feature.bus.resources.bus_city_title
 import org.jetbrains.compose.resources.stringResource
@@ -114,6 +116,15 @@ fun CityPickerItemRow(
                         MaterialTheme.colorScheme.onSurface
                     }
                 )
+                if (city.isSpeciallyAdapted) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = vectorResource(Res.drawable.ic_star_filled),
+                        contentDescription = stringResource(BusRes.string.bus_city_special_adapted),
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                }
                 if (showProvinceBadge) {
                     val prov = provinceName ?: city.province.ifBlank {
                         ProvinceCityCatalog.inferProvince(city.cityName)
@@ -319,11 +330,14 @@ fun CityPickerBottomSheet(
             } else {
                 // 非搜索状态：顶部定位与热门城市
                 val effectiveHotCities = remember(effectiveCities, hotCities) {
+                    // 特别适配城市（眉山）置于热门首位
+                    val special = effectiveCities.filter { it.isSpeciallyAdapted }
                     if (hotCities != null) {
-                        hotCities
+                        special + hotCities.filterNot { it.isSpeciallyAdapted }
                     } else {
-                        val hot = effectiveCities.filter { it.isHot }
-                        if (hot.isNotEmpty()) hot.take(8) else effectiveCities.take(8)
+                        val hot = effectiveCities.filter { it.isHot && !it.isSpeciallyAdapted }
+                        val rest = if (hot.isNotEmpty()) hot.take(8) else effectiveCities.filterNot { it.isSpeciallyAdapted }.take(8)
+                        special + rest
                     }
                 }
 
@@ -398,7 +412,19 @@ fun CityPickerBottomSheet(
                         FilterChip(
                             selected = city.matchesCity(currentCity),
                             onClick = { onSelectCity(city) },
-                            label = { Text(city.cityName) }
+                            label = { Text(city.cityName) },
+                            leadingIcon = if (city.isSpeciallyAdapted) {
+                                {
+                                    Icon(
+                                        imageVector = vectorResource(Res.drawable.ic_star_filled),
+                                        contentDescription = stringResource(BusRes.string.bus_city_special_adapted),
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.tertiary
+                                    )
+                                }
+                            } else {
+                                null
+                            }
                         )
                     }
                 }
@@ -415,6 +441,11 @@ fun CityPickerBottomSheet(
                         val prov = city.province.ifBlank { ProvinceCityCatalog.inferProvince(city.cityName) }
                         val list = map.getOrPut(prov) { mutableListOf() }
                         list.add(city)
+                    }
+                    // 特别适配城市（眉山）：复制一份到「直辖市」分组顶部（直辖市为默认选中分组），
+                    // 原省份分组保持不变；同一对象引用，选中态 / 「当前」徽章表现一致
+                    for (special in effectiveCities.filter { it.isSpeciallyAdapted }) {
+                        map["直辖市"]?.add(0, special)
                     }
                     map.filterValues { it.isNotEmpty() }
                 }
