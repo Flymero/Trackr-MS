@@ -126,7 +126,7 @@ class SchemeTextsTest {
 
     @Test
     fun trackingStatusText_byPhase() {
-        assertEquals("第 1/2 程 · 等车 · 4 分钟", trackingStatusText(trackingSession(LegPhase.WAITING_BOARD, 2, 240)))
+        assertEquals("第 1/2 程 · 等车 · 约 4 分钟", trackingStatusText(trackingSession(LegPhase.WAITING_BOARD, 2, 240)))
         assertEquals("第 1/2 程 · 乘车 · 2 站后下车", trackingStatusText(trackingSession(LegPhase.ON_BOARD, 2, 300)))
         assertEquals(LegPhase.ON_BOARD, trackingPhaseOf(trackingSession(LegPhase.ON_BOARD, 2, 300)))
     }

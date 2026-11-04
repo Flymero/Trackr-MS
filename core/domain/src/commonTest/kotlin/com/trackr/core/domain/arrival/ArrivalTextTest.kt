@@ -57,11 +57,11 @@ class ArrivalTextTest {
         assertEquals(ArrivalState.OnTheWay(stopsAway = 4, minutes = 8), state)
 
         val d = ArrivalText.format(state, lineName = "325路", stopName = "科技园")
-        assertEquals("8", d.value)
+        assertEquals("约 8", d.value)
         assertEquals("分钟", d.unit)
-        assertEquals("8 分钟", d.headline)
+        assertEquals("约 8 分钟", d.headline)
         assertEquals("还有 4 站", d.detail)
-        assertEquals("8 分钟 · 还有 4 站", d.short)
+        assertEquals("约 8 分钟 · 还有 4 站", d.short)
         assertEquals(ArrivalTone.Normal, d.tone)
         assertEquals("325路，还有 4 站，大约 8 分钟到科技园站", d.spoken)
     }
@@ -90,7 +90,7 @@ class ArrivalTextTest {
         val state = runningLine(target = 5, buses = listOf(bus(order = 5, etaSeconds = 90)))
         assertEquals(ArrivalState.OnTheWay(stopsAway = 0, minutes = 2), state)
         val d = ArrivalText.format(state)
-        assertEquals("2 分钟 · 下一站就到", d.short)
+        assertEquals("约 2 分钟 · 下一站就到", d.short)
         assertEquals(ArrivalTone.Go, d.tone)
 
         val noEta = ArrivalText.format(runningLine(5, listOf(bus(order = 5, etaSeconds = -1))))
@@ -102,7 +102,7 @@ class ArrivalTextTest {
     fun noStopOrder_usesEtaOnly() {
         val withEta = ArrivalText.stateForBus(targetOrder = 0, bus = bus(order = 0, etaSeconds = 300))
         assertEquals(ArrivalState.OnTheWay(stopsAway = null, minutes = 5), withEta)
-        assertEquals("5 分钟", ArrivalText.format(withEta).short)
+        assertEquals("约 5 分钟", ArrivalText.format(withEta).short)
 
         val nothing = ArrivalText.format(ArrivalText.stateForBus(0, bus(order = 0)))
         assertEquals("在路上 · 暂无到站时间", nothing.short)
@@ -138,10 +138,10 @@ class ArrivalTextTest {
         val d = ArrivalText.format(state, lineName = "325路", stopName = "科技园")
         assertEquals("到站了", d.headline)
         assertNull(d.unit)
-        assertEquals("快去上车 · 下一辆 9 分钟", d.detail)
-        assertEquals("到站了 · 下一辆 9 分钟", d.short)
+        assertEquals("快去上车 · 下一辆 约 9 分钟", d.detail)
+        assertEquals("到站了 · 下一辆 约 9 分钟", d.short)
         assertEquals(ArrivalTone.Go, d.tone)
-        assertEquals("325路，车到科技园站了，快去上车，下一辆 9 分钟", d.spoken)
+        assertEquals("325路，车到科技园站了，快去上车，下一辆 约 9 分钟", d.spoken)
 
         val noNext = ArrivalText.format(ArrivalState.Arriving())
         assertEquals("快去上车", noNext.detail)
@@ -372,7 +372,7 @@ class ArrivalTextTest {
         assertEquals(1, ArrivalText.minutesOf(89))
         assertEquals(2, ArrivalText.minutesOf(90))
         assertEquals(8, ArrivalText.minutesOf(480))
-        assertEquals("8 分钟", ArrivalText.minutesText(480))
+        assertEquals("约 8 分钟", ArrivalText.minutesText(480))
         assertNull(ArrivalText.minutesText(0))
     }
 

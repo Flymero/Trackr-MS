@@ -206,7 +206,7 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
-        composeTestRule.onNodeWithText("8").assertIsDisplayed()
+        composeTestRule.onNodeWithText("约 8").assertIsDisplayed()
         composeTestRule.onNodeWithText("分钟").assertIsDisplayed()
         composeTestRule.onNodeWithText("还有 3 站").assertIsDisplayed()
         composeTestRule.onNodeWithText("下一辆还有 ", substring = true).assertDoesNotExist()
@@ -226,7 +226,7 @@ class StationArrivalContentTest {
         setContent(detail, stops[1])
 
         composeTestRule.onNodeWithText("到站了").assertIsDisplayed()
-        composeTestRule.onNodeWithText("快去上车 · 下一辆 9 分钟").assertIsDisplayed()
+        composeTestRule.onNodeWithText("快去上车 · 下一辆 约 9 分钟").assertIsDisplayed()
     }
 
     @Test
@@ -271,11 +271,11 @@ class StationArrivalContentTest {
         setContent(detail, stops[1])
 
         composeTestRule.onNodeWithText("陕西北路站上车").assertIsDisplayed()
-        composeTestRule.onNodeWithText("4").assertIsDisplayed()
+        composeTestRule.onNodeWithText("约 4").assertIsDisplayed()
         composeTestRule.onNodeWithText("还有 2 站").assertIsDisplayed()
         composeTestRule.onNodeWithText("沪A·D8866").assertIsDisplayed()
         composeTestRule.onNodeWithText("12:04 到").assertIsDisplayed()
-        composeTestRule.onNodeWithText("下一辆 12 分钟 · 4 站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("下一辆 约 12 分钟 · 4 站").assertIsDisplayed()
         composeTestRule.onNodeWithText("全线 2 辆车在途 · 查看").assertIsDisplayed()
     }
 

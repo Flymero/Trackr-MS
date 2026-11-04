@@ -134,8 +134,7 @@ class MeishanTransitProviderTest {
         assertEquals("千禾味业", detail.line.endStop)
         assertEquals(3, detail.stops.size)
         assertEquals("ms-st:2", detail.stops[1].stopId)
-        // 票价备注 + 估算标识
-        assertEquals("票价 1 元 · 到站时间为估算值，仅供参考", detail.statusDescription)
+        assertEquals("票价 1 元", detail.statusDescription)
         assertEquals("ms:1_1_1", detail.reverseDirection?.lineId)
         assertEquals(1, detail.buses.size)
         assertEquals("川Z10091D", detail.buses[0].plateOrFleetNo)

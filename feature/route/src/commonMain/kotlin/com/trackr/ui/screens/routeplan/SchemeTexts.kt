@@ -161,7 +161,7 @@ internal fun trackingStatusText(session: GroupTrackingSessionState): String {
     val detail = when {
         legSession == null || legSession.stopsRemaining < 0 -> null
         phase == LegPhase.ON_BOARD -> "${legSession.stopsRemaining} 站后下车"
-        else -> etaMinutesOf(legSession.etaSeconds, legSession.stopsRemaining)?.let { "$it 分钟" }
+        else -> etaMinutesOf(legSession.etaSeconds, legSession.stopsRemaining)?.let { "约 $it 分钟" }
     }
     return if (detail != null) "$label · $detail" else label
 }

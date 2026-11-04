@@ -485,11 +485,7 @@ class MeishanTransitProvider(
             stops = stops,
             buses = withEta(stops, buses, request),
             operatingState = operatingState(first, last),
-            // ETA 是按车辆实时位置 × 沿线折线距离估算的（数据源没有服务端预测），如实标注
-            statusDescription = listOfNotNull(
-                optString("l_remark").trim().takeIf { it.isNotBlank() },
-                "到站时间为估算值，仅供参考"
-            ).joinToString(" · ")
+            statusDescription = optString("l_remark").trim()
         )
     }
 

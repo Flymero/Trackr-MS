@@ -119,8 +119,8 @@ object ArrivalText {
     fun minutesOf(etaSeconds: Int): Int? =
         if (etaSeconds > 0) (etaSeconds / 60.0).roundToInt().coerceAtLeast(1) else null
 
-    /** 「8 分钟」；没有 ETA 返回 null */
-    fun minutesText(etaSeconds: Int): String? = minutesOf(etaSeconds)?.let { "$it 分钟" }
+    /** 「约 8 分钟」；没有 ETA 返回 null（到站分钟各数据源都是估算口径，统一带「约」） */
+    fun minutesText(etaSeconds: Int): String? = minutesOf(etaSeconds)?.let { "约 $it 分钟" }
 
     /** 选出离 [targetOrder] 最近、还没开过去的车（按 order + segmentProgress，和各页面口径一致） */
     fun nearestBus(targetOrder: Int, buses: List<LiveBus>): LiveBus? =
@@ -243,7 +243,7 @@ object ArrivalText {
             is ArrivalState.OnTheWay -> formatOnTheWay(state, who, toStop)
 
             is ArrivalState.Arriving -> {
-                val nextPart = state.nextBusMinutes?.let { "下一辆 $it 分钟" }
+                val nextPart = state.nextBusMinutes?.let { "下一辆 约 $it 分钟" }
                     ?: state.nextBusStops?.let { "下一辆还有 $it 站" }
                 ArrivalDisplay(
                     value = "到站了",
@@ -368,10 +368,10 @@ object ArrivalText {
         val spokenStops = stopsText?.let { "$it，" }.orEmpty()
         return when {
             minutes != null -> ArrivalDisplay(
-                value = minutes.toString(),
+                value = "约 $minutes",
                 unit = "分钟",
                 detail = stopsText.orEmpty(),
-                short = listOfNotNull("$minutes 分钟", stopsText).joinToString(" · "),
+                short = listOfNotNull("约 $minutes 分钟", stopsText).joinToString(" · "),
                 tone = tone,
                 spoken = "$who${spokenStops}大约 $minutes 分钟${toStop.ifEmpty { "到站" }}"
             )

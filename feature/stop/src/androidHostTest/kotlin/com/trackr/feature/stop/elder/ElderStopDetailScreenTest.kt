@@ -52,7 +52,7 @@ class ElderStopDetailScreenTest {
 
     private val row325 = StopLineRowUi(
         key = "r325", lineId = "L325", lineName = "325", endStop = "科技园", hours = "06:30–22:30",
-        arrival = arrival("4", "分钟", "还有 2 站"), isFavorite = true, selectable = true,
+        arrival = arrival("约 4", "分钟", "还有 2 站"), isFavorite = true, selectable = true,
         targetOrder = 5, stopId = "st1", source = DataSourceType.CHELAILE
     )
     private val row19 = row325.copy(
@@ -127,7 +127,7 @@ class ElderStopDetailScreenTest {
         composeTestRule.onNodeWithText("科技园站").assertIsDisplayed()
         composeTestRule.onNodeWithText("120米 · 3 条线").assertIsDisplayed()
         composeTestRule.onNodeWithText("→ 科技园").assertIsDisplayed()
-        composeTestRule.onNodeWithText("4 分钟").assertIsDisplayed()
+        composeTestRule.onNodeWithText("约 4 分钟").assertIsDisplayed()
         composeTestRule.onNodeWithText("还有 2 站").assertIsDisplayed()
         composeTestRule.onNodeWithTag(ElderStopTags.LIST).performScrollToNode(hasTestTag(ElderStopTags.line("rM194")))
         // 没车时给下一班发车时间

@@ -295,7 +295,7 @@ class RoutePlanScreenTest {
         )
         setScreen(RoutePlanUiState(schemeTabs = demoTabs, trackingSession = session))
 
-        composeTestRule.onNodeWithTag("tracking_status_text").assertTextEquals("第 1/2 程 · 等车 · 4 分钟")
+        composeTestRule.onNodeWithTag("tracking_status_text").assertTextEquals("第 1/2 程 · 等车 · 约 4 分钟")
         composeTestRule.onNodeWithTag("btn_plan_confirm_boarded").tap()
         assertEquals(RoutePlanEvent.ConfirmBoarded, lastAction())
         composeTestRule.onNodeWithTag("btn_start_monitor").assertDoesNotExist()

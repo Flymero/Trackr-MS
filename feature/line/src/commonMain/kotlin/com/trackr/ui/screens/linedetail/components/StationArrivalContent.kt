@@ -383,13 +383,13 @@ private fun busFacts(bus: LiveBus): List<String> {
     )
 }
 
-/** 「下一辆 12 分钟 · 5 站」 */
+/** 「下一辆 约 12 分钟 · 5 站」 */
 internal fun followingBusText(targetOrder: Int, bus: LiveBus): String {
     val minutes = ArrivalText.minutesOf(bus.etaSeconds)
     val stops = (targetOrder - bus.order).takeIf { bus.order > 0 && it >= 0 }
     return when {
-        minutes != null && stops != null -> "下一辆 $minutes 分钟 · $stops 站"
-        minutes != null -> "下一辆 $minutes 分钟"
+        minutes != null && stops != null -> "下一辆 约 $minutes 分钟 · $stops 站"
+        minutes != null -> "下一辆 约 $minutes 分钟"
         stops != null -> "下一辆还有 $stops 站"
         else -> "后面还有车"
     }

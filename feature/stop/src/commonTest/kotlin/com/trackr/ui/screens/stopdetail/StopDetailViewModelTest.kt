@@ -403,7 +403,7 @@ class StopDetailViewModelTest {
         assertEquals(ArrivalTone.Mute, r49.arrival.tone)
         assertEquals("", r49.hours)
         // 有来车：8 分钟 / 还有 3 站
-        assertEquals("8", r71.arrival.value)
+        assertEquals("约 8", r71.arrival.value)
         assertEquals("分钟", r71.arrival.unit)
         assertEquals("还有 3 站", r71.arrival.detail)
         assertEquals("05:30–23:00", r71.hours)
@@ -608,7 +608,7 @@ class StopDetailViewModelTest {
         assertEquals(2, watch.lineCount)
         assertEquals(listOf("71路", "49路"), watch.lines.map { it.lineName })
         val first = watch.lines.first()
-        assertEquals("1", first.arrival.value)
+        assertEquals("约 1", first.arrival.value)
         assertEquals("还有 1 站 · 沪A·71001", first.detail)
         assertEquals("上海体育馆", first.endStop)
     }

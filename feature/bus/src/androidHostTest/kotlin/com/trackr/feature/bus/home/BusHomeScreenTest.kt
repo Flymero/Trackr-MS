@@ -170,7 +170,7 @@ class BusHomeScreenTest {
         setContent(stateOf(session = watchSession(lineCount = 5)))
 
         composeTestRule.onNodeWithText("一起等 5 条 · 科技园站").assertIsDisplayed()
-        composeTestRule.onNodeWithText("2 分钟").assertIsDisplayed()
+        composeTestRule.onNodeWithText("约 2 分钟").assertIsDisplayed()
         composeTestRule.onNodeWithText("L1 先到 · 还有 1 站").assertIsDisplayed()
         // 大字 1 条 + 下面 2 条，剩下 2 条折叠
         composeTestRule.onNodeWithText("L2").assertIsDisplayed()

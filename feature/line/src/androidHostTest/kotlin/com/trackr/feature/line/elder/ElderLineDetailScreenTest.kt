@@ -139,8 +139,8 @@ class ElderLineDetailScreenTest {
         composeTestRule.onNodeWithText("白石洲 → 科技园").assertIsDisplayed()
         composeTestRule.onNodeWithText("运营 06:30–22:30").assertIsDisplayed()
         composeTestRule.onNodeWithText("在 科技园站 上车").assertIsDisplayed()
-        composeTestRule.onNodeWithText("4 分钟").assertIsDisplayed()
-        composeTestRule.onNodeWithText("还有 2 站 · 下一辆 12 分钟 · 4 站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("约 4 分钟").assertIsDisplayed()
+        composeTestRule.onNodeWithText("还有 2 站 · 下一辆 约 12 分钟 · 4 站").assertIsDisplayed()
 
         listOf("时刻表 ›", "定时提醒", "地图", "规划", "公交", "路线", "我的", "全线 2 辆车在途 · 查看", "大冲", "海岸城").forEach {
             composeTestRule.onNodeWithText(it).assertDoesNotExist()
