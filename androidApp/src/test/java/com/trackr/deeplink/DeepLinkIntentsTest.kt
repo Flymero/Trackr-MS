@@ -82,7 +82,7 @@ class DeepLinkIntentsTest {
     @Test
     fun legacyTransitCodeActions_bothSpellings_onlyAlipayIsAlipay() {
         listOf(
-            "com.github.u5151561.trackr.action.OPEN_TRANSIT_CODE",
+            "com.github.u5151561.trackr.ms.action.OPEN_TRANSIT_CODE",
             "com.trackr.action.OPEN_TRANSIT_CODE"
         ).forEach { action ->
             assertEquals(
@@ -109,7 +109,7 @@ class DeepLinkIntentsTest {
         assertNull(DeepLinkIntents.parse(legacy))
         assertNull(legacy.getStringExtra("extra_city_id"))
 
-        val legacyTransit = Intent("com.github.u5151561.trackr.action.OPEN_TRANSIT_CODE").putExtra("extra_provider", "alipay")
+        val legacyTransit = Intent("com.github.u5151561.trackr.ms.action.OPEN_TRANSIT_CODE").putExtra("extra_provider", "alipay")
         DeepLinkIntents.consume(legacyTransit)
         assertNull(legacyTransit.action)
         assertNull(DeepLinkIntents.parse(legacyTransit))

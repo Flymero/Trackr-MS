@@ -37,7 +37,7 @@ android {
     namespace = "com.trackr"
 
     defaultConfig {
-        applicationId = "com.github.u5151561.trackr"
+        applicationId = "com.github.u5151561.trackr.ms"
         versionCode = 8
         versionName = "0.1.4"
 
@@ -213,7 +213,7 @@ tasks.register("amapKeyStatus") {
             |  AMAP_WEB_KEY              : ${state(amapWebServiceKey)}
             |
             |包名（提交到高德开放平台时填写，debug / release 一致）
-            |  PackageName : com.github.u5151561.trackr
+            |  PackageName : com.github.u5151561.trackr.ms
             |
             |一个 Key 可同时填写「发布版 SHA-1」与「调试版 SHA-1」，两种构建都能出图。
             |签名 SHA-1 可在 App 内「配置 Key」弹窗一键复制。

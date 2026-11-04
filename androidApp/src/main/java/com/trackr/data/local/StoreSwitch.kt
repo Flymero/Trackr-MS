@@ -12,8 +12,8 @@ import java.io.File
  *   文件不存在或内容认不出时用默认值。改完要杀进程重开才生效：
  *
  *   ```
- *   adb shell run-as com.github.u5151561.trackr sh -c 'echo old > files/store_switch'
- *   adb shell am force-stop com.github.u5151561.trackr
+ *   adb shell run-as com.github.u5151561.trackr.ms sh -c 'echo old > files/store_switch'
+ *   adb shell am force-stop com.github.u5151561.trackr.ms
  *   ```
  *   恢复：把 `old` 换成 `new`，或 `rm files/store_switch`。
  *

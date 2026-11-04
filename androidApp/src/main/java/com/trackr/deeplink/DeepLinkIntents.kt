@@ -21,7 +21,7 @@ import com.trackr.core.navigation.deeplink.DeepLinkUris
 object DeepLinkIntents {
 
     /** 旧版乘车码 action（兼容一个版本） */
-    internal const val LEGACY_ACTION_OPEN_TRANSIT_CODE = "com.github.u5151561.trackr.action.OPEN_TRANSIT_CODE"
+    internal const val LEGACY_ACTION_OPEN_TRANSIT_CODE = "com.github.u5151561.trackr.ms.action.OPEN_TRANSIT_CODE"
     internal const val LEGACY_ACTION_OPEN_TRANSIT_CODE_SHORT = "com.trackr.action.OPEN_TRANSIT_CODE"
     internal const val LEGACY_EXTRA_PROVIDER = "extra_provider"
 
