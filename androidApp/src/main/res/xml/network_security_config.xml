@@ -10,6 +10,9 @@
   路线搜索 restsdk.amap.com（ServiceSettings 默认 HTTP）、定位 apilocate.amap.com / aps.amap.com、
   tsapi / mpsapi.amap.com，以及定位用的星历 gnss-eph.oss-cn-hangzhou.aliyuncs.com。
   所以只对这几处放开明文，其余一律 https。
+
+  眉山特化：官方公交后台 busapp.superms.cn:8182 只有 http（doc/眉山公交数据链路实测与重写契约 §4.1），
+  只对这一个主机放开明文。
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
@@ -17,5 +20,6 @@
         <domain includeSubdomains="true">amap.com</domain>
         <domain includeSubdomains="true">autonavi.com</domain>
         <domain includeSubdomains="false">gnss-eph.oss-cn-hangzhou.aliyuncs.com</domain>
+        <domain includeSubdomains="false">busapp.superms.cn</domain>
     </domain-config>
 </network-security-config>

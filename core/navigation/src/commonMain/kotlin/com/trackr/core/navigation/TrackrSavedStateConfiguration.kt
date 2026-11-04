@@ -17,6 +17,7 @@ val TrackrSavedStateConfiguration: SavedStateConfiguration = SavedStateConfigura
         polymorphic(NavKey::class) {
             subclass(ScreenKey.Home.serializer())
             subclass(ScreenKey.RoutePlan.serializer())
+            subclass(ScreenKey.Lines.serializer())
             subclass(ScreenKey.FavoritesGroup.serializer())
             subclass(ScreenKey.Search.serializer())
             subclass(ScreenKey.LineDetail.serializer())

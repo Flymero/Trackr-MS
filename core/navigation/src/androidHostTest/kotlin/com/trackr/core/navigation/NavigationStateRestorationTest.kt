@@ -53,7 +53,7 @@ class NavigationStateRestorationTest {
 
     /** 每个 ScreenKey 子类一个样本；新增子类时这里和 TrackrSavedStateConfiguration 都要加。 */
     private val oneOfEachKey: List<ScreenKey> = listOf(
-        ScreenKey.Home, ScreenKey.RoutePlan, ScreenKey.FavoritesGroup, ScreenKey.Search,
+        ScreenKey.Home, ScreenKey.RoutePlan, ScreenKey.Lines, ScreenKey.FavoritesGroup, ScreenKey.Search,
         line49, stop, ScreenKey.More, ScreenKey.About,
         ScreenKey.RouteDetail(groupId = "g1"), ScreenKey.FavoritesEdit,
         ScreenKey.ChooseBoardedBus(sessionId = "s-1"),
@@ -248,6 +248,7 @@ class NavigationStateRestorationTest {
         when (key) {
             ScreenKey.Home -> ScreenKey.Home.serializer()
             ScreenKey.RoutePlan -> ScreenKey.RoutePlan.serializer()
+            ScreenKey.Lines -> ScreenKey.Lines.serializer()
             ScreenKey.FavoritesGroup -> ScreenKey.FavoritesGroup.serializer()
             ScreenKey.Search -> ScreenKey.Search.serializer()
             is ScreenKey.LineDetail -> ScreenKey.LineDetail.serializer()

@@ -8,7 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.DirectionsBus
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.FormatListNumbered
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,8 +50,9 @@ internal actual fun PlatformHost(enabled: Boolean, content: @Composable () -> Un
 @Composable
 internal actual fun bottomTabIcon(key: ScreenKey): ImageVector = when (key) {
     ScreenKey.Home -> Icons.Default.DirectionsBus
+    ScreenKey.Lines -> Icons.Default.FormatListNumbered
     ScreenKey.RoutePlan -> Icons.AutoMirrored.Filled.AltRoute
-    ScreenKey.More -> Icons.Default.Person
+    ScreenKey.More -> Icons.Default.Settings
     else -> error("$key 不是顶层页签")
 }
 

@@ -106,4 +106,12 @@
     <string name="line_station_expand_card">展开卡片</string>
     <string name="line_rail_condition">响应</string>
     <string name="line_rail_arrived">到站</string>
+    <!-- 「线路」页签（眉山特化：官方全量线路列表） -->
+    <string name="line_tab_title">线路</string>
+    <string name="line_tab_subtitle">眉山公交官方数据 · 全部线路</string>
+    <string name="line_tab_search_hint">搜线路名或起终点</string>
+    <string name="line_tab_empty">没有匹配的线路</string>
+    <string name="line_tab_error">线路列表加载失败，请检查网络后重试</string>
+    <string name="line_tab_error_retry">重试</string>
+    <string name="line_tab_not_covered">当前数据源未覆盖「%1$s」，试试切换数据源</string>
 </resources>

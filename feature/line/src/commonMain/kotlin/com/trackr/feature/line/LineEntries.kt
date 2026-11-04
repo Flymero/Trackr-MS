@@ -5,6 +5,8 @@ import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import com.trackr.core.navigation.TrackrNavigator
 import com.trackr.core.navigation.ScreenKey
+import com.trackr.feature.line.list.LineListRoute
+import com.trackr.feature.line.list.LineListViewModel
 import com.trackr.feature.line.elder.ElderLineDetailScreen
 import com.trackr.ui.screens.linedetail.LineDetailRoute
 import com.trackr.ui.screens.linedetail.LineDetailViewModel
@@ -13,8 +15,15 @@ import org.koin.core.module.dsl.viewModel
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.module
 
-/** 线路详情页的导航入口（`:composeApp` 组装）。第 20 步页面重写进 commonMain，Android / iOS 共用 */
+/** 线路页签 + 线路详情页的导航入口（`:composeApp` 组装）。第 20 步页面重写进 commonMain，Android / iOS 共用 */
 fun EntryProviderScope<NavKey>.lineEntries(navigator: TrackrNavigator) {
+    entry<ScreenKey.Lines> {
+        LineListRoute(
+            viewModel = koinViewModel(),
+            navigator = navigator
+        )
+    }
+
     entry<ScreenKey.LineDetail> { key ->
         val detailViewModel: LineDetailViewModel = koinViewModel(
             key = "detail_${key.cityId}_${key.lineId}_${key.targetOrder}"
@@ -46,8 +55,16 @@ fun EntryProviderScope<NavKey>.elderLineEntries(navigator: TrackrNavigator) {
     }
 }
 
-/** 线路详情的 Koin 定义 */
+/** 线路列表页签 + 线路详情的 Koin 定义 */
 val lineModule = module {
+    viewModel {
+        LineListViewModel(
+            meishanLines = get(),
+            settings = get(),
+            realtime = get()
+        )
+    }
+
     viewModel { (key: ScreenKey.LineDetail) ->
         LineDetailViewModel(
             cityId = key.cityId,

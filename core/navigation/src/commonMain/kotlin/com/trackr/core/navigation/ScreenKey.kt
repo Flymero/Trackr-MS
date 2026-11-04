@@ -19,6 +19,10 @@ sealed interface ScreenKey : NavKey {
     @Serializable
     data object RoutePlan : ScreenKey
 
+    /** 线路列表页签（眉山特化：官方 /line/list 全量线路） */
+    @Serializable
+    data object Lines : ScreenKey
+
     @Serializable
     data object FavoritesGroup : ScreenKey
 

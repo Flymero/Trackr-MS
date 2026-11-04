@@ -11,9 +11,10 @@ object TopLevel {
     /** 起始页签：非起始页签在根页按返回回到这里；它的根页再按返回就退出（exit-through-home）。 */
     val start: ScreenKey = ScreenKey.Home
 
-    /** 底栏顺序。 */
+    /** 底栏顺序（眉山特化：公交 / 线路 / 路线 / 设置）。 */
     val tabs: List<ScreenKey> = listOf(
         ScreenKey.Home,
+        ScreenKey.Lines,
         ScreenKey.RoutePlan,
         ScreenKey.More,
     )

@@ -2,6 +2,7 @@ package com.trackr.core.testing
 
 import com.trackr.core.data.repository.FavoritesRepository
 import com.trackr.core.data.repository.LocationRepository
+import com.trackr.core.data.repository.MeishanLineRepository
 import com.trackr.core.data.repository.RealtimeRepository
 import com.trackr.core.data.repository.SearchHistoryRepository
 import com.trackr.core.data.repository.SettingsRepository
@@ -14,6 +15,8 @@ import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
+import com.trackr.core.model.MeishanArea
+import com.trackr.core.model.MeishanLine
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
@@ -289,6 +292,9 @@ class FakeRealtimeRepository(
     var nearbyStopsResult: Result<List<NearbyStop>> = Result.success(emptyList())
     var stopDetailResult: Result<List<NearbyStop>> = Result.success(emptyList())
     var searchResult: Result<TransitSearchResult> = Result.success(TransitSearchResult(keyword = ""))
+
+    /** 按关键词返回搜索结果（命中优先于 [searchResult]）；「线路」页签按名称搜当前数据源用 */
+    val searchResultsByKeyword: MutableMap<String, Result<TransitSearchResult>> = mutableMapOf()
     var lineDetailResult: Result<BusLineDetail>? = null
     val lineDetailsMap: MutableMap<String, BusLineDetail> = mutableMapOf()
     var timetableResult: Result<LineTimetable> = Result.success(LineTimetable(lineId = "", lineName = ""))
@@ -352,7 +358,7 @@ class FakeRealtimeRepository(
         keyword: String,
         userLat: Double?,
         userLng: Double?
-    ): Result<TransitSearchResult> = searchResult
+    ): Result<TransitSearchResult> = searchResultsByKeyword[keyword] ?: searchResult
 
     override suspend fun getLineDetail(
         city: TransitCity,
@@ -422,5 +428,17 @@ class FakeLocationRepository(
     fun emit(fix: UserFix) {
         _latest.value = fix
         live.tryEmit(fix)
+    }
+}
+
+/** [MeishanLineRepository] 的 Fake：「线路」页签（眉山官方全量线路列表）测试用 */
+class FakeMeishanLineRepository : MeishanLineRepository {
+
+    var result: Result<List<MeishanLine>> = Result.success(emptyList())
+    val calls: MutableList<MeishanArea> = mutableListOf()
+
+    override suspend fun getLines(area: MeishanArea, forceRefresh: Boolean): Result<List<MeishanLine>> {
+        calls += area
+        return result
     }
 }

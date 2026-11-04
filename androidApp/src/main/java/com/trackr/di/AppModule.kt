@@ -58,6 +58,7 @@ import org.koin.core.module.Module
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import org.koin.dsl.onClose
+import com.trackr.core.network.remote.meishan.MeishanTransitClient
 import kotlin.time.Clock
 
 /** 应用级协程作用域的限定名：活得和进程一样久，接收器、小组件、收藏同步都用它 */
@@ -74,6 +75,8 @@ val appModule: Module = module {
     single<HttpClient> { createTrackrHttpClient() } onClose { it?.close() }
     single { ChelaileApiClient(get()) }
     single { MygolbsApiClient(get()) }
+    // 眉山官方后台（http 明文，域名在 network_security_config.xml 白名单）
+    single { MeishanTransitClient(get()) }
     single { ChelaileTransitProvider(get()) }
     single { MygolbsTransitProvider(get()) }
     single {

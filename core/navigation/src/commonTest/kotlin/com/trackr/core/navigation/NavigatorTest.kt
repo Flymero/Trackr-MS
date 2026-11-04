@@ -43,7 +43,7 @@ class NavigatorTest {
         assertEquals(ScreenKey.Home, state.topLevel)
         assertEquals(ScreenKey.Home, state.currentKey)
         assertTrue(state.isAtTabRoot)
-        assertEquals(listOf(ScreenKey.Home, ScreenKey.RoutePlan, ScreenKey.More), TopLevel.tabs, "第 17 步：3 个页签")
+        assertEquals(listOf(ScreenKey.Home, ScreenKey.Lines, ScreenKey.RoutePlan, ScreenKey.More), TopLevel.tabs, "眉山特化：4 个页签（公交 / 线路 / 路线 / 设置）")
         assertEquals(TopLevel.tabs.toSet(), state.stacks.keys)
         TopLevel.tabs.forEach { tab -> assertEquals(listOf<NavKey>(tab), state.stacks.getValue(tab).toList()) }
         assertEquals(listOf<NavKey>(ScreenKey.Home), state.keysShown())
@@ -382,7 +382,7 @@ class NavigatorTest {
     fun visibleTabs_withoutMapKey_dropsOnlyRoutePlan_keepingOrder() {
         assertEquals(TopLevel.tabs, TopLevel.visibleTabs(hasMapKey = true))
         assertEquals(
-            listOf(ScreenKey.Home, ScreenKey.More),
+            listOf(ScreenKey.Home, ScreenKey.Lines, ScreenKey.More),
             TopLevel.visibleTabs(hasMapKey = false)
         )
         assertTrue(TopLevel.start in TopLevel.visibleTabs(hasMapKey = false), "起始页签总在")
