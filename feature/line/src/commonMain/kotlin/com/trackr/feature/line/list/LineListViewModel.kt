@@ -57,9 +57,8 @@ data class LineListUiState(
         }
 }
 
-/** 「线路」页签的事件 */
+/** 「线路」页签的事件（区域不再手动切换，严格跟随当前城市） */
 sealed interface LineListEvent {
-    data class AreaSelected(val area: MeishanArea) : LineListEvent
     data class QueryChanged(val query: String) : LineListEvent
     data object Retry : LineListEvent
     data class LineClicked(val line: MeishanLine) : LineListEvent
@@ -98,7 +97,6 @@ class LineListViewModel(
 
     fun onEvent(event: LineListEvent) {
         when (event) {
-            is LineListEvent.AreaSelected -> if (event.area != _uiState.value.area) loadLines(event.area)
             is LineListEvent.QueryChanged -> _uiState.update { it.copy(query = event.query) }
             LineListEvent.Retry -> loadLines(_uiState.value.area, forceRefresh = true)
             is LineListEvent.LineClicked -> openLine(event.line)

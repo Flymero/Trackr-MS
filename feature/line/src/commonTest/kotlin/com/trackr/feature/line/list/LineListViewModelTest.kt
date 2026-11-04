@@ -119,19 +119,6 @@ class LineListViewModelTest {
     }
 
     @Test
-    fun `切换区域请求对应列表`() = runTest(dispatcherHolder.dispatcher) {
-        meishanLines.result = Result.success(sampleLines())
-        val viewModel = createViewModel()
-        advanceUntilIdle()
-
-        viewModel.onEvent(LineListEvent.AreaSelected(MeishanArea.RENSHOU))
-        advanceUntilIdle()
-
-        assertEquals(MeishanArea.RENSHOU, viewModel.uiState.value.area)
-        assertEquals(listOf(MeishanArea.MEISHAN, MeishanArea.RENSHOU), meishanLines.calls)
-    }
-
-    @Test
     fun `过滤同时匹配名称和起终点`() = runTest(dispatcherHolder.dispatcher) {
         meishanLines.result = Result.success(sampleLines())
         val viewModel = createViewModel()

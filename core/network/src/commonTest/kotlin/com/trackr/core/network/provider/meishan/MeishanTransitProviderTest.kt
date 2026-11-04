@@ -134,12 +134,56 @@ class MeishanTransitProviderTest {
         assertEquals("千禾味业", detail.line.endStop)
         assertEquals(3, detail.stops.size)
         assertEquals("ms-st:2", detail.stops[1].stopId)
-        assertEquals("票价 1 元", detail.statusDescription)
+        // 票价备注 + 估算标识
+        assertEquals("票价 1 元 · 到站时间为估算值，仅供参考", detail.statusDescription)
         assertEquals("ms:1_1_1", detail.reverseDirection?.lineId)
         assertEquals(1, detail.buses.size)
         assertEquals("川Z10091D", detail.buses[0].plateOrFleetNo)
-        // 首帧没有上一帧可比：速度为 0（b_sd 恒 0，不采用）
+        // 首帧没有上一帧可比：速度为 0（b_sd 无效）
         assertEquals(0.0, detail.buses[0].speedKmh)
+    }
+
+    @Test
+    fun lineDetail_eta_polylineToTargetStop_atMeasuredOrFallbackSpeed() = runBlocking {
+        val provider = newProvider(MockBackend())
+
+        // 未选上车站：目标站 = 终点站（千禾味业，下标 2）。车在紫竹西街前方：
+        // 折线 = 车辆GPS→紫竹西街→千禾味业 ≈ 2.2km；车速无效 → 按 4 m/s 兜底 ≈ 545 秒
+        val toTerminus = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val bus = toTerminus.buses[0]
+        assertTrue(bus.distanceToTargetMeters in 2100..2300, "折线距离应≈2.2km，实际 ${bus.distanceToTargetMeters}")
+        assertTrue(bus.etaSeconds in 500..600, "折线≈2.2km ÷ 4m/s ≈ 545s，实际 ${bus.etaSeconds}")
+
+        // 指定上车站 = 终点站（order 3）：同样有距离与 ETA（车又前移了一帧，数值略变）
+        val withTarget = provider.getLineDetail(
+            city,
+            LineDetailRequest(lineId = "ms:1_1_0", targetOrder = 3)
+        )
+        assertTrue(withTarget.buses[0].distanceToTargetMeters in 2100..2300)
+        assertTrue(withTarget.buses[0].etaSeconds in 500..600)
+
+        // 目标站是车辆后方（已过站）：不给 ETA
+        val passed = provider.getLineDetail(
+            city,
+            LineDetailRequest(lineId = "ms:1_1_0", targetOrder = 1)
+        )
+        assertEquals(-1, passed.buses[0].etaSeconds)
+        assertEquals(null, passed.buses[0].distanceToTargetMeters)
+    }
+
+    @Test
+    fun lineDetail_eta_usesMeasuredSpeedOverFallback() = runBlocking {
+        var now = 0L
+        val backend = MockBackend()
+        backend.byIdBsd = 36.0 // 服务端下发 36 km/h
+        val provider = MeishanTransitProvider(
+            client = MeishanTransitClient(backend.httpClient),
+            wallClock = fixedClock,
+            monotonicClock = { now }
+        )
+        // ≈2206m ÷ (36/3.6 = 10 m/s) ≈ 221s（4 m/s 兜底会是 ~550s，完全不同）
+        val detail = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        assertTrue(detail.buses[0].etaSeconds in 210..230, "实测速度 ETA 应≈221s，实际 ${detail.buses[0].etaSeconds}")
     }
 
     @Test

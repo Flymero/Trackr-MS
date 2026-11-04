@@ -75,6 +75,9 @@ class MeishanTransitProvider(
         private const val SPEED_MAX_KMH = 80.0
         private const val SPEED_NOISE_KMH = 2.0
 
+        /** 车速无效时的平均运营假设：4 m/s（14.4 km/h），与原客户端口径一致 */
+        private const val DEFAULT_SPEED_KMH = 14.4
+
         /** 站点 ID 前缀：官方 s_id 打包进通用 stopId */
         const val STOP_ID_PREFIX = "ms-st:"
 
@@ -249,7 +252,7 @@ class MeishanTransitProvider(
         )
     }
 
-    /** 线路详情（03 §3.2）：站点表 + 车辆快照（车牌 / 站序 / 到站状态 / 实测速度） */
+    /** 线路详情（03 §3.2）：站点表 + 车辆快照（车牌 / 站序 / 到站状态 / 速度 / 估算 ETA） */
     override suspend fun getLineDetail(
         city: TransitCity,
         request: LineDetailRequest
@@ -258,7 +261,7 @@ class MeishanTransitProvider(
             ?: throw IllegalArgumentException("眉山官方源不认这个 lineId: ${request.lineId}")
         val area = MeishanArea.fromAreaId(ref.areaId)
         val detail = client.getLineDetail(ref.lId, ref.state, area)
-        return detail.toBusLineDetail(ref)
+        return detail.toBusLineDetail(ref, request)
     }
 
     /** 官方后台没有班次接口（05 §2），返回空表，调用方按首末班展示 */
@@ -367,6 +370,20 @@ class MeishanTransitProvider(
                 )
             }
             approaching.sortBy { targetPos - stops.indexOfFirst { s -> s.order == it.order } }
+            // 附近卡片也带估算 ETA / 距离（车到本站）
+            val approachingWithEta = approaching.map { bus ->
+                val busPos = stops.indexOfFirst { it.order == bus.order }
+                val meters = when {
+                    busPos < 0 || busPos > targetPos -> null
+                    busPos == targetPos -> 0
+                    else -> polylineMeters(stops, busPos, targetPos, bus.wgsLat, bus.wgsLng)
+                }
+                if (meters == null) {
+                    bus
+                } else {
+                    bus.copy(distanceToTargetMeters = meters, etaSeconds = etaSeconds(meters, bus.speedKmh))
+                }
+            }
 
             val serviceState = ServiceHours.state(
                 nowHHMM = nowHHMM,
@@ -393,7 +410,7 @@ class MeishanTransitProvider(
                     targetStopId = encodeStopId(targetSId),
                     targetStopName = targetName,
                     statusText = statusText,
-                    approachingBuses = approaching.take(MAX_APPROACHING)
+                    approachingBuses = approachingWithEta.take(MAX_APPROACHING)
                 )
             )
         }
@@ -405,7 +422,7 @@ class MeishanTransitProvider(
 
     // ---- 线路详情解析 ----
 
-    private fun JSONObject.toBusLineDetail(ref: MeishanIds.Ref): BusLineDetail {
+    private fun JSONObject.toBusLineDetail(ref: MeishanIds.Ref, request: LineDetailRequest): BusLineDetail {
         val area = MeishanArea.fromAreaId(ref.areaId)
         val name = optString("l_name").trim()
         val directionText = if (ref.state == 0) optString("l_sxpz") else optString("l_xxpz")
@@ -466,10 +483,79 @@ class MeishanTransitProvider(
             line = line,
             reverseDirection = reverseDirection,
             stops = stops,
-            buses = buses,
+            buses = withEta(stops, buses, request),
             operatingState = operatingState(first, last),
-            statusDescription = optString("l_remark").trim()
+            // ETA 是按车辆实时位置 × 沿线折线距离估算的（数据源没有服务端预测），如实标注
+            statusDescription = listOfNotNull(
+                optString("l_remark").trim().takeIf { it.isNotBlank() },
+                "到站时间为估算值，仅供参考"
+            ).joinToString(" · ")
         )
+    }
+
+    /**
+     * 给每辆车补「到目标站的折线距离 + 估算 ETA」。
+     * 目标站：请求带上车站（targetOrder / stationId）就用它，否则按终点站（LiveBus 契约）。
+     * 距离 = 车辆 GPS → 下一站 → … → 目标站 逐段直线累加；耗时 = 距离 ÷ 该车实测速度，
+     * 车速无效（<2km/h，可能在等灯）时退回固定 4 m/s（14.4 km/h）的平均假设。
+     */
+    private fun withEta(stops: List<BusStop>, buses: List<LiveBus>, request: LineDetailRequest): List<LiveBus> {
+        if (stops.isEmpty()) return buses
+        // 没选上车站就按终点站算（LiveBus 契约「目标站（或终点站）」）
+        val targetPos = resolveTargetPos(stops, request.targetOrder, request.stationId) ?: stops.lastIndex
+        return buses.map { bus ->
+            val busPos = stops.indexOfFirst { it.order == bus.order }
+            val meters = when {
+                busPos < 0 || busPos > targetPos -> null // 已过目标站 / 站序异常：不给 ETA
+                busPos == targetPos -> 0
+                else -> polylineMeters(stops, busPos, targetPos, bus.wgsLat, bus.wgsLng)
+            } ?: return@map bus
+            bus.copy(
+                distanceToTargetMeters = meters,
+                etaSeconds = etaSeconds(meters, bus.speedKmh)
+            )
+        }
+    }
+
+    /** 目标站下标：targetOrder → stationId(ms-st:) → null（调用方回退终点站） */
+    private fun resolveTargetPos(stops: List<BusStop>, targetOrder: Int?, stationId: String?): Int? {
+        targetOrder?.takeIf { it > 0 }?.let { order ->
+            val pos = stops.indexOfFirst { it.order == order }
+            if (pos >= 0) return pos
+        }
+        stationId?.let { id ->
+            val pos = stops.indexOfFirst { it.stopId == id }
+            if (pos >= 0) return pos
+        }
+        return null
+    }
+
+    /** 车辆 GPS → s[busPos+1] → … → s[targetPos] 的逐段直线距离（米） */
+    private fun polylineMeters(
+        stops: List<BusStop>,
+        busPos: Int,
+        targetPos: Int,
+        busLat: Double,
+        busLng: Double
+    ): Int? {
+        var total = 0.0
+        var fromLat = busLat
+        var fromLng = busLng
+        for (i in busPos + 1..targetPos) {
+            val to = stops[i]
+            val seg = RouteProjectionMath.calculateDistanceMeters(fromLat, fromLng, to.wgsLat, to.wgsLng)
+                ?: return null // 坐标缺失的站表算不了
+            total += seg
+            fromLat = to.wgsLat
+            fromLng = to.wgsLng
+        }
+        return total.roundToInt()
+    }
+
+    /** 距离 ÷ 速度：速度无效时按固定 4 m/s（14.4 km/h）的平均运营假设 */
+    private fun etaSeconds(meters: Int, speedKmh: Double): Int {
+        val effectiveKmh = if (speedKmh >= SPEED_NOISE_KMH) speedKmh else DEFAULT_SPEED_KMH
+        return (meters / (effectiveKmh / 3.6)).roundToInt()
     }
 
     /** 车辆快照解析：速度优先用数据源自带的 b_sd，字段无效（0/缺失）时用相邻帧位移兜底 */

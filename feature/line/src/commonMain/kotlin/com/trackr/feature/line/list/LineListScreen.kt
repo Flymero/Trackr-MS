@@ -6,11 +6,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
@@ -18,19 +19,23 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,7 +43,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.ic_search
-import com.trackr.core.model.MeishanArea
 import com.trackr.core.model.MeishanLine
 import com.trackr.core.navigation.TrackrNavigator
 import com.trackr.feature.line.resources.Res as LineRes
@@ -84,99 +88,104 @@ fun LineListRoute(
  * 「线路」页签（眉山特化）：官方 `/line/list` 全量线路列表。
  * 无状态；状态与事件见 [LineListUiState] / [LineListEvent]。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LineListScreen(
     state: LineListUiState,
     onEvent: (LineListEvent) -> Unit
 ) {
-    Column(
+    // 顶部大标题头与公交 / 设置页同款（自带状态栏留白 + 滚动折叠）
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    Scaffold(
         modifier = Modifier
             .fillMaxSize()
-            // 顶部留白和公交 / 设置页一致：内容从状态栏下方开始
-            .statusBarsPadding()
-            .padding(horizontal = 18.dp)
-    ) {
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // 标题
-        Text(
-            text = stringResource(LineRes.string.line_tab_title),
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = stringResource(LineRes.string.line_tab_subtitle),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // 区域切换（眉山 / 仁寿）
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MeishanArea.entries.forEach { area ->
-                FilterChip(
-                    selected = state.area == area,
-                    onClick = { onEvent(LineListEvent.AreaSelected(area)) },
-                    label = { Text(area.displayName) }
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        contentWindowInsets = WindowInsets.safeDrawing,
+        topBar = {
+            LargeTopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = stringResource(LineRes.string.line_tab_title),
+                            fontWeight = FontWeight.Bold
+                        )
+                        // 区域严格跟随当前城市（选眉山就是眉山的线，选仁寿就是仁寿的线），不提供手动切换
+                        Text(
+                            text = stringResource(LineRes.string.line_tab_subtitle, state.area.displayName),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // 名称 / 起终点过滤
-        OutlinedTextField(
-            value = state.query,
-            onValueChange = { onEvent(LineListEvent.QueryChanged(it)) },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text(stringResource(LineRes.string.line_tab_search_hint)) },
-            singleLine = true,
-            shape = MaterialTheme.shapes.medium,
-            leadingIcon = {
-                Icon(
-                    imageVector = vectorResource(Res.drawable.ic_search),
-                    contentDescription = null
-                )
-            }
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 一次性提示
-        val message = state.message
-        if (message != null) {
-            val text = when (message) {
-                is LineListMessage.NotCovered ->
-                    stringResource(LineRes.string.line_tab_not_covered, message.lineName)
-            }
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.errorContainer
-            ) {
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        when {
-            state.isLoading -> LoadingSection()
-            state.loadFailed -> ErrorSection(onRetry = { onEvent(LineListEvent.Retry) })
-            state.visibleLines.isEmpty() -> EmptySection()
-            else -> LineListSection(
-                lines = state.visibleLines,
-                openingLineId = state.openingLineId,
-                onLineClick = { onEvent(LineListEvent.LineClicked(it)) }
             )
         }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 18.dp)
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Spacer(modifier = Modifier.height(16.dp))
+            // 名称 / 起终点过滤
+            OutlinedTextField(
+                value = state.query,
+                onValueChange = { onEvent(LineListEvent.QueryChanged(it)) },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(stringResource(LineRes.string.line_tab_search_hint)) },
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium,
+                leadingIcon = {
+                    Icon(
+                        imageVector = vectorResource(Res.drawable.ic_search),
+                        contentDescription = null
+                    )
+                }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 一次性提示
+            val message = state.message
+            if (message != null) {
+                val text = when (message) {
+                    is LineListMessage.NotCovered ->
+                        stringResource(LineRes.string.line_tab_not_covered, message.lineName)
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer
+                ) {
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            when {
+                state.isLoading -> LoadingSection()
+                state.loadFailed -> ErrorSection(onRetry = { onEvent(LineListEvent.Retry) })
+                state.visibleLines.isEmpty() -> EmptySection()
+                else -> LineListSection(
+                    lines = state.visibleLines,
+                    openingLineId = state.openingLineId,
+                    onLineClick = { onEvent(LineListEvent.LineClicked(it)) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 }
 

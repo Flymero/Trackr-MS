@@ -108,7 +108,7 @@
     <string name="line_rail_arrived">到站</string>
     <!-- 「线路」页签（眉山特化：官方全量线路列表） -->
     <string name="line_tab_title">线路</string>
-    <string name="line_tab_subtitle">眉山公交官方数据 · 全部线路</string>
+    <string name="line_tab_subtitle">%1$s公交官方数据 · 全部线路</string>
     <string name="line_tab_search_hint">搜线路名或起终点</string>
     <string name="line_tab_empty">没有匹配的线路</string>
     <string name="line_tab_error">线路列表加载失败，请检查网络后重试</string>

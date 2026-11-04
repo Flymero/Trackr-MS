@@ -39,7 +39,8 @@ android {
     defaultConfig {
         applicationId = "com.github.u5151561.trackr.ms"
         versionCode = 8
-        versionName = "0.1.4"
+        // 眉山特化后缀：便于在 设置→关于 分辨装的是哪个包（原版是纯 0.1.4）
+        versionName = "0.1.4-ms.1"
 
         buildConfigField("String", "AMAP_WEB_KEY", "\"$amapWebServiceKey\"")
         // 第 9 步存储开关 USE_NEW_STORE 的默认值（true = Room + DataStore）；运行时可用 files/store_switch 覆盖，见 StoreSwitch
@@ -85,6 +86,9 @@ android {
             enableUnitTestCoverage = true
             buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKeyDebug\"")
             manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKeyDebug
+            // 眉山特化：调试只打包 arm64（真机就是 arm64），少一半打包时间；
+            // 注意不能和 splits.abi 同时用（Gradle 互斥），见下方说明
+            ndk { abiFilters.add("arm64-v8a") }
         }
         release {
             isMinifyEnabled = true
@@ -99,19 +103,15 @@ android {
             if (releaseSigning.storeFile?.exists() == true) {
                 signingConfig = releaseSigning
             }
+            ndk {
+                // release 双 ABI 出一个通用包（手动安装场景，比按 ABI 拆包省事）
+                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+            }
         }
     }
 
-    // 两个 ABI 各出一个包，不把 56 MB 原生库塞进同一个 APK：arm64 约 51 MB、armv7 约 40 MB。
-    // 产物在 build/outputs/apk/release/androidApp-<abi>-release.apk。
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
-        }
-    }
+    // 眉山特化：不再用 splits.abi 按 ABI 拆包（与上面 buildTypes 的 ndk.abiFilters 互斥）。
+    // debug 只打 arm64（快）；release 双 ABI 出一个通用包（androidApp-release.apk）。
 
     buildFeatures {
         buildConfig = true
