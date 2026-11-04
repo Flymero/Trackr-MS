@@ -19,6 +19,7 @@ import com.trackr.core.navigation.Navigator
 import com.trackr.core.navigation.ScreenKey
 import com.trackr.core.navigation.TopLevel
 import com.trackr.core.testing.FakeAmapKeyRepository
+import com.trackr.core.testing.FakeSettingsRepository
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -55,10 +56,14 @@ class NavigationFlowTest {
     private var visibleTabs: List<ScreenKey> = emptyList()
 
     /** 把底栏渲染成一排带 testTag 的文字，返回导航状态 */
-    private fun render(amapKeys: FakeAmapKeyRepository, state: NavigationState = newState()): NavigationState {
+    private fun render(
+        amapKeys: FakeAmapKeyRepository,
+        state: NavigationState = newState(),
+        settings: FakeSettingsRepository = FakeSettingsRepository()
+    ): NavigationState {
         composeTestRule.setContent {
             val navigator = remember { Navigator(state) }
-            val tabs = rememberVisibleTabs(amapKeys, navigator)
+            val tabs = rememberVisibleTabs(amapKeys, settings, navigator)
             visibleTabs = tabs
             Column {
                 tabs.forEach { key -> Text(key.toString(), Modifier.testTag("tab_$key")) }
@@ -68,13 +73,18 @@ class NavigationFlowTest {
         return state
     }
 
-    /** 第 17 步起底栏只有 3 个页签（首页、路线规划、更多），「收藏」不再是页签；没 Key 时只剩首页、更多 */
+    /**
+     * 第 17 步起底栏页签：首页、路线规划、更多（「收藏」不再是页签）；
+     * 眉山特化：「线路」页签只在眉山 / 仁寿出现，默认城市（上海）看不到。
+     * 没 Key 时只剩首页、更多。
+     */
     private fun assertRouteTabShown(shown: Boolean) {
         val node = composeTestRule.onNodeWithTag("tab_${ScreenKey.RoutePlan}")
         if (shown) node.assertExists() else node.assertDoesNotExist()
         composeTestRule.onNodeWithTag("tab_${ScreenKey.Home}").assertExists()
         composeTestRule.onNodeWithTag("tab_${ScreenKey.More}").assertExists()
         composeTestRule.onNodeWithTag("tab_${ScreenKey.FavoritesGroup}").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("tab_${ScreenKey.Lines}").assertDoesNotExist()
         val expected = if (shown) {
             listOf(ScreenKey.Home, ScreenKey.RoutePlan, ScreenKey.More)
         } else {

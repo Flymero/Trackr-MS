@@ -7,6 +7,7 @@
     <string name="state_loading">加载中…</string>
     <string name="data_source_chelaile">车来了</string>
     <string name="data_source_mygolbs">掌上公交</string>
+    <string name="data_source_meishan">官方</string>
     <string name="action_relocate">重新定位</string>
     <string name="action_edit">编辑</string>
     <string name="action_end">结束</string>

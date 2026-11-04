@@ -9,6 +9,7 @@ import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.RailMode
 import com.trackr.core.model.UiMode
+import com.trackr.core.model.isMeishanLocal
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.ui.platform.LiveUpdateAccess
 import com.trackr.ui.platform.LiveUpdateStatus
@@ -30,7 +31,7 @@ import kotlinx.coroutines.launch
  * @param elderMode 长辈版开关（`SettingsRepository.uiMode` 是不是 Elder）
  */
 data class MeUiState(
-    val engineMode: EngineMode = EngineMode.CHELAILE,
+    val engineMode: EngineMode = EngineMode.MYGOLBS,
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val alertThresholdStops: Int = 2,
     val reminders: List<ScheduledReminder> = emptyList(),
@@ -42,7 +43,9 @@ data class MeUiState(
     val versionName: String? = null,
     val elderMode: Boolean = false,
     val railMode: RailMode = RailMode.Horizontal,
-    val userMessages: List<UserMessage> = emptyList()
+    val userMessages: List<UserMessage> = emptyList(),
+    /** 眉山特化：当前城市属于眉山官方源服务范围（眉山 / 仁寿）时，数据源弹窗才提供「官方」 */
+    val isMeishanCity: Boolean = false
 )
 
 /** 「我的」页的事件。`Open*` 由 Route 处理（导航），其余交给 [MeViewModel.onEvent] */
@@ -86,6 +89,8 @@ class MeViewModel(
     ) { engine, code, stops, live, lock -> SettingsPart(engine, code, stops, live, lock) }
         .combine(settings.uiMode) { part, mode -> part.copy(elderMode = mode == UiMode.Elder) }
         .combine(settings.railMode) { part, mode -> part.copy(railMode = mode) }
+        // 眉山特化：官方数据源选项只在眉山 / 仁寿提供
+        .combine(settings.selectedCity) { part, city -> part.copy(meishanCity = city.isMeishanLocal) }
 
     private val mapKeyStatus = combine(amapKeys.hasMapKey, amapKeys.canShowMap) { has, canShow ->
         amapKeyStatusText(has, canShow)
@@ -162,6 +167,7 @@ class MeViewModel(
         showOnLockScreen = part.showOnLockScreen,
         elderMode = part.elderMode,
         railMode = part.railMode,
+        isMeishanCity = part.meishanCity,
         // 和原来一样：实时通知关着时不显示胶囊权限
         liveUpdate = liveUpdate?.takeIf { part.liveNotification },
         amapKeyStatus = keyStatus,
@@ -176,6 +182,7 @@ class MeViewModel(
         val liveNotification: Boolean,
         val showOnLockScreen: Boolean,
         val elderMode: Boolean = false,
-        val railMode: RailMode = RailMode.Horizontal
+        val railMode: RailMode = RailMode.Horizontal,
+        val meishanCity: Boolean = false
     )
 }

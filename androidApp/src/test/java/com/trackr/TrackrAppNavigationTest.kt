@@ -178,7 +178,7 @@ class TrackrAppNavigationTest {
         runCatching { GlobalContext.get().get<TrackingRepository>().stop() }
     }
 
-    /** 点底栏页签（第 25 步页签文字改成 公交 / 路线 / 我的；「我的」页标题也叫「我的」，所以只认带 Selected 语义的页签） */
+    /** 点底栏页签（眉山特化页签文字：公交 / 线路 / 路线 / 设置；只认带 Selected 语义的页签） */
     private fun clickTab(label: String) {
         composeTestRule.onNode(hasText(label) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
     }
@@ -197,7 +197,7 @@ class TrackrAppNavigationTest {
     @Test
     fun switchToMeTab_stopsHomePolling_andBackAfterOneInterval_catchesUpImmediately() {
         launch()
-        clickTab("我的")
+        clickTab("设置")
         composeTestRule.waitForIdle()
         assertFalse("切到「我的」后首页停轮询", homeViewModel.isPollingActive)
 
@@ -249,7 +249,7 @@ class TrackrAppNavigationTest {
         val restorationTester = StateRestorationTester(composeTestRule)
         restorationTester.setContent { Content() }
         composeTestRule.waitForIdle()
-        clickTab("我的")
+        clickTab("设置")
         composeTestRule.waitForIdle()
         val before = homeViewModel
 
@@ -285,12 +285,12 @@ class TrackrAppNavigationTest {
     private fun assertOnLineDetail() {
         assertEquals("打开的是链接里那条线", line49, openedLines.lastOrNull())
         composeTestRule.onNodeWithText("编辑").assertDoesNotExist()
-        composeTestRule.onNodeWithText("我的").assertDoesNotExist() // 子页不显示底栏
+        composeTestRule.onNodeWithText("设置").assertDoesNotExist() // 子页不显示底栏
     }
 
     private fun assertOnHomeRoot() {
         composeTestRule.onNodeWithText("编辑").assertExists()
-        composeTestRule.onNodeWithText("我的").assertExists()
+        composeTestRule.onNodeWithText("设置").assertExists()
     }
 
     @Test
@@ -310,7 +310,7 @@ class TrackrAppNavigationTest {
     @Test
     fun warmStart_onAnotherTab_switchesToHomeTabAndOpensLineDetail() {
         launch()
-        composeTestRule.onNodeWithText("我的").performClick()
+        composeTestRule.onNodeWithText("设置").performClick()
         composeTestRule.waitForIdle()
 
         composeTestRule.runOnIdle { deepLink = line49Link }

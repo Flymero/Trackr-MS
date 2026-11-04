@@ -4,6 +4,7 @@ import com.trackr.core.model.EngineMode
 import com.trackr.core.model.RailMode
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
+import com.trackr.core.model.TransitCity
 import com.trackr.core.model.UiMode
 import com.trackr.core.testing.FakeAmapKeyRepository
 import com.trackr.core.testing.FakeSettingsRepository
@@ -117,10 +118,13 @@ class MeViewModelTest {
     }
 
     @Test
-    fun dataSource_isSingleChoiceOfTwo_andStateFollows() = runTest(main.dispatcher) {
+    fun dataSource_isSingleChoice_andStateFollows() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
-        // D1：数据源只有车来了 / 掌上公交两个，没有聚合
-        assertEquals(listOf(EngineMode.CHELAILE, EngineMode.MYGOLBS), EngineMode.entries.toList())
+        // D1：数据源单源；眉山特化多一个「官方」（只在眉山 / 仁寿的弹窗里出现）
+        assertEquals(
+            listOf(EngineMode.CHELAILE, EngineMode.MYGOLBS, EngineMode.MEISHAN),
+            EngineMode.entries.toList()
+        )
 
         viewModel.onEvent(MeEvent.SetEngineMode(EngineMode.MYGOLBS))
         testScheduler.advanceUntilIdle()
@@ -130,6 +134,25 @@ class MeViewModelTest {
         viewModel.onEvent(MeEvent.SetEngineMode(EngineMode.CHELAILE))
         testScheduler.advanceUntilIdle()
         assertEquals(EngineMode.CHELAILE, viewModel.uiState.value.engineMode)
+    }
+
+    @Test
+    fun dataSource_meishanOptionVisibleOnlyForMeishanCities() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // FakeSettingsRepository 默认上海：没有官方选项
+        assertFalse(viewModel.uiState.value.isMeishanCity)
+
+        settings.selectCity(TransitCity(cityId = "", cityName = "眉山", province = "四川"))
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.isMeishanCity)
+
+        settings.selectCity(TransitCity(cityId = "", cityName = "仁寿", province = "四川"))
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.isMeishanCity)
+
+        settings.selectCity(TransitCity(cityId = "034", cityName = "上海", province = "直辖市"))
+        testScheduler.advanceUntilIdle()
+        assertFalse(viewModel.uiState.value.isMeishanCity)
     }
 
     @Test

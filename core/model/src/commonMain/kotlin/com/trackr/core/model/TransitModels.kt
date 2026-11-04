@@ -3,21 +3,24 @@ package com.trackr.core.model
 import kotlinx.serialization.Serializable
 
 /**
- * 数据源标识：全国车来了 vs 全国掌上公交
+ * 数据源标识：全国车来了 / 全国掌上公交 / 眉山官方（眉山特化）
  */
 @Serializable
 enum class DataSourceType(val displayName: String) {
     CHELAILE("车来了"),
-    MYGOLBS("掌上公交")
+    MYGOLBS("掌上公交"),
+    MEISHAN("眉山官方")
 }
 
 /**
- * 引擎运行模式：车来了 / 掌上公交（独立单源模式）
+ * 引擎运行模式：车来了 / 掌上公交 / 眉山官方（独立单源模式）。
+ * 官方源只覆盖眉山 / 仁寿，设置页只在选了这两个城市时提供该选项。
  */
 @Serializable
 enum class EngineMode(val displayName: String, val shortLabel: String) {
     CHELAILE("车来了", "车来了"),
-    MYGOLBS("掌上公交", "掌上公交")
+    MYGOLBS("掌上公交", "掌上公交"),
+    MEISHAN("官方", "官方")
 }
 
 /**

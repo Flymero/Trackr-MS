@@ -14,6 +14,7 @@ import com.trackr.core.model.isPureSubwayStation
 import com.trackr.core.network.provider.ITransitProvider
 import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
+import com.trackr.core.network.remote.meishan.MeishanIds
 import com.trackr.core.network.remote.mygolbs.MygolbsIds
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -23,25 +24,31 @@ val EngineMode.dataSource: DataSourceType
     get() = when (this) {
         EngineMode.CHELAILE -> DataSourceType.CHELAILE
         EngineMode.MYGOLBS -> DataSourceType.MYGOLBS
+        EngineMode.MEISHAN -> DataSourceType.MEISHAN
     }
 
 /**
- * 实时公交数据源分发协调器（D1：数据源二选一，不做聚合）
+ * 实时公交数据源分发协调器（D1：数据源二选一，不做聚合；眉山特化加官方源）。
  *
  * 搜索、附近站、站点详情按当前数据源（[EngineMode]）选一个 Provider；线路详情、时刻表按线路自带的来源或 id 前缀选，
- * 认不出来才用当前数据源。城市列表仍合并两家（掌上公交编码要补到车来了城市上）。
+ * 认不出来才用当前数据源。城市列表合并三家，官方源只补眉山 / 仁寿。
+ * 官方源不做附近站 / 站点经过线路，官方模式下这两类查询回退掌上公交。
  */
 class TransitProviderCoordinator(
     val providers: Map<DataSourceType, ITransitProvider>
 ) {
     constructor(
         chelaileProvider: ITransitProvider,
-        mygolbsProvider: ITransitProvider
+        mygolbsProvider: ITransitProvider,
+        meishanProvider: ITransitProvider? = null
     ) : this(
-        mapOf(
-            DataSourceType.CHELAILE to chelaileProvider,
-            DataSourceType.MYGOLBS to mygolbsProvider
-        )
+        buildMap {
+            put(DataSourceType.CHELAILE, chelaileProvider)
+            put(DataSourceType.MYGOLBS, mygolbsProvider)
+            if (meishanProvider != null) {
+                put(DataSourceType.MEISHAN, meishanProvider)
+            }
+        }
     )
 
     private var cachedCities: List<TransitCity> = emptyList()
@@ -69,6 +76,7 @@ class TransitProviderCoordinator(
             }
             Pair(clDeferred.await(), mgDeferred.await())
         }
+        val meishanCities = runCatching { meishanProvider()?.getSupportedCities().orEmpty() }.getOrDefault(emptyList())
 
         // 构建掌上公交映射 cleanName -> TransitCity
         val mgMap = LinkedHashMap<String, TransitCity>()
@@ -123,23 +131,39 @@ class TransitProviderCoordinator(
             }
         }
 
+        // 3. 眉山特化：官方源独有的城市（眉山 / 仁寿）也补进来
+        val existingNames = result.mapTo(HashSet()) { it.cityName }
+        for (msCity in meishanCities) {
+            if (msCity.cityName !in existingNames) {
+                result.add(msCity)
+                existingNames.add(msCity.cityName)
+            }
+        }
+
         cachedCities = result
         return result
     }
 
-    /** 逆地理先问车来了、再问掌上公交（和数据源选哪个无关，只用来定城市） */
-    private val geocodeProviders: List<ITransitProvider>
-        get() = GEOCODE_ORDER.mapNotNull { providers[it] } +
+    private fun meishanProvider(): ITransitProvider? = providers[DataSourceType.MEISHAN]
+
+    /** 逆地理先问车来了、再问掌上公交（只用来定城市）；官方模式只问官方（就近区域中心判定） */
+    private fun geocodeProviders(mode: EngineMode? = null): List<ITransitProvider> {
+        if (mode == EngineMode.MEISHAN) {
+            return listOfNotNull(providers[DataSourceType.MEISHAN])
+        }
+        return GEOCODE_ORDER.mapNotNull { providers[it] } +
                 providers.values.filter { it.sourceType !in GEOCODE_ORDER }
+    }
 
     /**
      * 逆地理定位：依次查询具备雷达能力的 Provider，返回第一个非空城市名
      */
     suspend fun resolveCityByLocation(
         wgsLat: Double,
-        wgsLng: Double
+        wgsLng: Double,
+        mode: EngineMode? = null
     ): String? {
-        for (provider in geocodeProviders) {
+        for (provider in geocodeProviders(mode)) {
             if (provider.supportsLocationRadar()) {
                 val resolved = runCatching { provider.resolveCityByLocation(wgsLat, wgsLng) }.getOrNull()
                 if (!resolved.isNullOrBlank()) {
@@ -155,9 +179,10 @@ class TransitProviderCoordinator(
      */
     suspend fun resolveDistrictByLocation(
         wgsLat: Double,
-        wgsLng: Double
+        wgsLng: Double,
+        mode: EngineMode? = null
     ): String? {
-        for (provider in geocodeProviders) {
+        for (provider in geocodeProviders(mode)) {
             if (provider.supportsLocationRadar()) {
                 val resolved = runCatching { provider.resolveDistrictByLocation(wgsLat, wgsLng) }.getOrNull()
                 if (!resolved.isNullOrBlank()) {
@@ -169,14 +194,15 @@ class TransitProviderCoordinator(
     }
 
     /**
-     * 获取周边站点：根据 EngineMode 单源路由至支持位置雷达能力的 Provider
+     * 获取周边站点：根据 EngineMode 单源路由至支持位置雷达能力的 Provider。
+     * 官方源自带附近站接口（siteAndRedPacket），不再回退掌上公交。
      */
     suspend fun getNearbyStops(
         city: TransitCity,
         wgsLat: Double,
         wgsLng: Double,
         limit: Int = 4,
-        mode: EngineMode = EngineMode.CHELAILE
+        mode: EngineMode = EngineMode.MYGOLBS
     ): List<NearbyStop> {
         val targetProvider = providers[mode.dataSource]
 
@@ -209,7 +235,8 @@ class TransitProviderCoordinator(
     }
 
     /**
-     * 站点详情：根据 EngineMode 或请求显式特征精准单源路由
+     * 站点详情：根据 EngineMode 或请求显式特征精准单源路由。
+     * 官方源自带同站线路接口（line/site），官方模式不再回退掌上公交。
      */
     suspend fun getStopDetail(
         city: TransitCity,
@@ -218,6 +245,10 @@ class TransitProviderCoordinator(
     ): List<NearbyStop> {
         val chelaileProvider = providers[DataSourceType.CHELAILE]
         val mygolbsProvider = providers[DataSourceType.MYGOLBS]
+
+        if (mode == EngineMode.MEISHAN) {
+            return providers[DataSourceType.MEISHAN]?.getStopDetail(city, request).orEmpty()
+        }
 
         // 若请求明确包含掌上公交前缀特征，或当前引擎模式为掌上公交，路由至掌上公交
         val isExplicitMygolbs = when {
@@ -243,12 +274,13 @@ class TransitProviderCoordinator(
     suspend fun getLineDetail(
         city: TransitCity,
         request: LineDetailRequest,
-        mode: EngineMode = EngineMode.CHELAILE
+        mode: EngineMode = EngineMode.MYGOLBS
     ): BusLineDetail {
         val defaultFallback = fallbackProvider(mode)
 
         val targetProvider = when {
             request.source != null -> providers[request.source]
+            providers[DataSourceType.MEISHAN]?.supportsLine(request.lineId) == true -> providers[DataSourceType.MEISHAN]
             providers[DataSourceType.MYGOLBS]?.supportsLine(request.lineId) == true -> providers[DataSourceType.MYGOLBS]
             providers[DataSourceType.CHELAILE]?.supportsLine(request.lineId) == true -> providers[DataSourceType.CHELAILE]
             else -> providers.values.firstOrNull { it.supportsLine(request.lineId) } ?: defaultFallback
@@ -264,13 +296,15 @@ class TransitProviderCoordinator(
         city: TransitCity,
         line: BusLineDirection,
         atTimeHHMM: String? = null,
-        mode: EngineMode = EngineMode.CHELAILE
+        mode: EngineMode = EngineMode.MYGOLBS
     ): LineTimetable {
         val defaultFallback = fallbackProvider(mode)
 
         val targetProvider = when {
+            line.source == DataSourceType.MEISHAN || MeishanIds.isMeishanId(line.lineId) -> providers[DataSourceType.MEISHAN]
             line.source == DataSourceType.MYGOLBS || MygolbsIds.isMygolbsId(line.lineId) -> providers[DataSourceType.MYGOLBS]
             line.source == DataSourceType.CHELAILE -> providers[DataSourceType.CHELAILE]
+            providers[DataSourceType.MEISHAN]?.supportsLine(line.lineId) == true -> providers[DataSourceType.MEISHAN]
             providers[DataSourceType.MYGOLBS]?.supportsLine(line.lineId) == true -> providers[DataSourceType.MYGOLBS]
             providers[DataSourceType.CHELAILE]?.supportsLine(line.lineId) == true -> providers[DataSourceType.CHELAILE]
             else -> defaultFallback

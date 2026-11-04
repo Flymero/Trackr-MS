@@ -113,9 +113,11 @@ class DefaultRealtimeRepository(
 
     override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): Result<TransitCity?> = runCatching {
         withContext(Dispatchers.IO) {
+            // 官方模式独立：只问官方（就近区域中心判定），不借助第三方
+            val mode = settings.engineMode.value
             // 1) 优先尝试雷达 Provider GPS 逆地理服务（地级市 + 区县）
-            var resolvedName: String? = coordinator.resolveCityByLocation(wgsLat, wgsLng)
-            var rawDistrict: String? = coordinator.resolveDistrictByLocation(wgsLat, wgsLng)
+            var resolvedName: String? = coordinator.resolveCityByLocation(wgsLat, wgsLng, mode)
+            var rawDistrict: String? = coordinator.resolveDistrictByLocation(wgsLat, wgsLng, mode)
 
             // 2) 若为空，尝试系统自带的逆地理（Android Geocoder）
             if (resolvedName.isNullOrBlank()) {

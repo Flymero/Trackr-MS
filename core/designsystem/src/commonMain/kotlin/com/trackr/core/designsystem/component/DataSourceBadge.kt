@@ -15,10 +15,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.trackr.core.designsystem.theme.DataSourceChelaileContainer
 import com.trackr.core.designsystem.theme.DataSourceChelaileContent
+import com.trackr.core.designsystem.theme.DataSourceMeishanContainer
+import com.trackr.core.designsystem.theme.DataSourceMeishanContent
 import com.trackr.core.designsystem.theme.DataSourceMygolbsContainer
 import com.trackr.core.designsystem.theme.DataSourceMygolbsContent
 import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.data_source_chelaile
+import com.trackr.core.designsystem.resources.data_source_meishan
 import com.trackr.core.designsystem.resources.data_source_mygolbs
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
@@ -32,7 +35,8 @@ enum class DataSourceBadgeStyle(
     val contentColor: Color
 ) {
     CHELAILE(Res.string.data_source_chelaile, DataSourceChelaileContainer, DataSourceChelaileContent),
-    MYGOLBS(Res.string.data_source_mygolbs, DataSourceMygolbsContainer, DataSourceMygolbsContent)
+    MYGOLBS(Res.string.data_source_mygolbs, DataSourceMygolbsContainer, DataSourceMygolbsContent),
+    MEISHAN(Res.string.data_source_meishan, DataSourceMeishanContainer, DataSourceMeishanContent)
 }
 
 /**

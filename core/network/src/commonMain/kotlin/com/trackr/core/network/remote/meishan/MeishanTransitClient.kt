@@ -8,8 +8,13 @@ import com.trackr.core.network.remote.common.BaseTransitApiClient
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
+import io.ktor.client.request.setBody
+import io.ktor.client.request.forms.FormDataContent
 import io.ktor.http.HttpMethod
+import io.ktor.http.Parameters
 import io.ktor.http.takeFrom
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
@@ -39,11 +44,26 @@ class MeishanTransitClient(
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36"
     }
 
+    /** 线路列表会话缓存（按区域）：搜索和线路页共用，列表不常变 */
+    private val listLock = SynchronizedObject()
+    private val lineListCache = HashMap<MeishanArea, List<MeishanLine>>()
+
     /**
      * 全量线路列表（契约 §4.2）：每行是一个线路记录而非方向，当前全部 state=0；
      * 名称可能重复、起终点 / 时间字段可能缺失，按 [MeishanLine] 的可空字段容错。
+     * 会话内缓存，[forceRefresh] 重新拉。
      */
-    suspend fun getLineList(area: MeishanArea): List<MeishanLine> = withContext(Dispatchers.IO) {
+    suspend fun getLineList(area: MeishanArea, forceRefresh: Boolean = false): List<MeishanLine> =
+        withContext(Dispatchers.IO) {
+            if (!forceRefresh) {
+                synchronized(listLock) { lineListCache[area] }?.let { return@withContext it }
+            }
+            val lines = fetchLineList(area)
+            synchronized(listLock) { lineListCache[area] = lines }
+            lines
+        }
+
+    private suspend fun fetchLineList(area: MeishanArea): List<MeishanLine> {
         val response = executeHttpCall { meishanGet("/line/list", mapOf("areaId" to area.areaId.toString())) }
         if (!response.isSuccessful) {
             throw IOException("眉山线路列表 HTTP ${response.code}（${response.safeUrl}）")
@@ -74,7 +94,78 @@ class MeishanTransitClient(
                 )
             )
         }
-        lines
+        return lines
+    }
+
+    /**
+     * 线路详情（契约 §4.3）：POST /line/byId，`userId` 传空即可匿名。
+     * `siteList` 已按运营顺序返回；`busList` 是请求时刻的车辆快照（含车牌与速度）。
+     */
+    suspend fun getLineDetail(lId: Int, state: Int, area: MeishanArea): JSONObject =
+        withContext(Dispatchers.IO) {
+            val response = executeHttpCall {
+                meishanPost(
+                    "/line/byId",
+                    mapOf(
+                        "l_id" to lId.toString(),
+                        "state" to state.toString(),
+                        "userId" to "",
+                        "areaId" to area.areaId.toString()
+                    )
+                )
+            }
+            if (!response.isSuccessful) {
+                throw IOException("眉山线路详情 HTTP ${response.code}（${response.safeUrl}）")
+            }
+            val data = JSONObject(response.body)
+            if (data.optInt("code", -1) != CODE_SUCCESS) {
+                throw IOException("眉山线路详情业务失败 code=${data.optInt("code", -1)}（${response.safeUrl}）")
+            }
+            data.optJSONObject("result")
+                ?: throw IOException("眉山线路详情无 result（l_id=$lId state=$state，${response.safeUrl}）")
+        }
+
+    /** 附近站点（doc/news 03 §3.4）：`dist` 单位公里；返回 siteInfos 原始 JSON 数组 */
+    suspend fun getNearbySites(lat: Double, lon: Double, distKm: Double = 0.6): JSONArray =
+        withContext(Dispatchers.IO) {
+            val response = executeHttpCall {
+                meishanPost(
+                    "/find/siteAndRedPacket",
+                    mapOf(
+                        "dist" to distKm.toString(),
+                        "lat" to lat.toString(),
+                        "lon" to lon.toString(),
+                        "u_id" to "0"
+                    )
+                )
+            }
+            if (!response.isSuccessful) {
+                throw IOException("眉山附近站点 HTTP ${response.code}（${response.safeUrl}）")
+            }
+            val data = JSONObject(response.body)
+            if (data.optInt("code", -1) != CODE_SUCCESS) {
+                throw IOException("眉山附近站点业务失败 code=${data.optInt("code", -1)}（${response.safeUrl}）")
+            }
+            data.optJSONObject("result")?.optJSONArray("siteInfos") ?: JSONArray()
+        }
+
+    /**
+     * 同站线路（doc/news 03 §3.3）：POST /line/site，`id` 是站点 `s_id`。
+     * 返回经过该站的全部线路，每条含完整 siteList 与 busList（站数计算一次请求拿全）。
+     * 返回 result 原始 JSON 数组（可能为空数组=站点无在营线路）。
+     */
+    suspend fun getStopLines(sId: Int): JSONArray = withContext(Dispatchers.IO) {
+        val response = executeHttpCall {
+            meishanPost("/line/site", mapOf("id" to sId.toString()))
+        }
+        if (!response.isSuccessful) {
+            throw IOException("眉山同站线路 HTTP ${response.code}（${response.safeUrl}）")
+        }
+        val data = JSONObject(response.body)
+        if (data.optInt("code", -1) != CODE_SUCCESS) {
+            throw IOException("眉山同站线路业务失败 code=${data.optInt("code", -1)}（${response.safeUrl}）")
+        }
+        data.optJSONArray("result") ?: JSONArray()
     }
 
     /** GET [path]，query 带旧客户端公共参数（契约 §4.1） */
@@ -89,5 +180,21 @@ class MeishanTransitClient(
             }
         }
         header("User-Agent", USER_AGENT)
+    }
+
+    /** POST [path]，表单编码带旧客户端公共参数（契约 §4.1） */
+    private fun HttpRequestBuilder.meishanPost(path: String, params: Map<String, String>) {
+        method = HttpMethod.Post
+        url {
+            takeFrom("$BASE_URL$path")
+            parameters.append("m_version", M_VERSION)
+            parameters.append("versionCode", VERSION_CODE)
+        }
+        header("User-Agent", USER_AGENT)
+        setBody(FormDataContent(Parameters.build {
+            for ((k, v) in params) {
+                append(k, v)
+            }
+        }))
     }
 }

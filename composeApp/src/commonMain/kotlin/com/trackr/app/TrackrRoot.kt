@@ -45,6 +45,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
 import com.trackr.core.data.repository.AmapKeyRepository
+import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.UiMode
 import com.trackr.core.navigation.Navigator
@@ -153,7 +154,7 @@ private fun TrackrNavApp(
     koinViewModel<RouteDetailViewModel>(viewModelStoreOwner = appViewModelStoreOwner)
 
     // D2：没有高德 Key 就不显示「路线规划」；Key 被清空且正停在那个页签时回首页、清掉它的栈
-    val visibleTabs = rememberVisibleTabs(koinInject<AmapKeyRepository>(), navigator)
+    val visibleTabs = rememberVisibleTabs(koinInject<AmapKeyRepository>(), koinInject<SettingsRepository>(), navigator)
     val hasMapKey = ScreenKey.RoutePlan in visibleTabs
     val amapKeys = koinInject<AmapKeyRepository>()
     val privacyConsent by amapKeys.privacyConsent.collectAsStateWithLifecycle()

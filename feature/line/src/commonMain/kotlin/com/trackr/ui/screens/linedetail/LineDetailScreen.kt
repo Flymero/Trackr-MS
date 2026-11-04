@@ -460,6 +460,7 @@ private fun LineTopBar(
                         style = when (source) {
                             DataSourceType.CHELAILE -> DataSourceBadgeStyle.CHELAILE
                             DataSourceType.MYGOLBS -> DataSourceBadgeStyle.MYGOLBS
+                            DataSourceType.MEISHAN -> DataSourceBadgeStyle.MEISHAN
                         },
                         text = source.displayName
                     )

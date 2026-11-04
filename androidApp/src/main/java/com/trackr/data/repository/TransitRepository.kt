@@ -20,6 +20,7 @@ import com.trackr.core.model.EngineMode
 import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.ProvinceCityCatalog
+import com.trackr.core.model.isMeishanLocal
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.TransitSearchResult
@@ -190,8 +191,9 @@ class TransitRepository(
     }
 
     private fun loadInitialEngineMode(): EngineMode {
-        val modeStr = initial.engineMode ?: EngineMode.CHELAILE.name
-        return runCatching { EngineMode.valueOf(modeStr) }.getOrDefault(EngineMode.CHELAILE)
+        // 眉山特化：默认掌上公交（小城市覆盖比车来了好）
+        val modeStr = initial.engineMode ?: EngineMode.MYGOLBS.name
+        return runCatching { EngineMode.valueOf(modeStr) }.getOrDefault(EngineMode.MYGOLBS)
     }
 
     override fun setEngineMode(mode: EngineMode) {
@@ -218,6 +220,10 @@ class TransitRepository(
         }
         _selectedCity.value = effectiveCity
         _hasSavedCity.value = true
+        // 眉山特化：官方源只覆盖眉山 / 仁寿，切到别的城市自动回退掌上公交
+        if (_engineMode.value == EngineMode.MEISHAN && !effectiveCity.isMeishanLocal) {
+            setEngineMode(EngineMode.MYGOLBS)
+        }
         val str = json.encodeToString(effectiveCity)
         writer.enqueue { store.saveSelectedCityJson(str) }.join()
     }

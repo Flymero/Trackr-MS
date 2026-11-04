@@ -389,6 +389,19 @@ class NavigatorTest {
     }
 
     @Test
+    fun visibleTabs_linesTabHiddenOutsideMeishan() {
+        // 眉山特化：「线路」只在眉山 / 仁寿显示；与高德 Key 互不影响
+        assertEquals(
+            listOf(ScreenKey.Home, ScreenKey.RoutePlan, ScreenKey.More),
+            TopLevel.visibleTabs(hasMapKey = true, showLinesTab = false)
+        )
+        assertEquals(
+            listOf(ScreenKey.Home, ScreenKey.More),
+            TopLevel.visibleTabs(hasMapKey = false, showLinesTab = false)
+        )
+    }
+
+    @Test
     fun visibleTabs_keyClearedWhileOnRoutePlan_returnsHome_andKeyBackLeavesStateAlone() {
         val state = newState()
         val navigator = Navigator(state)

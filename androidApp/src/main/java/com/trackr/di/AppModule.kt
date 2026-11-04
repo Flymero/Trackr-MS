@@ -23,6 +23,7 @@ import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.domain.platform.UpdateChecker
 import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.network.provider.chelaile.ChelaileTransitProvider
+import com.trackr.core.network.provider.meishan.MeishanTransitProvider
 import com.trackr.core.network.provider.mygolbs.MygolbsTransitProvider
 import com.trackr.core.network.remote.amap.AmapTransitApiClient
 import com.trackr.core.network.remote.chelaile.ChelaileApiClient
@@ -79,10 +80,12 @@ val appModule: Module = module {
     single { MeishanTransitClient(get()) }
     single { ChelaileTransitProvider(get()) }
     single { MygolbsTransitProvider(get()) }
+    single { MeishanTransitProvider(get()) }
     single {
         TransitProviderCoordinator(
             chelaileProvider = get<ChelaileTransitProvider>(),
-            mygolbsProvider = get<MygolbsTransitProvider>()
+            mygolbsProvider = get<MygolbsTransitProvider>(),
+            meishanProvider = get<MeishanTransitProvider>()
         )
     }
     single { AmapTransitApiClient(get()) }

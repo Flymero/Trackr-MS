@@ -51,7 +51,7 @@
     <string name="me_amap_web_key_optional">高德 Web 服务 Key（可选）</string>
     <string name="me_amap_web_key">高德 Web 服务 Key</string>
     <string name="me_amap_web_key_hint">用于云端公交算路，不绑定包名</string>
-    <string name="me_title">我的</string>
+    <string name="me_title">设置</string>
     <string name="me_group_display">显示</string>
     <string name="me_elder_mode">长辈版</string>
     <string name="me_elder_mode_desc">字更大，按钮更大</string>

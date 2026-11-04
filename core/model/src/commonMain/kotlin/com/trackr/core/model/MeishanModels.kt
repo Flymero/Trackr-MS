@@ -16,8 +16,19 @@ enum class MeishanArea(val areaId: Int, val displayName: String) {
 
     companion object {
         fun fromAreaId(areaId: Int): MeishanArea = entries.firstOrNull { it.areaId == areaId } ?: MEISHAN
+
+        /** 按城市名取区域；不是眉山 / 仁寿返回 null */
+        fun forCityName(cityName: String): MeishanArea? = when (cityName) {
+            "眉山" -> MEISHAN
+            "仁寿" -> RENSHOU
+            else -> null
+        }
     }
 }
+
+/** 当前城市是否属于眉山官方源的服务范围（眉山 / 仁寿） */
+val TransitCity.isMeishanLocal: Boolean
+    get() = MeishanArea.forCityName(cityName) != null
 
 /**
  * 眉山官方 `/line/list` 的线路记录（契约 §5.1）。

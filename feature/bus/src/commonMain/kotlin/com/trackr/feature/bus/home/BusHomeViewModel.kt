@@ -508,6 +508,8 @@ class BusHomeViewModel(
         val nextMode = when (_uiState.value.engineMode) {
             EngineMode.MYGOLBS -> EngineMode.CHELAILE
             EngineMode.CHELAILE -> EngineMode.MYGOLBS
+            // 官方源只在设置页选，快捷切换按「掌上公交」理解
+            EngineMode.MEISHAN -> EngineMode.MYGOLBS
         }
         setEngineMode(nextMode)
     }

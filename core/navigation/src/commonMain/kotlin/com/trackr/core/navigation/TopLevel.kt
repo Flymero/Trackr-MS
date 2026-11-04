@@ -22,9 +22,12 @@ object TopLevel {
     fun isTopLevel(key: NavKey?): Boolean = key != null && key in tabs
 
     /**
-     * 底栏实际显示的页签（D2）：没有高德 Key（`AmapKeyRepository.hasMapKey` 为 false）时去掉「路线规划」。
+     * 底栏实际显示的页签（D2）：没有高德 Key（`AmapKeyRepository.hasMapKey` 为 false）时去掉「路线规划」；
+     * 眉山特化：「线路」页签走官方全量线路数据，只在眉山 / 仁寿（[showLinesTab]）时显示。
      * 顺序同 [tabs]。页签集合变了交给 [Navigator.onTabsChanged]（在被去掉的页签上就清栈回起始页签）。
      */
-    fun visibleTabs(hasMapKey: Boolean): List<ScreenKey> =
-        if (hasMapKey) tabs else tabs.filterNot { it == ScreenKey.RoutePlan }
+    fun visibleTabs(hasMapKey: Boolean, showLinesTab: Boolean = true): List<ScreenKey> =
+        tabs.filterNot { key ->
+            (key == ScreenKey.RoutePlan && !hasMapKey) || (key == ScreenKey.Lines && !showLinesTab)
+        }
 }

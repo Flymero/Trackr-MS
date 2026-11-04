@@ -36,9 +36,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -63,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.action_cancel
 import com.trackr.core.designsystem.resources.data_source_chelaile
+import com.trackr.core.designsystem.resources.data_source_meishan
 import com.trackr.core.designsystem.resources.data_source_mygolbs
 import com.trackr.core.designsystem.resources.ic_chevron_right
 import com.trackr.core.designsystem.resources.ic_clock
@@ -120,6 +118,7 @@ fun MeScreen(
     var showTransitCodeDialog by rememberSaveable { mutableStateOf(false) }
     var showAlertThresholdDialog by rememberSaveable { mutableStateOf(false) }
     var showRailModeDialog by rememberSaveable { mutableStateOf(false) }
+    var showEngineModeDialog by rememberSaveable { mutableStateOf(false) }
     var showRemindersSheet by rememberSaveable { mutableStateOf(false) }
 
 
@@ -174,9 +173,10 @@ fun MeScreen(
 
             item(key = "group_trip", contentType = "settings_group") {
                 SettingsGroup(title = stringResource(MeRes.string.me_group_travel)) {
-                    EngineModeRow(
-                        selected = state.engineMode,
-                        onSelect = { onEvent(MeEvent.SetEngineMode(it)) }
+                    SettingRow(
+                        title = stringResource(MeRes.string.me_data_source),
+                        value = engineModeLabel(state.engineMode),
+                        onClick = { showEngineModeDialog = true }
                     )
                     GroupDivider()
                     SettingRow(
@@ -267,6 +267,35 @@ fun MeScreen(
                 }
             }
         }
+    }
+
+    if (showEngineModeDialog) {
+        // 眉山特化：官方源只覆盖眉山 / 仁寿，其他地方只给车来了和掌上公交
+        val options = if (state.isMeishanCity) {
+            listOf(EngineMode.CHELAILE, EngineMode.MYGOLBS, EngineMode.MEISHAN)
+        } else {
+            listOf(EngineMode.CHELAILE, EngineMode.MYGOLBS)
+        }
+        val chelaileLabel = stringResource(Res.string.data_source_chelaile)
+        val mygolbsLabel = stringResource(Res.string.data_source_mygolbs)
+        val meishanLabel = stringResource(Res.string.data_source_meishan)
+        ChoiceDialog(
+            title = stringResource(MeRes.string.me_data_source),
+            options = options,
+            selected = state.engineMode,
+            label = { mode ->
+                when (mode) {
+                    EngineMode.CHELAILE -> chelaileLabel
+                    EngineMode.MYGOLBS -> mygolbsLabel
+                    EngineMode.MEISHAN -> meishanLabel
+                }
+            },
+            onSelect = {
+                onEvent(MeEvent.SetEngineMode(it))
+                showEngineModeDialog = false
+            },
+            onDismiss = { showEngineModeDialog = false }
+        )
     }
 
     if (showTransitCodeDialog) {
@@ -460,35 +489,15 @@ private fun SwitchRow(
     }
 }
 
-/** 「数据来源」：车来了 / 掌上公交 两段 */
+/** 「数据来源」弹窗里的选项文字 */
 @Composable
-private fun EngineModeRow(
-    selected: EngineMode,
-    onSelect: (EngineMode) -> Unit
-) {
-    val options = listOf(EngineMode.CHELAILE to stringResource(Res.string.data_source_chelaile), EngineMode.MYGOLBS to stringResource(Res.string.data_source_mygolbs))
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        RowTexts(title = stringResource(MeRes.string.me_data_source), subtitle = null, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(12.dp))
-        SingleChoiceSegmentedButtonRow {
-            options.forEachIndexed { index, (mode, label) ->
-                SegmentedButton(
-                    selected = selected == mode,
-                    onClick = { onSelect(mode) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                    icon = {},
-                    label = { Text(text = label, style = MaterialTheme.typography.labelMedium) }
-                )
-            }
-        }
+private fun engineModeLabel(mode: EngineMode): String = stringResource(
+    when (mode) {
+        EngineMode.CHELAILE -> Res.string.data_source_chelaile
+        EngineMode.MYGOLBS -> Res.string.data_source_mygolbs
+        EngineMode.MEISHAN -> Res.string.data_source_meishan
     }
-}
+)
 
 /** 单选对话框：点选项即选中并关闭；只有「取消」按钮 */
 @Composable

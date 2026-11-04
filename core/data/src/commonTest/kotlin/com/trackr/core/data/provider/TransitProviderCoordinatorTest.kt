@@ -415,7 +415,8 @@ class TransitProviderCoordinatorTest {
             NearbyStop(stopId = "s1", name = "站台A")
         )
 
-        val stops = coordinator.getNearbyStops(testCity, 31.23, 121.47)
+        // 眉山特化后默认模式是掌上公交；车来了路由走显式模式
+        val stops = coordinator.getNearbyStops(testCity, 31.23, 121.47, mode = EngineMode.CHELAILE)
 
         assertEquals(1, stops.size)
         assertEquals("站台A", stops[0].name)

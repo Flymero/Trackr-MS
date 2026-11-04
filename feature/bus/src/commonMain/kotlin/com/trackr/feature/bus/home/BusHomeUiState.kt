@@ -10,6 +10,7 @@ import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TransitCity
+import com.trackr.core.model.isMeishanLocal
 import com.trackr.ui.components.arrival.ArrivalUi
 
 /**
@@ -61,10 +62,15 @@ data class BusHomeUiState(
             val baseList = when (engineMode) {
                 EngineMode.MYGOLBS -> cities.filter { !it.mygolbsCityCode.isNullOrBlank() }
                 EngineMode.CHELAILE -> cities.filter { it.cityId.isNotBlank() }
+                // 眉山特化：官方源只覆盖眉山 / 仁寿，城市列表也只留这两个
+                EngineMode.MEISHAN -> cities.filter { it.isMeishanLocal }
             }
-            if (citySearchQuery.isBlank()) return baseList
+            // 眉山 / 仁寿始终可选（官方源覆盖，第三方缺编码也不藏）
+            val meishanCities = cities.filter { it.isMeishanLocal && it !in baseList }
+            val withSpecial = meishanCities + baseList
+            if (citySearchQuery.isBlank()) return withSpecial
             val q = citySearchQuery.trim().lowercase()
-            return baseList.filter {
+            return withSpecial.filter {
                 it.cityName.lowercase().contains(q) ||
                     it.pinyin.lowercase().contains(q) ||
                     (it.province.ifBlank { ProvinceCityCatalog.inferProvince(it.cityName) }).lowercase().contains(q)

@@ -19,6 +19,7 @@ import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitSearchResult
 import com.trackr.core.model.UiMode
 import com.trackr.core.model.UserFix
+import com.trackr.core.network.remote.meishan.MeishanIds
 import com.trackr.core.network.remote.mygolbs.MygolbsIds
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -177,7 +178,11 @@ interface RealtimeRepository {
         stationId: String? = null,
         wgsLat: Double? = null,
         wgsLng: Double? = null,
-        source: DataSourceType = if (MygolbsIds.isMygolbsId(lineId)) DataSourceType.MYGOLBS else DataSourceType.CHELAILE,
+        source: DataSourceType = when {
+            MeishanIds.isMeishanId(lineId) -> DataSourceType.MEISHAN
+            MygolbsIds.isMygolbsId(lineId) -> DataSourceType.MYGOLBS
+            else -> DataSourceType.CHELAILE
+        },
         lineNameHint: String = "",
         directionHint: Int = 0
     ): Result<BusLineDetail>
