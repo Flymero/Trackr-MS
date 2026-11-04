@@ -42,7 +42,8 @@ class CityPickerItemRowTest {
 
         composeTestRule.onNodeWithText("深圳").assertIsDisplayed()
         composeTestRule.onNodeWithText("广东省").assertIsDisplayed()
-        composeTestRule.onNodeWithText("当前").assertIsDisplayed()
+        // 「当前」徽章已去掉：当前城市靠加粗 + 主色强调，不再有文字徽章
+        composeTestRule.onNodeWithText("当前").assertDoesNotExist()
         composeTestRule.onNodeWithText("定位").assertIsDisplayed()
         composeTestRule.onNodeWithText("车来了").assertIsDisplayed()
         composeTestRule.onNodeWithText("掌上公交").assertIsDisplayed()

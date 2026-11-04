@@ -53,7 +53,6 @@ import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TransitCity
 import com.trackr.feature.bus.resources.Res as BusRes
 import com.trackr.feature.bus.resources.bus_city_clear
-import com.trackr.feature.bus.resources.bus_city_current
 import com.trackr.feature.bus.resources.bus_city_located
 import com.trackr.feature.bus.resources.bus_city_located_name
 import com.trackr.feature.bus.resources.bus_city_match_count
@@ -152,20 +151,7 @@ fun CityPickerItemRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                if (isCurrent) {
-                    Surface(
-                        shape = MaterialTheme.shapes.extraSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    ) {
-                        Text(
-                            text = stringResource(BusRes.string.bus_city_current),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
-                }
+                // 当前城市不加「当前」徽章：名字加粗 + 主色已经是足够强的强调
                 if (isLocated) {
                     Surface(
                         shape = MaterialTheme.shapes.extraSmall,
@@ -346,7 +332,13 @@ fun CityPickerBottomSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // 点「定位: X」直接切到定位城市；还没定位到就只展示已选城市
                     Surface(
+                        modifier = Modifier.let { m ->
+                            if (locatedCity != null) m.clip(MaterialTheme.shapes.small).clickable {
+                                onSelectCity(locatedCity)
+                            } else m
+                        },
                         shape = MaterialTheme.shapes.small,
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                     ) {
@@ -434,18 +426,23 @@ fun CityPickerBottomSheet(
                 // 省份-城市双列联动选择器
                 val provinceMap = remember(effectiveCities) {
                     val map = linkedMapOf<String, MutableList<TransitCity>>()
+                    // 眉山特化：「眉山」作为一个独立分组排在最前（官方数据源覆盖 眉山 / 仁寿）
+                    map[MEISHAN_PROVINCE] = mutableListOf()
                     for (p in ProvinceCityCatalog.PROVINCE_ORDER) {
                         map[p] = mutableListOf()
                     }
                     for (city in effectiveCities) {
+                        // 眉山 / 仁寿只进「眉山」分组，不在四川里重复出现
+                        if (city.cityName in MEISHAN_CITY_NAMES) continue
                         val prov = city.province.ifBlank { ProvinceCityCatalog.inferProvince(city.cityName) }
                         val list = map.getOrPut(prov) { mutableListOf() }
                         list.add(city)
                     }
-                    // 特别适配城市（眉山）：复制一份到「直辖市」分组顶部（直辖市为默认选中分组），
-                    // 原省份分组保持不变；同一对象引用，选中态 / 「当前」徽章表现一致
-                    for (special in effectiveCities.filter { it.isSpeciallyAdapted }) {
-                        map["直辖市"]?.add(0, special)
+                    // 眉山 / 仁寿放进「眉山」分组（城市列表里没有就补一个占位城市，选中后按名称走官方源）
+                    for (name in MEISHAN_CITY_NAMES) {
+                        val city = effectiveCities.firstOrNull { it.cityName == name }
+                            ?: TransitCity(cityId = "", cityName = name, province = "四川")
+                        map[MEISHAN_PROVINCE]?.add(city)
                     }
                     map.filterValues { it.isNotEmpty() }
                 }
@@ -454,7 +451,7 @@ fun CityPickerBottomSheet(
                 val activeProvince = if (selectedProvince in provinceMap.keys) {
                     selectedProvince
                 } else {
-                    availableProvinces.firstOrNull() ?: "直辖市"
+                    availableProvinces.firstOrNull() ?: MEISHAN_PROVINCE
                 }
                 val provinceCities = provinceMap[activeProvince].orEmpty()
 

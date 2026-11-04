@@ -5,7 +5,7 @@
     <string name="bus_city_located">定位</string>
     <string name="bus_city_title">切换城市</string>
     <string name="bus_city_subtitle">按 省 / 直辖市 分级快速查找全国 480+ 城市</string>
-    <string name="bus_city_search_hint">搜索城市中文名或拼音（如：玉林 / yulin）</string>
+    <string name="bus_city_search_hint">搜索城市名或拼音</string>
     <string name="bus_city_search">搜索</string>
     <string name="bus_city_clear">清除</string>
     <string name="bus_city_match_count">找到 %1$s 个相关城市</string>

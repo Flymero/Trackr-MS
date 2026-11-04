@@ -46,7 +46,7 @@ import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.action_relocate
 import com.trackr.core.designsystem.resources.ic_arrow_drop_down
 import com.trackr.core.designsystem.resources.ic_chevron_right
-import com.trackr.core.designsystem.resources.ic_person
+import com.trackr.core.designsystem.resources.ic_settings
 import com.trackr.core.designsystem.resources.ic_search
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.feature.bus.citypicker.CityPickerBottomSheet
@@ -255,7 +255,7 @@ private fun ElderHomeTopBar(cityName: String, onCityClick: () -> Unit, onSetting
                 .widthIn(min = ElderButtonHeight)
                 .testTag(ElderBusHomeTags.SETTINGS)
         ) {
-            Icon(imageVector = vectorResource(Res.drawable.ic_person), contentDescription = null, modifier = Modifier.size(28.dp))
+            Icon(imageVector = vectorResource(Res.drawable.ic_settings), contentDescription = null, modifier = Modifier.size(28.dp))
             Spacer(modifier = Modifier.width(dimens.spaceXs))
             Text(text = stringResource(BusRes.string.bus_home_settings), style = MaterialTheme.typography.titleMedium)
         }

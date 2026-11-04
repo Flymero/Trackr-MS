@@ -83,7 +83,9 @@ class LineListViewModel(
     private var nextMessageId = 0L
 
     init {
-        loadLines(MeishanArea.MEISHAN)
+        // 默认区域跟着当前城市走：选仁寿就默认仁寿，否则默认眉山
+        val initialArea = MeishanArea.forCityName(settings.selectedCity.value.cityName) ?: MeishanArea.MEISHAN
+        loadLines(initialArea)
     }
 
     fun onEvent(event: LineListEvent) {

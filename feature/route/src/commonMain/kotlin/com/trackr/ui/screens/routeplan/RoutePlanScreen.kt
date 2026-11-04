@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -101,7 +102,8 @@ fun RoutePlanScreen(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    // 顶部留白和公交首页一致：整页从状态栏下方开始（地图不再顶到状态栏后面）
+    Box(modifier = modifier.fillMaxSize().statusBarsPadding()) {
         if (state.canShowMap) {
             RouteMap(
                 state = state.map,
@@ -112,7 +114,6 @@ fun RoutePlanScreen(
             NoMapBackground()
         }
 
-        val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         SearchConsole(
             originText = state.originText,
             destText = state.destText,
@@ -122,7 +123,7 @@ fun RoutePlanScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(top = statusBarPadding + 10.dp, start = 16.dp, end = 16.dp)
+                .padding(top = 10.dp, start = 16.dp, end = 16.dp)
         )
 
         Column(
