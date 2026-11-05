@@ -54,9 +54,17 @@ private val nearbyJson = """
     ],"redPackets":[]}}
 """.trimIndent()
 
-/** 线路详情的车辆位置按命中次数前移，模拟车辆在 3 秒里走了约 30 米（≈36 km/h）；b_sd 可注入 */
-private fun lineDetailJson(hit: Int, bsd: Double = 0.0): String {
+/** 线路详情的车辆位置按命中次数前移，模拟车辆在 3 秒里走了约 30 米（≈36 km/h）；b_sd 可注入；可选附带场站车 */
+private fun lineDetailJson(hit: Int, bsd: Double = 0.0, withYardBuses: Boolean = false): String {
     val lat = if (hit <= 1) "30.065" else "30.06527"
+    // 场站车：index=0、isArriveSite=1、速度 0（实测运营时段大量存在于起点站 / 车场）
+    val yardBuses = if (withYardBuses) {
+        """,
+        {"b_id":0,"l_copy_id":11,"b_plate_num":"川Z10269D","index":0,"state":0,
+         "isArriveSite":1,"b_latitude":30.061,"b_longitude":103.820,"b_sd":0.0,"areaId":1},
+        {"b_id":0,"l_copy_id":11,"b_plate_num":"川Z10205D","index":0,"state":0,
+         "isArriveSite":1,"b_latitude":30.0612,"b_longitude":103.8202,"b_sd":0.0,"areaId":1}"""
+    } else ""
     return """
     {"code":101,"result":{
       "l_id":1,"l_name":"1路","l_copy_id":11,"state":0,
@@ -71,7 +79,7 @@ private fun lineDetailJson(hit: Int, bsd: Double = 0.0): String {
       ],
       "busList":[
         {"b_id":0,"l_copy_id":11,"b_plate_num":"川Z10091D","index":2,"state":0,
-         "isArriveSite":0,"b_latitude":$lat,"b_longitude":103.825,"b_sd":$bsd,"areaId":1}
+         "isArriveSite":0,"b_latitude":$lat,"b_longitude":103.825,"b_sd":$bsd,"areaId":1}$yardBuses
       ]
     }}
     """.trimIndent()
@@ -93,13 +101,27 @@ class MeishanTransitProviderTest {
         /** 注入车辆 b_sd（服务端下发的实时速度）；默认 0 模拟字段无效 */
         var byIdBsd = 0.0
 
+        /** 线路详情里附带场站车（index=0）：模拟未发车 / 归场车辆 */
+        var withYardBuses = false
+
+        /** `/line/site` 前 N 次返回业务失败（模拟网络抖动），用于验证重试 */
+        var siteFailuresBeforeSuccess = 0
+        private var siteHits = 0
+
         val httpClient = mockHttpClient { request ->
             val path = request.encodedPath.substringAfterLast('/')
             hits[path] = (hits[path] ?: 0) + 1
             when (path) {
                 "list" -> MockReply(lineListJson)
-                "byId" -> MockReply(lineDetailJson(++byIdHits, byIdBsd))
-                "site" -> MockReply(stopLinesJson)
+                "byId" -> MockReply(lineDetailJson(++byIdHits, byIdBsd, withYardBuses))
+                "site" -> {
+                    siteHits++
+                    if (siteHits <= siteFailuresBeforeSuccess) {
+                        MockReply("""{"code":500}""")
+                    } else {
+                        MockReply(stopLinesJson)
+                    }
+                }
                 "siteAndRedPacket" -> MockReply(nearbyJson)
                 else -> MockReply("""{"code":102}""")
             }
@@ -213,6 +235,30 @@ class MeishanTransitProviderTest {
         assertEquals("1站", stops[0].lines.single().statusText)
         // 第三方前缀不认
         assertFalse(provider.supportsStop(StopDetailRequest(stopId = "12345")))
+    }
+
+    @Test
+    fun stopDetail_retriesTransientFailure() = runBlocking {
+        val backend = MockBackend()
+        backend.siteFailuresBeforeSuccess = 1 // 第一次业务失败，第二次成功
+        val stops = newProvider(backend).getStopDetail(city, StopDetailRequest(stopId = "ms-st:2"))
+
+        assertEquals(2, backend.hits["site"], "失败后应重试一次")
+        assertEquals(1, stops.size, "重试后应正常返回，而不是整页「暂无运营车辆」")
+        assertEquals("1站", stops[0].lines.single().statusText)
+    }
+
+    @Test
+    fun lineDetail_filtersYardBuses_indexZero() = runBlocking {
+        // 场站车（index=0、isArriveSite=1）不属于任何站：不能出现在车辆列表，
+        // 否则「最近的车」筛选（order <= 目标站）会把它当成目标站上的「已到站」
+        val backend = MockBackend()
+        backend.withYardBuses = true
+        val detail = newProvider(backend).getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+
+        assertEquals(1, detail.buses.size, "场站车应被过滤")
+        assertEquals("川Z10091D", detail.buses.single().plateOrFleetNo)
+        assertTrue(detail.buses.none { it.order < 1 })
     }
 
     @Test

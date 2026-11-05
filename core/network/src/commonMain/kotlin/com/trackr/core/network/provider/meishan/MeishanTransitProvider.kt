@@ -30,6 +30,7 @@ import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -186,7 +187,8 @@ class MeishanTransitProvider(
         coroutineScope {
             sites.map { site ->
                 async {
-                    val stopLines = runCatching { client.getStopLines(site.sId) }.getOrNull()
+                    // 偶发失败会让整个站卡片没有线路信息，重试兜底
+                    val stopLines = getStopLinesWithRetry(site.sId)
                     NearbyStop(
                         stopId = encodeStopId(site.sId),
                         name = site.name,
@@ -203,6 +205,19 @@ class MeishanTransitProvider(
         }
     }
 
+    /**
+     * `/line/site` 带重试：接口本身稳定（实测连发 5 次均正常），偶发一次失败 / 空响应
+     * 多半是移动网络抖动。失败重试最多 [attempts] 次、退避 [backoffMs] 递增；
+     * 空结果不重试（站点没有在营线路是正常业务态）。
+     */
+    private suspend fun getStopLinesWithRetry(sId: Int, attempts: Int = 3, backoffMs: Long = 400): JSONArray? {
+        repeat(attempts) { attempt ->
+            runCatching { client.getStopLines(sId) }.getOrNull()?.let { return it }
+            if (attempt < attempts - 1) delay(backoffMs * (attempt + 1))
+        }
+        return null
+    }
+
     /** 站点详情（03 §3.3）：与附近站共用 `/line/site`；站 ID 来自我们自己的 `ms-st:` 编码 */
     override suspend fun getStopDetail(
         city: TransitCity,
@@ -211,8 +226,8 @@ class MeishanTransitProvider(
         val sId = parseStopId(request.stopId)
             ?: parseStopId(request.physicalStId)
             ?: return@withContext emptyList()
-        val stopLines = runCatching { client.getStopLines(sId) }.getOrNull()
-            ?: return@withContext emptyList()
+        // 偶发一次失败/空响应就整页「暂无运营车辆」太伤：重试几次（实测接口本身稳定）
+        val stopLines = getStopLinesWithRetry(sId) ?: return@withContext emptyList()
 
         // 站名与坐标从任一线路的 siteList 里找（请求里未必带）
         var name = request.stopName.orEmpty().trim()
@@ -344,6 +359,8 @@ class MeishanTransitProvider(
             for (j in 0 until buses.length()) {
                 val busJson = buses.optJSONObject(j) ?: continue
                 val busIndex = busJson.optInt("index", -1)
+                // 场站车（index=0，未发车/归场）不属于任何站，不参与「下一班」判定
+                if (busIndex < 1) continue
                 var busPos = -1
                 for (k in stops.indices) {
                     if (stops[k].order == busIndex) {
@@ -567,6 +584,10 @@ class MeishanTransitProvider(
             // b_id 实测恒为 0（02 §3），身份用车牌 + 站序；车牌不落盘
             val plate = bus.optString("b_plate_num").trim()
             val index = bus.optInt("index", -1)
+            // 场站车过滤：站序从 1 开始，index=0 是未发车/收车归场的车（实测运营时段也有
+            // 一堆 index=0 的车停在起点站）。它们不属于任何站，放进列表会被「最近的车」
+            // 筛选（order <= 目标站）误判成目标站上「已到站」
+            if (index < 1) continue
             val lat = bus.optDouble("b_latitude", 0.0)
             val lng = bus.optDouble("b_longitude", 0.0)
 
