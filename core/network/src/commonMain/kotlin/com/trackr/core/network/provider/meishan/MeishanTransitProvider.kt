@@ -79,6 +79,10 @@ class MeishanTransitProvider(
         /** 车速无效时的平均运营假设：4 m/s（14.4 km/h），与原客户端口径一致 */
         private const val DEFAULT_SPEED_KMH = 14.4
 
+        /** 停场车判定（06 §4.1）：连续 N 帧位移 < 30m 且无下发速度 → 离线/停场，从到站列表剔除 */
+        private const val PARKED_FRAMES = 5
+        private const val PARKED_MOVE_METERS = 30.0
+
         /** 站点 ID 前缀：官方 s_id 打包进通用 stopId */
         const val STOP_ID_PREFIX = "ms-st:"
 
@@ -353,38 +357,61 @@ class MeishanTransitProvider(
                 source = DataSourceType.MEISHAN
             )
 
+            // 发车状态机先行（05 §2）：未发车 / 末班已过时段不解析车辆——
+            // 服务端仍返回归场车快照，但它们不是在途车，显示「等待发车 / 末班已过」
+            val serviceState = ServiceHours.state(
+                nowHHMM = nowHHMM,
+                windows = listOfNotNull(
+                    ServiceHours.Window(first = line.firstTime, last = line.lastTime)
+                        .takeIf { it.first.isNotBlank() && it.last.isNotBlank() }
+                )
+            )
+            val inService = serviceState == ServiceHours.State.IN_SERVICE ||
+                serviceState == ServiceHours.State.UNKNOWN // 没给首末班时无法判定，按现状解析
+
             // 筛「还没到本站」的车（05 §1.2）：站序匹配、下标做差
             val buses: JSONArray = lineJson.optJSONArray("busList") ?: JSONArray()
             val approaching = ArrayList<LiveBus>()
-            for (j in 0 until buses.length()) {
-                val busJson = buses.optJSONObject(j) ?: continue
-                val busIndex = busJson.optInt("index", -1)
-                // 场站车（index=0，未发车/归场）不属于任何站，不参与「下一班」判定
-                if (busIndex < 1) continue
-                var busPos = -1
-                for (k in stops.indices) {
-                    if (stops[k].order == busIndex) {
-                        busPos = k
-                        break
+            if (inService) {
+                val lineKey = "${area.areaId}_${lId}_${state}"
+                val nowMs = monotonicClock.elapsedMillis()
+                for (j in 0 until buses.length()) {
+                    val busJson = buses.optJSONObject(j) ?: continue
+                    val busIndex = busJson.optInt("index", -1)
+                    // 场站车（index=0，未发车/归场）不属于任何站，不参与「下一班」判定
+                    if (busIndex < 1) continue
+                    var busPos = -1
+                    for (k in stops.indices) {
+                        if (stops[k].order == busIndex) {
+                            busPos = k
+                            break
+                        }
                     }
-                }
-                if (busPos < 0) continue // index 越界（02 §3：可能在车场），不参与「下一班」
-                val remaining = targetPos - busPos
-                val arrived = busJson.optInt("isArriveSite", 0) == 1
-                if (remaining < 0 || (remaining == 0 && !arrived)) continue // 已过站 / 在本站未进站
+                    if (busPos < 0) continue // index 越界（02 §3：可能在车场），不参与「下一班」
+                    val remaining = targetPos - busPos
+                    val arrived = busJson.optInt("isArriveSite", 0) == 1
+                    if (remaining < 0 || (remaining == 0 && !arrived)) continue // 已过站 / 在本站未进站
 
-                val plate = busJson.optString("b_plate_num").trim()
-                approaching.add(
-                    LiveBus(
-                        busId = "msb:${area.areaId}:${lId}:${state}:${plate}_${busIndex}_$j",
-                        plateOrFleetNo = plate,
-                        order = busIndex,
-                        isArrived = arrived,
-                        wgsLat = busJson.optDouble("b_latitude", 0.0),
-                        wgsLng = busJson.optDouble("b_longitude", 0.0),
-                        speedKmh = busJson.optDouble("b_sd", 0.0)
+                    val plate = busJson.optString("b_plate_num").trim()
+                    val busLat = busJson.optDouble("b_latitude", 0.0)
+                    val busLng = busJson.optDouble("b_longitude", 0.0)
+                    val reported = busJson.optDouble("b_sd", 0.0)
+                    val (speedKmh, sample, parked) = resolveBusSpeed(lineKey, plate, busLat, busLng, reported, nowMs)
+                    storeSample(lineKey, plate, sample)
+                    if (parked) continue // 连续多帧未动：停场/离线车，剔除
+
+                    approaching.add(
+                        LiveBus(
+                            busId = "msb:${area.areaId}:${lId}:${state}:${plate}_${busIndex}_$j",
+                            plateOrFleetNo = plate,
+                            order = busIndex,
+                            isArrived = arrived,
+                            wgsLat = busLat,
+                            wgsLng = busLng,
+                            speedKmh = speedKmh
+                        )
                     )
-                )
+                }
             }
             approaching.sortBy { targetPos - stops.indexOfFirst { s -> s.order == it.order } }
             // 附近卡片也带估算 ETA / 距离（车到本站）
@@ -402,13 +429,6 @@ class MeishanTransitProvider(
                 }
             }
 
-            val serviceState = ServiceHours.state(
-                nowHHMM = nowHHMM,
-                windows = listOfNotNull(
-                    ServiceHours.Window(first = line.firstTime, last = line.lastTime)
-                        .takeIf { it.first.isNotBlank() && it.last.isNotBlank() }
-                )
-            )
             val nearest = approaching.firstOrNull()
             val statusText = when {
                 nearest == null -> when (serviceState) {
@@ -495,13 +515,20 @@ class MeishanTransitProvider(
             )
         }
 
-        val buses = parseBuses(ref, optJSONArray("busList") ?: JSONArray())
+        // 非运营时段（未发车 / 末班已过）：服务端仍返回归场车辆快照，但它们不是在途车——
+        // 车辆列表置空，主卡按运营状态显示「未发车 / 末班已过」（06 §4.1 软件层规则优先）
+        val state = operatingState(first, last)
+        val buses = if (state == LineOperatingState.RUNNING) {
+            withEta(stops, parseBuses(ref, optJSONArray("busList") ?: JSONArray()), request)
+        } else {
+            emptyList()
+        }
         return BusLineDetail(
             line = line,
             reverseDirection = reverseDirection,
             stops = stops,
-            buses = withEta(stops, buses, request),
-            operatingState = operatingState(first, last),
+            buses = buses,
+            operatingState = state,
             statusDescription = optString("l_remark").trim()
         )
     }
@@ -571,12 +598,13 @@ class MeishanTransitProvider(
         return (meters / (effectiveKmh / 3.6)).roundToInt()
     }
 
-    /** 车辆快照解析：速度优先用数据源自带的 b_sd，字段无效（0/缺失）时用相邻帧位移兜底 */
+    /**
+     * 车辆快照解析：速度优先用数据源自带的 b_sd，字段无效（0/缺失）时用相邻帧位移兜底；
+     * 连续多帧不动的停场车从列表剔除。
+     */
     private fun JSONObject.parseBuses(ref: MeishanIds.Ref, busList: JSONArray): List<LiveBus> {
         val nowMs = monotonicClock.elapsedMillis()
         val cacheKey = "${ref.areaId}_${ref.lId}_${ref.state}"
-        val previous = synchronized(speedLock) { speedSamples[cacheKey] }
-        val current = HashMap<String, SpeedSample>()
 
         val buses = ArrayList<LiveBus>(busList.length())
         for (i in 0 until busList.length()) {
@@ -590,26 +618,11 @@ class MeishanTransitProvider(
             if (index < 1) continue
             val lat = bus.optDouble("b_latitude", 0.0)
             val lng = bus.optDouble("b_longitude", 0.0)
-
-            // 速度：b_sd 是服务端下发的实时速度，有效就直接用；
-            // 为 0 可能是车真停着（等灯/归场），也可能是字段没填——
-            // 此时若上一帧位置可比且间隔合理，用 GPS 位移兜底算一次
             val reported = bus.optDouble("b_sd", 0.0)
-            var speedKmh = reported.takeIf { it > 0.0 } ?: 0.0
-            if (speedKmh <= 0.0) {
-                val prev = previous?.get(plate)
-                if (prev != null) {
-                    val dtSec = (nowMs - prev.timeMs) / 1000.0
-                    if (dtSec in SPEED_DT_MIN..SPEED_DT_MAX) {
-                        val meters = RouteProjectionMath.calculateDistanceMeters(prev.lat, prev.lng, lat, lng)
-                        if (meters != null) {
-                            val kmh = (meters / dtSec) * 3.6
-                            if (kmh in SPEED_NOISE_KMH..SPEED_MAX_KMH) speedKmh = kmh
-                        }
-                    }
-                }
-            }
-            current[plate] = SpeedSample(lat, lng, nowMs)
+
+            val (speedKmh, sample, parked) = resolveBusSpeed(cacheKey, plate, lat, lng, reported, nowMs)
+            storeSample(cacheKey, plate, sample)
+            if (parked) continue // 连续多帧未动：停场/离线车，不出现在车辆列表
 
             buses.add(
                 LiveBus(
@@ -623,13 +636,52 @@ class MeishanTransitProvider(
                 )
             )
         }
-        synchronized(speedLock) { speedSamples[cacheKey] = current }
         return buses
     }
 
-    private data class SpeedSample(val lat: Double, val lng: Double, val timeMs: Long)
+    /**
+     * 单辆车速度解析 + 停场帧计数（06 §4.1）：
+     * - b_sd 有效（>0）直接用；
+     * - 无效时若上一帧可比（2–120s）且位移合理，按位移估算；
+     * - 位移 < 30m 且无下发速度 → 停场帧 +1，累计 ≥ [PARKED_FRAMES] 判为停场车。
+     */
+    private fun resolveBusSpeed(
+        key: String,
+        plate: String,
+        lat: Double,
+        lng: Double,
+        reported: Double,
+        nowMs: Long
+    ): Triple<Double, SpeedSample, Boolean> {
+        val previous = synchronized(speedLock) { speedSamples[key] }?.get(plate)
+        var speedKmh = reported.takeIf { it > 0.0 } ?: 0.0
+        var still = 0
+        if (previous != null) {
+            val dtSec = (nowMs - previous.timeMs) / 1000.0
+            val meters = RouteProjectionMath.calculateDistanceMeters(previous.lat, previous.lng, lat, lng)
+            if (dtSec in SPEED_DT_MIN..SPEED_DT_MAX && meters != null) {
+                if (meters < PARKED_MOVE_METERS && reported <= 0.0) {
+                    still = (previous.stillFrames + 1).coerceAtMost(PARKED_FRAMES)
+                } else {
+                    val kmh = (meters / dtSec) * 3.6
+                    if (kmh in SPEED_NOISE_KMH..SPEED_MAX_KMH) speedKmh = kmh
+                }
+            }
+        }
+        return Triple(speedKmh, SpeedSample(lat, lng, nowMs, still), still >= PARKED_FRAMES)
+    }
 
-    /** 每个线路方向一份上一帧位置（内存态，进程内有效；车牌不落盘）。getLineDetail 可能并发，访问走 [speedLock] */
+    private fun storeSample(key: String, plate: String, sample: SpeedSample) {
+        synchronized(speedLock) {
+            val map = speedSamples[key]?.toMutableMap() ?: mutableMapOf()
+            map[plate] = sample
+            speedSamples[key] = map
+        }
+    }
+
+    private data class SpeedSample(val lat: Double, val lng: Double, val timeMs: Long, val stillFrames: Int = 0)
+
+    /** 每个线路方向一份上一帧位置（内存态，进程内有效；车牌不落盘）。线路详情 / 站点状态两条路径共用，访问走 [speedLock] */
     private val speedSamples = HashMap<String, Map<String, SpeedSample>>()
     private val speedLock = SynchronizedObject()
 

@@ -1,5 +1,6 @@
 package com.trackr.core.network.provider.meishan
 
+import com.trackr.core.model.LineOperatingState
 import com.trackr.core.model.TransitCity
 import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
@@ -27,20 +28,23 @@ private val lineListJson = """
     ]}
 """.trimIndent()
 
-private val stopLinesJson = """
+private fun stopLinesJson(
+    firstLast: Pair<String, String> = "06:30" to "19:00",
+    busAtStop: Boolean = false
+): String = """
     {"code":101,"result":[
       {"l_id":1,"l_name":"1路","l_copy_id":11,"state":0,
        "l_sxpz":"眉山东站:千禾味业","l_xxpz":"千禾味业:眉山东站",
-       "start_time":"06:30","end_time":"19:00",
-       "xx_start_time":"06:30","xx_end_time":"19:00","areaId":1,
+       "start_time":"${firstLast.first}","end_time":"${firstLast.second}",
+       "xx_start_time":"${firstLast.first}","xx_end_time":"${firstLast.second}","areaId":1,
        "siteList":[
          {"s_id":1,"s_name":"眉山东站","latitude":30.06,"longitude":103.82,"index":1},
          {"s_id":2,"s_name":"紫竹西街._跑法2","latitude":30.07,"longitude":103.83,"index":2},
          {"s_id":3,"s_name":"千禾味业","latitude":30.08,"longitude":103.84,"index":3}
        ],
        "busList":[
-         {"b_id":0,"l_copy_id":11,"b_plate_num":"川Z10091D","index":1,"state":0,
-          "isArriveSite":0,"b_latitude":30.062,"b_longitude":103.821,"b_sd":0.0,"areaId":1}
+         {"b_id":0,"l_copy_id":11,"b_plate_num":"川Z10091D","index":${if (busAtStop) 2 else 1},"state":0,
+          "isArriveSite":${if (busAtStop) 1 else 0},"b_latitude":30.062,"b_longitude":103.821,"b_sd":0.0,"areaId":1}
        ]}
     ]}
 """.trimIndent()
@@ -55,8 +59,14 @@ private val nearbyJson = """
 """.trimIndent()
 
 /** 线路详情的车辆位置按命中次数前移，模拟车辆在 3 秒里走了约 30 米（≈36 km/h）；b_sd 可注入；可选附带场站车 */
-private fun lineDetailJson(hit: Int, bsd: Double = 0.0, withYardBuses: Boolean = false): String {
-    val lat = if (hit <= 1) "30.065" else "30.06527"
+private fun lineDetailJson(
+    hit: Int,
+    bsd: Double = 0.0,
+    withYardBuses: Boolean = false,
+    firstLast: Pair<String, String> = "06:30" to "19:00",
+    latOverride: String? = null
+): String {
+    val lat = latOverride ?: if (hit <= 1) "30.065" else "30.06527"
     // 场站车：index=0、isArriveSite=1、速度 0（实测运营时段大量存在于起点站 / 车场）
     val yardBuses = if (withYardBuses) {
         """,
@@ -69,8 +79,8 @@ private fun lineDetailJson(hit: Int, bsd: Double = 0.0, withYardBuses: Boolean =
     {"code":101,"result":{
       "l_id":1,"l_name":"1路","l_copy_id":11,"state":0,
       "l_sxpz":"眉山东站:千禾味业","l_xxpz":"千禾味业:眉山东站",
-      "start_time":"06:30","end_time":"19:00",
-      "xx_start_time":"06:30","xx_end_time":"19:00",
+      "start_time":"${firstLast.first}","end_time":"${firstLast.second}",
+      "xx_start_time":"${firstLast.first}","xx_end_time":"${firstLast.second}",
       "l_remark":"票价 1 元",
       "siteList":[
         {"s_id":1,"s_name":"眉山东站","latitude":30.06,"longitude":103.82,"index":1},
@@ -104,6 +114,16 @@ class MeishanTransitProviderTest {
         /** 线路详情里附带场站车（index=0）：模拟未发车 / 归场车辆 */
         var withYardBuses = false
 
+        /** 线路详情首末班（默认 06:30–19:00，在 fixedClock 的 18:00 北京时间之内） */
+        var byIdFirstLast: Pair<String, String> = "06:30" to "19:00"
+
+        /** 线路详情车辆位置固定（不随命中前移）：模拟停场不动 */
+        var byIdLatOverride: String? = null
+
+        /** `/line/site` 首/末班 + 车辆是否停在本站（isArriveSite=1） */
+        var siteFirstLast: Pair<String, String> = "06:30" to "19:00"
+        var siteBusAtStop = false
+
         /** `/line/site` 前 N 次返回业务失败（模拟网络抖动），用于验证重试 */
         var siteFailuresBeforeSuccess = 0
         private var siteHits = 0
@@ -113,13 +133,15 @@ class MeishanTransitProviderTest {
             hits[path] = (hits[path] ?: 0) + 1
             when (path) {
                 "list" -> MockReply(lineListJson)
-                "byId" -> MockReply(lineDetailJson(++byIdHits, byIdBsd, withYardBuses))
+                "byId" -> MockReply(
+                    lineDetailJson(++byIdHits, byIdBsd, withYardBuses, byIdFirstLast, byIdLatOverride)
+                )
                 "site" -> {
                     siteHits++
                     if (siteHits <= siteFailuresBeforeSuccess) {
                         MockReply("""{"code":500}""")
                     } else {
-                        MockReply(stopLinesJson)
+                        MockReply(stopLinesJson(siteFirstLast, siteBusAtStop))
                     }
                 }
                 "siteAndRedPacket" -> MockReply(nearbyJson)
@@ -259,6 +281,50 @@ class MeishanTransitProviderTest {
         assertEquals(1, detail.buses.size, "场站车应被过滤")
         assertEquals("川Z10091D", detail.buses.single().plateOrFleetNo)
         assertTrue(detail.buses.none { it.order < 1 })
+    }
+
+    @Test
+    fun lineDetail_offHours_returnsNoBusesAndWaitingState() = runBlocking {
+        // 未发车时段（首班 19:30 > 当前 18:00）：服务端仍返回归场车快照，但它们不是在途车
+        val backend = MockBackend()
+        backend.byIdFirstLast = "19:30" to "22:00"
+        backend.withYardBuses = true
+        val detail = newProvider(backend).getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+
+        assertEquals(LineOperatingState.WAITING, detail.operatingState)
+        assertTrue(detail.buses.isEmpty(), "非运营时段车辆列表应为空，不能把归场车当在途")
+    }
+
+    @Test
+    fun stopStatuses_offHours_showsWaitingInsteadOfArrived() = runBlocking {
+        // 车停在本站（isArriveSite=1）但还没到首班：应显示「等待发车」而不是「已到站」
+        val backend = MockBackend()
+        backend.siteFirstLast = "19:30" to "22:00"
+        backend.siteBusAtStop = true
+        val stops = newProvider(backend).getStopDetail(city, StopDetailRequest(stopId = "ms-st:2"))
+
+        assertEquals("等待发车", stops[0].lines.single().statusText)
+    }
+
+    @Test
+    fun lineDetail_parkedBus_filteredAfterStillFrames() = runBlocking {
+        // 运营时段内连续 5 帧位移 <30m 且无下发速度 → 停场车，从车辆列表剔除（06 §4.1）
+        var now = 0L
+        val backend = MockBackend()
+        backend.byIdLatOverride = "30.065" // 每帧位置不变
+        val provider = MeishanTransitProvider(
+            client = MeishanTransitClient(backend.httpClient),
+            wallClock = fixedClock,
+            monotonicClock = { now }
+        )
+        val request = LineDetailRequest(lineId = "ms:1_1_0")
+
+        repeat(5) { // 停场帧 0..4：还没到阈值，车辆仍在列表
+            now += 15_000
+            assertEquals(1, provider.getLineDetail(city, request).buses.size, "第 ${it + 1} 帧不应剔除")
+        }
+        now += 15_000 // 第 6 帧：停场帧满 5 → 剔除
+        assertTrue(provider.getLineDetail(city, request).buses.isEmpty(), "连续 5 帧不动应判停场")
     }
 
     @Test
