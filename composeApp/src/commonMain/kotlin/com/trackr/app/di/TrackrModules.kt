@@ -4,6 +4,8 @@ import com.trackr.core.data.local.LocalMigrationFlags
 import com.trackr.core.data.repository.HomeCoordinates
 import com.trackr.core.data.repository.MeishanLineRepository
 import com.trackr.core.data.repository.DefaultMeishanLineRepository
+import com.trackr.core.data.repository.DefaultMeishanPushRepository
+import com.trackr.core.data.repository.MeishanPushRepository
 import com.trackr.core.data.repository.RoutePlanRepository
 import com.trackr.core.data.route.DefaultRoutePlanRepository
 import com.trackr.core.data.route.FavoriteGroupSelection
@@ -32,6 +34,7 @@ val routeDataModule: Module = module {
     single<RoutePlanRepository> { DefaultRoutePlanRepository(gateway = get(), alignment = get(), coordinator = get()) }
     // 眉山官方线路列表（眉山特化：/line/list 全量线路）
     single<MeishanLineRepository> { DefaultMeishanLineRepository(client = get()) }
+    single<MeishanPushRepository> { DefaultMeishanPushRepository(client = get(), provider = get()) }
     single { FavoriteGroupSelection() }
     // 首页当前坐标，给搜索用（拆分前搜索直接读首页状态）
     single { HomeCoordinates() }

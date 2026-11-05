@@ -22,6 +22,7 @@ kotlin {
             implementation(kotlin("test"))
             implementation(project(":core:testing"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.ktor.client.mock)
         }
         getByName("androidHostTest").dependencies {
             implementation(kotlin("test-junit"))

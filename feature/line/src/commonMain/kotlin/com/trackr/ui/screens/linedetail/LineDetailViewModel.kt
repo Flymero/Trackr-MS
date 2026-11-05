@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.trackr.core.data.local.LineStopsCache
 import com.trackr.core.data.local.NoLineStopsCache
 import com.trackr.core.data.repository.FavoritesRepository
+import com.trackr.core.data.repository.MeishanPushAvailability
+import com.trackr.core.data.repository.MeishanPushRepository
 import com.trackr.core.data.repository.RealtimeRepository
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
@@ -38,8 +40,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -158,11 +164,16 @@ class LineDetailViewModel(
     initialLineId: String,
     private val initialTargetOrder: Int? = null,
     private val initialStationId: String? = null,
-    private val initialSource: DataSourceType = if (initialLineId.startsWith("mg:")) DataSourceType.MYGOLBS else DataSourceType.CHELAILE,
+    private val initialSource: DataSourceType = when {
+        initialLineId.startsWith("ms:") -> DataSourceType.MEISHAN
+        initialLineId.startsWith("mg:") -> DataSourceType.MYGOLBS
+        else -> DataSourceType.CHELAILE
+    },
     private val lineNameHint: String = "",
     private val settings: SettingsRepository,
     private val favorites: FavoritesRepository,
     private val realtime: RealtimeRepository,
+    private val pushRepository: MeishanPushRepository? = null,
     /** 定时提醒仓库（顶栏时钟 → 定时提醒弹窗保存用） */
     private val reminderRepository: IScheduledReminderRepository,
     /** 追踪会话（页面据此判断「本站是否正在追踪」） */
@@ -210,6 +221,14 @@ class LineDetailViewModel(
     /** 最近一次发起刷新的时刻（[clockMillis]），null 表示尚未请求过 */
     @Volatile
     private var lastRefreshAtMillis: Long? = null
+
+    private var pushJob: Job? = null
+    private var pushKey: Pair<String, Int?>? = null
+    private var pushOnline = false
+    private var screenResumed = false
+    private var pushGeneration = 0L
+    private var httpGeneration = 0L
+    private var pushRevision = 0L
 
     /**
      * 每条线路方向的时刻表缓存，避免 10 秒轮询时反复拉取。
@@ -359,6 +378,10 @@ class LineDetailViewModel(
      */
     private suspend fun fetchLineDetail(isInitial: Boolean = false, targetOrderOverride: Int? = null) {
         activeLoads.incrementAndFetch()
+        val generation = ++httpGeneration
+        val requestedLineId = currentLineId
+        val requestedSource = currentSource
+        val revision = pushRevision
         lastRefreshAtMillis = clockMillis()
         try {
             if (isInitial) {
@@ -374,13 +397,18 @@ class LineDetailViewModel(
 
             val result = realtime.getLineDetail(
                 city = currentCity,
-                lineId = currentLineId,
+                lineId = requestedLineId,
                 targetOrder = targetOrder,
-                stationId = initialStationId,
-                source = currentSource,
+                stationId = _uiState.value.selectedStop?.stopId ?: initialStationId,
+                source = requestedSource,
                 lineNameHint = lineNameHint
             )
 
+            if (generation != httpGeneration || requestedLineId != currentLineId) return
+            if (revision != pushRevision) {
+                _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
+                return
+            }
             result.onSuccess { detail ->
                 val selected = _uiState.value.selectedStop
                 // 初次加载或无选中站时，计算默认选中的候车站（首车前面一站）；用户已经在缓存的站表上点过站就保留
@@ -395,6 +423,7 @@ class LineDetailViewModel(
                 }
 
                 applyDetail(detail, targetStop)
+                startPush(detail, targetStop)
 
                 refreshFallbackNextDeparture(detail, targetStop)
 
@@ -448,6 +477,53 @@ class LineDetailViewModel(
         checkFavoriteState(favorites.favorites.value)
         refreshFavoriteGroup(favorites.favoriteItems.value)
         writeStopsCache(newStatic)
+    }
+
+    private fun startPush(detail: BusLineDetail, stop: BusStop?) {
+        val repository = pushRepository ?: return
+        if (!screenResumed || detail.line.source != DataSourceType.MEISHAN || detail.stops.isEmpty()) return
+        val key = detail.line.lineId to stop?.order
+        if (pushKey == key && pushJob?.isActive == true) return
+        stopPush()
+        pushKey = key
+        val generation = pushGeneration
+        pushJob = viewModelScope.launch {
+            repository.stream(detail, stop?.order, stop?.stopId)
+                .catch {
+                    if (generation == pushGeneration) setPushOnline(false)
+                }
+                .onCompletion {
+                    if (generation == pushGeneration) setPushOnline(false)
+                }
+                .collect { update ->
+                    if (generation != pushGeneration || currentLineId != key.first || !screenResumed) return@collect
+                    val fresh = update.detail
+                    if (fresh != null && fresh.line.lineId == currentLineId) {
+                        pushRevision++
+                        lastRefreshAtMillis = clockMillis()
+                        applyDetail(fresh, _uiState.value.selectedStop)
+                    }
+                    setPushOnline(update.availability == MeishanPushAvailability.ONLINE && (fresh != null || pushOnline))
+                }
+        }
+    }
+
+    private fun setPushOnline(online: Boolean) {
+        val wasOnline = pushOnline
+        pushOnline = online
+        if (!screenResumed || !enableAutoPolling) return
+        pollingCoordinator.setActive(!online)
+        if (wasOnline && !online && activeLoads.load() == 0) {
+            loadLineDetail(isInitial = false)
+        }
+    }
+
+    private fun stopPush() {
+        pushGeneration++
+        pushJob?.cancel()
+        pushJob = null
+        pushKey = null
+        pushOnline = false
     }
 
     private fun writeStopsCache(static: LineStatic) {
@@ -524,7 +600,13 @@ class LineDetailViewModel(
      * 设置轮询是否激活（生命周期感知或显式开关）
      */
     fun setPollingActive(active: Boolean) {
-        pollingCoordinator.setActive(active)
+        if (!active) {
+            onScreenPaused()
+            return
+        }
+        screenResumed = true
+        currentDetail?.let { startPush(it, _uiState.value.selectedStop) }
+        pollingCoordinator.setActive(!pushOnline)
     }
 
     /**
@@ -532,8 +614,10 @@ class LineDetailViewModel(
      * 测试或预览中 enableAutoPolling = false 时不做任何事。
      */
     fun onScreenResumed() {
+        screenResumed = true
+        currentDetail?.let { startPush(it, _uiState.value.selectedStop) }
         if (!enableAutoPolling) return
-        pollingCoordinator.setActive(true)
+        pollingCoordinator.setActive(!pushOnline)
         val last = lastRefreshAtMillis ?: return
         if (activeLoads.load() == 0 && clockMillis() - last >= POLL_INTERVAL_SECONDS * 1000L) {
             pollingCoordinator.restart()
@@ -545,6 +629,8 @@ class LineDetailViewModel(
      * 页面离开前台（Lifecycle PAUSED / 移出组合）：停止轮询，进行中的轮询请求随之取消。
      */
     fun onScreenPaused() {
+        screenResumed = false
+        stopPush()
         pollingCoordinator.setActive(false)
     }
 
@@ -578,6 +664,7 @@ class LineDetailViewModel(
      * 选中站点：以该站为 targetOrder 计算精确到站 ETA
      */
     fun selectStop(stop: BusStop) {
+        httpGeneration++
         userPickedStop = true
         _uiState.update {
             it.copy(
@@ -588,6 +675,8 @@ class LineDetailViewModel(
         }
         checkFavoriteState(favorites.favorites.value)
         refreshFavoriteGroup(favorites.favoriteItems.value)
+        currentDetail?.let { startPush(it, stop) }
+        if (!pushOnline && screenResumed && enableAutoPolling) pollingCoordinator.setActive(true)
         // 选站即刷新，同时重新计时，避免紧接着轮询又发一次
         pollingCoordinator.restart()
         loadLineDetail(isInitial = false, targetOrderOverride = stop.order)
@@ -632,11 +721,13 @@ class LineDetailViewModel(
         val reverse = detail.reverseDirection ?: return
         val currentStop = _uiState.value.selectedStop ?: return
 
+        stopPush()
+        val switchGeneration = ++httpGeneration
+        currentLineId = reverse.lineId
+        currentSource = reverse.source
+        if (screenResumed && enableAutoPolling) pollingCoordinator.setActive(true)
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-
-            currentLineId = reverse.lineId
-            currentSource = reverse.source
 
             val currentCity = settings.selectedCity.value
             val reverseResult = realtime.getLineDetail(
@@ -646,6 +737,7 @@ class LineDetailViewModel(
                 lineNameHint = reverse.name
             )
 
+            if (switchGeneration != httpGeneration || currentLineId != reverse.lineId) return@launch
             reverseResult.onSuccess { revDetail ->
                 val oppositeStop = RouteProjectionMath.findOppositeStop(
                     currentStop = currentStop,
@@ -653,6 +745,7 @@ class LineDetailViewModel(
                 ) ?: calculateDefaultStop(revDetail)
 
                 applyDetail(revDetail, oppositeStop)
+                startPush(revDetail, oppositeStop)
                 _uiState.update { it.copy(panelMode = PanelMode.STATION_CARD, followedBusId = null) }
 
                 // 若找到了对应站，立即拉取到该站的精确 ETA
@@ -859,6 +952,8 @@ class LineDetailViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        screenResumed = false
+        stopPush()
         pausePolling()
         // 离开线路页就别再读了
         announcer.stop()

@@ -131,6 +131,15 @@ class KoinGraphVerifyTest {
         )
     }
 
+    @Test
+    fun meishanPush_dependenciesAreSingletons() {
+        val koin = GlobalContext.get()
+        val client = koin.get<com.trackr.core.network.remote.meishan.push.MeishanPushClientApi>()
+        val repository = koin.get<com.trackr.core.data.repository.MeishanPushRepository>()
+        assertTrue(client === koin.get<com.trackr.core.network.remote.meishan.push.MeishanPushClientApi>())
+        assertTrue(repository === koin.get<com.trackr.core.data.repository.MeishanPushRepository>())
+    }
+
     /** 带参数的定义：按类型给一份样例参数 */
     private fun parametersFor(type: KClass<*>): ParametersHolder = when (type) {
         LineDetailViewModel::class -> parametersOf(

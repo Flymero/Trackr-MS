@@ -1,10 +1,14 @@
 package com.trackr.core.network.provider.meishan
 
+import com.trackr.core.domain.math.RouteProjectionMath
+import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.model.LineOperatingState
 import com.trackr.core.model.TransitCity
+import com.trackr.core.network.json.JSONArray
 import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
 import com.trackr.core.network.remote.meishan.MeishanTransitClient
+import com.trackr.core.network.remote.meishan.push.MeishanPushFrame
 import com.trackr.core.network.testing.MockReply
 import com.trackr.core.network.testing.mockHttpClient
 import kotlin.time.Clock
@@ -13,7 +17,46 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.math.roundToInt
+
+/** network 不依赖 :core:testing，测试内同时控制墙钟和单调时钟。 */
+private class FakeClock : Clock, MonotonicClock {
+    private var instant = Instant.parse("2026-11-04T10:00:00Z")
+    private var elapsed = 0L
+
+    override fun now(): Instant = instant
+    override fun elapsedMillis(): Long = elapsed
+
+    fun advanceBy(millis: Long) {
+        instant = Instant.fromEpochMilliseconds(instant.toEpochMilliseconds() + millis)
+        elapsed += millis
+    }
+
+    fun setWallClock(value: String) {
+        instant = Instant.parse(value)
+    }
+}
+
+private fun pushBus(
+    plate: String = "川Z10091D",
+    index: Int = 2,
+    lat: Double = 30.065,
+    speed: Double = 0.0,
+    id: Int = 0
+): String = """
+    {"b_id":$id,"b_plate_num":"$plate","index":$index,"isArriveSite":1,
+     "b_latitude":$lat,"b_longitude":103.825,"b_sd":$speed}
+""".trimIndent()
+
+private fun pushFrame(
+    vararg buses: String,
+    time: String = "2026-11-04 18:00:00",
+    tag: String = "11_0"
+): MeishanPushFrame = MeishanPushFrame(tag, time, JSONArray(buses.joinToString(",", "[", "]")))
 
 /** 北京时间 18:00（10:00Z）：在 06:30–19:00 运营时段内 */
 private val fixedClock = object : Clock {
@@ -107,6 +150,7 @@ class MeishanTransitProviderTest {
     private class MockBackend {
         val hits = HashMap<String, Int>()
         var byIdHits = 0
+        var listJson = lineListJson
 
         /** 注入车辆 b_sd（服务端下发的实时速度）；默认 0 模拟字段无效 */
         var byIdBsd = 0.0
@@ -132,7 +176,7 @@ class MeishanTransitProviderTest {
             val path = request.encodedPath.substringAfterLast('/')
             hits[path] = (hits[path] ?: 0) + 1
             when (path) {
-                "list" -> MockReply(lineListJson)
+                "list" -> MockReply(listJson)
                 "byId" -> MockReply(
                     lineDetailJson(++byIdHits, byIdBsd, withYardBuses, byIdFirstLast, byIdLatOverride)
                 )
@@ -156,6 +200,200 @@ class MeishanTransitProviderTest {
             wallClock = fixedClock,
             monotonicClock = { nowMillis }
         )
+
+    private fun newProvider(backend: MockBackend, clock: FakeClock): MeishanTransitProvider =
+        MeishanTransitProvider(MeishanTransitClient(backend.httpClient), clock, clock)
+
+    @Test
+    fun pushTag_usesListCopyIdAndCachesPerArea() = runBlocking {
+        val backend = MockBackend()
+        val provider = newProvider(backend)
+        assertEquals("11_0_1", provider.pushTag("ms:1_1_0"))
+        assertEquals("11_1_1", provider.pushTag("ms:1_1_1"))
+        assertEquals("11_0_2", provider.pushTag("ms:2_1_0"))
+        assertNull(provider.pushTag("ms:1_99_0"))
+        assertNull(provider.pushTag("ms:1_1_2"))
+        assertNull(provider.pushTag("not-a-meishan-line"))
+        assertEquals(2, backend.hits["list"], "每个区域只请求一次线路列表")
+
+        for (copyId in listOf(0, -1)) {
+            val missingCopy = MockBackend().apply {
+                listJson = lineListJson.replace("\"l_copy_id\":11", "\"l_copy_id\":$copyId")
+            }
+            assertNull(newProvider(missingCopy).pushTag("ms:1_1_0"), "无有效 copyId 时退回 HTTP")
+        }
+    }
+
+    @Test
+    fun pushFrame_requiresExplicitCopyIdTagAndRejectsLIdFallback() = runBlocking {
+        val backend = MockBackend()
+        val provider = newProvider(backend)
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val expected = assertNotNull(provider.pushTag(base.line.lineId)).substringBeforeLast('_')
+        val frame = pushFrame(pushBus(speed = 36.0))
+        assertEquals("11_0", expected) // copyId=11 != lId=1
+        assertNull(provider.applyPushFrame(base, frame))
+        assertNull(provider.applyPushFrame(base, frame, expectedTag = ""))
+        assertNull(provider.applyPushFrame(base, frame.copy(tag = "1_0"), expectedTag = expected))
+        assertNull(provider.applyPushFrame(base, frame.copy(tag = "11_1"), expectedTag = expected))
+        assertNull(provider.applyPushFrame(base, frame, expectedTag = "11_0_1"))
+        val detail = assertNotNull(provider.applyPushFrame(base, frame, expectedTag = expected))
+        assertEquals(36.0, detail.buses.single().speedKmh)
+        assertEquals(base.line, detail.line)
+        assertEquals(base.stops, detail.stops)
+        assertEquals(base.reverseDirection, detail.reverseDirection)
+        assertEquals(base.statusDescription, detail.statusDescription)
+        assertEquals(mapOf("byId" to 1, "list" to 1), backend.hits, "套用推送不发 HTTP")
+    }
+
+    @Test
+    fun pushFrame_reportedSpeedWinsAndReplayRecalculatesOnlyTargetEta() = runBlocking {
+        val clock = FakeClock()
+        val provider = newProvider(MockBackend(), clock)
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        clock.advanceBy(3_000)
+        val frame = pushFrame(pushBus(lat = 30.06554, speed = 25.0))
+        val terminal = assertNotNull(provider.applyPushFrame(base, frame, expectedTag = "11_0"))
+        val bus = terminal.buses.single()
+        assertEquals(25.0, bus.speedKmh, "有效 b_sd 不应被位移速度覆盖")
+        val meters = assertNotNull(RouteProjectionMath.calculateDistanceMeters(30.06554, 103.825, 30.08, 103.84))
+        assertEquals(meters, bus.distanceToTargetMeters)
+        assertEquals((meters / (25.0 / 3.6)).roundToInt(), bus.etaSeconds)
+        clock.advanceBy(15_000)
+        val atBus = assertNotNull(provider.applyPushFrame(base, frame, targetOrder = 2, expectedTag = "11_0"))
+        assertEquals(0, atBus.buses.single().etaSeconds)
+        assertEquals(0, atBus.buses.single().distanceToTargetMeters)
+        val passed = assertNotNull(provider.applyPushFrame(base, frame, stationId = "ms-st:1", expectedTag = "11_0"))
+        assertNull(passed.buses.single().distanceToTargetMeters)
+        assertEquals(-1, passed.buses.single().etaSeconds, "缓存不能带入另一目标站的 ETA")
+        val byId = assertNotNull(provider.applyPushFrame(base, frame, stationId = "ms-st:3", expectedTag = "11_0"))
+        assertEquals(bus, byId.buses.single(), "重放应保留同一帧解析出的速度和 ID")
+        assertEquals(clock.now().toEpochMilliseconds(), byId.updatedAtMillis)
+    }
+
+    @Test
+    fun pushFrame_missingSpeedUsesDisplacementAndThenDefaultEta() = runBlocking {
+        val clock = FakeClock()
+        val provider = newProvider(MockBackend(), clock)
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        clock.advanceBy(3_000)
+        val frame = pushFrame(pushBus(lat = 30.06554))
+        val measured = assertNotNull(provider.applyPushFrame(base, frame, expectedTag = "11_0")).buses.single()
+        val traveled = assertNotNull(RouteProjectionMath.calculateDistanceMeters(30.065, 103.825, 30.06554, 103.825))
+        assertEquals(traveled / 3.0 * 3.6, measured.speedKmh, 0.001)
+        assertEquals((assertNotNull(measured.distanceToTargetMeters) / (measured.speedKmh / 3.6)).roundToInt(), measured.etaSeconds)
+        clock.advanceBy(121_000)
+        val stale = assertNotNull(provider.applyPushFrame(
+            base, pushFrame(pushBus(lat = 30.066), time = "2026-11-04 18:02:04"), expectedTag = "11_0"
+        )).buses.single()
+        assertEquals(0.0, stale.speedKmh)
+        assertEquals((assertNotNull(stale.distanceToTargetMeters) / 4.0).roundToInt(), stale.etaSeconds)
+    }
+
+    @Test
+    fun pushFrame_filtersIndexZeroAndKeepsBusIdentityAcrossMovementAndReordering() = runBlocking {
+        val clock = FakeClock()
+        val provider = newProvider(MockBackend(), clock)
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val first = assertNotNull(provider.applyPushFrame(base, pushFrame(
+            pushBus(index = 0, plate = "场站车"), pushBus(index = 1), pushBus(plate = "川Z20000D", index = 2)
+        ), expectedTag = "11_0"))
+        assertEquals(2, first.buses.size)
+        assertTrue(first.buses.all { it.order > 0 })
+        clock.advanceBy(3_000)
+        val moved = assertNotNull(provider.applyPushFrame(base, pushFrame(
+            pushBus(plate = "川Z20000D", index = 3), pushBus(index = 2, lat = 30.06554),
+            time = "2026-11-04 18:00:03"
+        ), expectedTag = "11_0"))
+        for (bus in first.buses) {
+            assertEquals(bus.busId, moved.buses.single { it.plateOrFleetNo == bus.plateOrFleetNo }.busId)
+        }
+        assertEquals(base.buses.single().busId, moved.buses.single { it.plateOrFleetNo == "川Z10091D" }.busId)
+        val stopBus = provider.getStopDetail(city, StopDetailRequest(stopId = "ms-st:2"))
+            .single().lines.single().approachingBuses.single()
+        assertEquals(base.buses.single().busId, stopBus.busId, "HTTP 站点、线路和推送使用同一车辆身份")
+    }
+
+    @Test
+    fun pushFrame_missingPlateUsesPositiveIdOrSeparateAnonymousSlots() = runBlocking {
+        val provider = newProvider(MockBackend())
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val first = assertNotNull(provider.applyPushFrame(base, pushFrame(
+            pushBus(plate = "", id = 42), pushBus(plate = ""), pushBus(plate = "", lat = 30.07)
+        ), expectedTag = "11_0"))
+        assertEquals(3, first.buses.map { it.busId }.toSet().size)
+        assertNotEquals(first.buses[1].busId, first.buses[2].busId)
+        val moved = assertNotNull(provider.applyPushFrame(base, pushFrame(
+            pushBus(plate = "", id = 42, index = 3, lat = 30.066),
+            pushBus(plate = "", index = 3), pushBus(plate = "", index = 3, lat = 30.071),
+            time = "2026-11-04 18:00:03"
+        ), expectedTag = "11_0"))
+        assertEquals(first.buses.map { it.busId }, moved.buses.map { it.busId })
+    }
+
+    @Test
+    fun pushFrame_rechecksServiceHoursOnEveryReplay() = runBlocking {
+        val clock = FakeClock()
+        clock.setWallClock("2026-11-04T22:29:00Z") // 北京时间次日 06:29
+        val provider = newProvider(MockBackend(), clock)
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val frame = pushFrame(pushBus(speed = 36.0))
+        assertEquals(LineOperatingState.WAITING, base.operatingState)
+        val waiting = assertNotNull(provider.applyPushFrame(base, frame, expectedTag = "11_0"))
+        assertTrue(waiting.buses.isEmpty())
+        clock.setWallClock("2026-11-04T22:30:00Z") // 首班边界
+        val running = assertNotNull(provider.applyPushFrame(waiting, frame, expectedTag = "11_0"))
+        assertEquals(LineOperatingState.RUNNING, running.operatingState)
+        assertEquals(1, running.buses.size)
+        clock.setWallClock("2026-11-05T11:01:00Z") // 北京时间 19:01
+        val ended = assertNotNull(provider.applyPushFrame(running, frame, expectedTag = "11_0"))
+        assertEquals(LineOperatingState.ENDED, ended.operatingState)
+        assertTrue(ended.buses.isEmpty())
+        assertEquals(clock.now().toEpochMilliseconds(), ended.updatedAtMillis)
+    }
+
+    @Test
+    fun pushFrame_cacheSeparatesAreasWithTheSameTagAndTime() = runBlocking {
+        val provider = newProvider(MockBackend())
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val otherArea = base.copy(line = base.line.copy(lineId = "ms:2_1_0"))
+        val frame = pushFrame(pushBus(speed = 25.0))
+        val first = assertNotNull(provider.applyPushFrame(base, frame, expectedTag = "11_0"))
+        val second = assertNotNull(provider.applyPushFrame(otherArea, frame, expectedTag = "11_0"))
+        assertTrue(first.buses.single().busId.startsWith("msb:1:1:0:"))
+        assertTrue(second.buses.single().busId.startsWith("msb:2:1:0:"))
+    }
+
+    @Test
+    fun pushFrame_replayDoesNotAdvanceOrResetParkedCounter() = runBlocking {
+        val clock = FakeClock()
+        val backend = MockBackend()
+        val provider = newProvider(backend, clock)
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val frames = (1..5).map { n -> pushFrame(pushBus(), time = "2026-11-04 18:00:${(n * 3).toString().padStart(2, '0')}") }
+        for (i in 0..3) {
+            clock.advanceBy(3_000)
+            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frames[i], expectedTag = "11_0")).buses.size)
+            // 同时订阅的另一个页面在相同时间拿相同帧，不能把 stillFrames 重置为 0。
+            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frames[i], targetOrder = 2, expectedTag = "11_0")).buses.size)
+            // 稍后换站重放也不能把 stillFrames 多加一次。
+            clock.advanceBy(3_000)
+            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frames[i], stationId = "ms-st:3", expectedTag = "11_0")).buses.size)
+            // 旧帧重放不能回写旧的速度样本。
+            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frames[0], expectedTag = "11_0")).buses.size)
+        }
+        clock.advanceBy(3_000)
+        val parked = assertNotNull(provider.applyPushFrame(base, frames[4], expectedTag = "11_0"))
+        assertTrue(parked.buses.isEmpty(), "HTTP 首样本后五个独立静止帧才剔除")
+        clock.advanceBy(3_000)
+        assertTrue(assertNotNull(provider.applyPushFrame(base, frames[4], expectedTag = "11_0")).buses.isEmpty())
+        clock.advanceBy(3_000)
+        val resumed = assertNotNull(provider.applyPushFrame(base, pushFrame(
+            pushBus(speed = 18.0), time = "2026-11-04 18:00:30"
+        ), expectedTag = "11_0"))
+        assertEquals(18.0, resumed.buses.single().speedKmh, "有效下发速度应解除停场")
+        assertEquals(1, backend.hits["byId"])
+    }
 
     @Test
     fun lineSearch_parsesAndCachesPerArea() = runBlocking {

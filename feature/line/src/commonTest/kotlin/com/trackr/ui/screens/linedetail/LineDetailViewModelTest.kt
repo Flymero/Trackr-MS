@@ -1,9 +1,16 @@
 package com.trackr.ui.screens.linedetail
 
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.trackr.core.data.local.CachedLineStops
 import com.trackr.core.data.local.LineStopsCache
 import com.trackr.core.data.repository.DefaultTrackingRepository
 import com.trackr.core.data.repository.InMemoryTrackingSessionStore
+import com.trackr.core.data.repository.MeishanPushAvailability
+import com.trackr.core.data.repository.MeishanPushRepository
+import com.trackr.core.data.repository.MeishanPushUpdate
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.BusStop
@@ -30,6 +37,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -79,6 +91,34 @@ private class CountingLineRepository(
         lineDetailTargetOrders += targetOrder
         gate?.await()
         return delegate.getLineDetail(city, lineId, targetOrder, stationId, wgsLat, wgsLng, source, lineNameHint, directionHint)
+    }
+}
+
+/** 每次收集有独立的推送队列，旧会话在取消后仍可发帧以验证页面不会被覆盖。 */
+private class FakeMeishanPushRepository : MeishanPushRepository {
+    class Session(
+        val base: BusLineDetail,
+        val targetOrder: Int?,
+        val stationId: String?
+    ) {
+        val updates = MutableSharedFlow<MeishanPushUpdate>(extraBufferCapacity = 8)
+    }
+
+    val subscriptions = mutableListOf<Session>()
+    val cancellations = mutableListOf<Session>()
+
+    override fun stream(
+        base: BusLineDetail,
+        targetOrder: Int?,
+        stationId: String?
+    ): Flow<MeishanPushUpdate> = flow {
+        val session = Session(base, targetOrder, stationId)
+        subscriptions += session
+        try {
+            session.updates.collect { emit(it) }
+        } finally {
+            cancellations += session
+        }
     }
 }
 
@@ -161,24 +201,370 @@ class LineDetailViewModelTest {
         realtime: RealtimeRepository = fakeRepository.realtime,
         cache: LineStopsCache = FakeLineStopsCache(),
         reminders: FakeScheduledReminderRepository = FakeScheduledReminderRepository(),
-        announcer: FakeAnnouncer = FakeAnnouncer()
+        announcer: FakeAnnouncer = FakeAnnouncer(),
+        source: DataSourceType = DataSourceType.CHELAILE,
+        pushRepository: MeishanPushRepository? = null,
+        enableAutoPolling: Boolean = false,
+        clockMillis: () -> Long = { 0L }
     ): LineDetailViewModel {
         return LineDetailViewModel(
             cityId = "034",
             initialLineId = "line_001",
             initialTargetOrder = targetOrder,
             initialStationId = stationId,
-            initialSource = DataSourceType.CHELAILE,
+            initialSource = source,
             settings = fakeRepository.settings,
             favorites = fakeRepository.favoritesRepo,
             realtime = realtime,
+            pushRepository = pushRepository,
             reminderRepository = reminders,
             trackingRepository = trackingRepository,
             trackingController = trackingController,
             lineStopsCache = cache,
             announcer = announcer,
-            enableAutoPolling = false
+            enableAutoPolling = enableAutoPolling,
+            clockMillis = clockMillis
         )
+    }
+
+    private fun officialDetail(): BusLineDetail = BusLineDetail(
+        line = forwardDirection.copy(source = DataSourceType.MEISHAN),
+        reverseDirection = reverseDirection.copy(source = DataSourceType.MEISHAN),
+        stops = stops,
+        buses = buses,
+        targetOrder = 2,
+        updatedAtMillis = 0L
+    )
+
+    /** 复用现有仓库与构造工具，只在验证轮询时开启周期任务。 */
+    private suspend fun TestScope.withPushViewModel(
+        detail: BusLineDetail = officialDetail(),
+        enableAutoPolling: Boolean = true,
+        block: suspend (LineDetailViewModel, CountingLineRepository, FakeMeishanPushRepository) -> Unit
+    ) {
+        fakeRepository.lineDetailResult = Result.success(detail)
+        val realtime = CountingLineRepository(fakeRepository.realtime)
+        val push = FakeMeishanPushRepository()
+        val store = ViewModelStore()
+        val viewModel = ViewModelProvider.create(
+            store,
+            viewModelFactory {
+                initializer {
+                    createViewModel(
+                        targetOrder = 2,
+                        stationId = stops[1].stopId,
+                        source = detail.line.source,
+                        realtime = realtime,
+                        pushRepository = push,
+                        enableAutoPolling = enableAutoPolling,
+                        clockMillis = { testScheduler.currentTime }
+                    )
+                }
+            }
+        )[LineDetailViewModel::class]
+        try {
+            testScheduler.runCurrent()
+            block(viewModel, realtime, push)
+        } finally {
+            viewModel.onScreenPaused()
+            store.clear()
+            testScheduler.runCurrent()
+        }
+    }
+
+    @Test
+    fun meishanPush_validDetail_updatesBusesAndSuspendsTenSecondPolling() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, realtime, push ->
+            // 仅构造和 HTTP 加载不会订阅，必须等页面 RESUMED。
+            assertTrue(push.subscriptions.isEmpty())
+            assertEquals(listOf<Int?>(2), realtime.lineDetailTargetOrders)
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+
+            val session = push.subscriptions.single()
+            assertEquals(officialDetail(), session.base)
+            assertEquals(2, session.targetOrder)
+            assertEquals("s2", session.stationId)
+            assertEquals(1, session.updates.subscriptionCount.value)
+
+            val fresh = session.base.copy(
+                buses = listOf(buses.single().copy(busId = "tcp-new", etaSeconds = 35)),
+                updatedAtMillis = 1_000L
+            )
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
+            testScheduler.runCurrent()
+
+            assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+            assertEquals(fresh.updatedAtMillis, viewModel.uiState.value.live?.updatedAtMillis)
+            assertEquals(stops[1], viewModel.uiState.value.selectedStop)
+            assertFalse(viewModel.isPollingActive)
+
+            testScheduler.advanceTimeBy(10_000L)
+            testScheduler.runCurrent()
+            assertEquals(listOf<Int?>(2), realtime.lineDetailTargetOrders)
+            assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+            assertEquals(1, push.subscriptions.size)
+            assertTrue(push.cancellations.isEmpty())
+        }
+    }
+
+    @Test
+    fun meishanPush_disconnected_refreshesImmediatelyAndResumesTenSecondPolling() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, realtime, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            val session = push.subscriptions.single()
+            val fresh = session.base.copy(buses = listOf(buses.single().copy(busId = "tcp")))
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
+            testScheduler.runCurrent()
+            assertFalse(viewModel.isPollingActive)
+
+            testScheduler.advanceTimeBy(3_000L)
+            testScheduler.runCurrent()
+            val fallback = session.base.copy(buses = listOf(buses.single().copy(busId = "http-fallback")))
+            fakeRepository.lineDetailResult = Result.success(fallback)
+            // 断开事件不带 detail，同样需要恢复 HTTP。
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            testScheduler.runCurrent()
+            assertTrue(viewModel.isPollingActive)
+            assertEquals(listOf<Int?>(2, 2), realtime.lineDetailTargetOrders)
+            assertEquals(fallback.buses, viewModel.uiState.value.live?.buses)
+
+            testScheduler.advanceTimeBy(9_999L)
+            testScheduler.runCurrent()
+            assertEquals(2, realtime.lineDetailTargetOrders.size)
+            testScheduler.advanceTimeBy(1L)
+            testScheduler.runCurrent()
+            assertEquals(listOf<Int?>(2, 2, 2), realtime.lineDetailTargetOrders)
+
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
+            testScheduler.runCurrent()
+            assertFalse(viewModel.isPollingActive)
+            testScheduler.advanceTimeBy(10_000L)
+            testScheduler.runCurrent()
+            assertEquals(3, realtime.lineDetailTargetOrders.size)
+            assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+            assertEquals(1, push.subscriptions.size)
+        }
+    }
+
+    @Test
+    fun meishanPush_screenPaused_cancelsSubscriptionAndResumeCreatesNewSession() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, realtime, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            val old = push.subscriptions.single()
+            old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, old.base))
+            testScheduler.runCurrent()
+            val beforePause = viewModel.uiState.value
+
+            viewModel.onScreenPaused()
+            testScheduler.runCurrent()
+            assertEquals(listOf(old), push.cancellations)
+            assertEquals(0, old.updates.subscriptionCount.value)
+            assertFalse(viewModel.isPollingActive)
+
+            old.updates.emit(
+                MeishanPushUpdate(
+                    MeishanPushAvailability.ONLINE,
+                    old.base.copy(buses = listOf(buses.single().copy(busId = "paused-old")))
+                )
+            )
+            testScheduler.advanceTimeBy(10_000L)
+            testScheduler.runCurrent()
+            assertEquals(beforePause, viewModel.uiState.value)
+            assertEquals(1, realtime.lineDetailTargetOrders.size)
+
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            assertEquals(2, push.subscriptions.size)
+            val resumed = push.subscriptions.last()
+            assertEquals(1, resumed.updates.subscriptionCount.value)
+            assertEquals(0, old.updates.subscriptionCount.value)
+
+            // 重复 RESUMED 不叠加收集器。
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            assertEquals(2, push.subscriptions.size)
+            val fresh = resumed.base.copy(buses = listOf(buses.single().copy(busId = "resumed-new")))
+            resumed.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
+            testScheduler.runCurrent()
+            assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+        }
+    }
+
+    @Test
+    fun meishanPush_thirdPartySources_keepHttpPollingWithoutSubscription() = runTest(main.dispatcher) {
+        for (source in listOf(DataSourceType.CHELAILE, DataSourceType.MYGOLBS)) {
+            val detail = officialDetail().let {
+                it.copy(
+                    line = it.line.copy(source = source),
+                    reverseDirection = it.reverseDirection?.copy(source = source)
+                )
+            }
+            withPushViewModel(detail = detail) { viewModel, realtime, push ->
+                viewModel.onScreenResumed()
+                testScheduler.runCurrent()
+                assertTrue(push.subscriptions.isEmpty(), source.name)
+                assertTrue(viewModel.isPollingActive, source.name)
+                assertEquals(listOf<Int?>(2), realtime.lineDetailTargetOrders)
+
+                val fresh = detail.copy(buses = listOf(buses.single().copy(busId = "http-${source.name}")))
+                fakeRepository.lineDetailResult = Result.success(fresh)
+                testScheduler.advanceTimeBy(10_000L)
+                testScheduler.runCurrent()
+                assertEquals(listOf<Int?>(2, 2), realtime.lineDetailTargetOrders)
+                assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+                assertTrue(push.subscriptions.isEmpty(), source.name)
+                assertTrue(push.cancellations.isEmpty(), source.name)
+            }
+        }
+    }
+
+    @Test
+    fun meishanPush_selectStop_cancelsOldSessionAndRejectsItsQueuedFrames() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, realtime, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            val old = push.subscriptions.single()
+            old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, old.base))
+            testScheduler.runCurrent()
+
+            // 帧已进入旧队列但还没交给收集器，立即选站。
+            val stale = old.base.copy(buses = listOf(buses.single().copy(busId = "old-stop")))
+            assertTrue(old.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, stale)))
+            viewModel.selectStop(stops[2])
+            testScheduler.runCurrent()
+
+            assertEquals(listOf(old), push.cancellations)
+            assertEquals(0, old.updates.subscriptionCount.value)
+            assertEquals(2, push.subscriptions.size)
+            val selected = push.subscriptions.last()
+            assertEquals(3, selected.targetOrder)
+            assertEquals("s3", selected.stationId)
+            assertEquals(listOf<Int?>(2, 3), realtime.lineDetailTargetOrders)
+            assertEquals(stops[2], viewModel.uiState.value.selectedStop)
+            assertEquals(buses, viewModel.uiState.value.live?.buses)
+
+            val fresh = selected.base.copy(
+                targetOrder = 3,
+                buses = listOf(buses.single().copy(busId = "new-stop", etaSeconds = 85))
+            )
+            selected.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
+            testScheduler.runCurrent()
+            val expected = viewModel.uiState.value
+            old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, stale))
+            old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            testScheduler.runCurrent()
+
+            assertEquals(fresh.buses, expected.live?.buses)
+            assertEquals(stops[2], expected.selectedStop)
+            assertEquals(expected, viewModel.uiState.value)
+            assertFalse(viewModel.isPollingActive)
+        }
+    }
+
+    @Test
+    fun meishanPush_switchDirection_cancelsOldSessionAndRejectsItsQueuedFrames() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, _, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            val old = push.subscriptions.single()
+            old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, old.base))
+            testScheduler.runCurrent()
+            val reverseStops = stops.reversed().mapIndexed { index, stop ->
+                stop.copy(stopId = "r${index + 1}", order = index + 1)
+            }
+            val reverse = old.base.copy(
+                line = assertNotNull(old.base.reverseDirection),
+                reverseDirection = old.base.line,
+                stops = reverseStops,
+                buses = listOf(buses.single().copy(busId = "reverse-http"))
+            )
+            fakeRepository.lineDetailResult = Result.success(reverse)
+            val gate = CompletableDeferred<Unit>()
+            fakeRepository.realtime.lineDetailHook = { gate.await() }
+            try {
+                val stale = old.base.copy(buses = listOf(buses.single().copy(busId = "old-direction")))
+                assertTrue(old.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, stale)))
+                viewModel.switchOppositeDirection()
+                testScheduler.runCurrent()
+                assertEquals(listOf(old), push.cancellations)
+                assertEquals(0, old.updates.subscriptionCount.value)
+                assertTrue(viewModel.uiState.value.isLoading)
+                assertEquals(buses, viewModel.uiState.value.live?.buses)
+
+                gate.complete(Unit)
+                testScheduler.runCurrent()
+                assertEquals(2, push.subscriptions.size)
+                val reversed = push.subscriptions.last()
+                assertEquals("line_002", reversed.base.line.lineId)
+                assertEquals(2, reversed.targetOrder)
+                assertEquals("r2", reversed.stationId)
+                assertEquals(reverse.line, viewModel.uiState.value.static?.line)
+                assertEquals(reverseStops[1], viewModel.uiState.value.selectedStop)
+
+                val fresh = reverse.copy(buses = listOf(buses.single().copy(busId = "reverse-tcp")))
+                reversed.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
+                testScheduler.runCurrent()
+                val expected = viewModel.uiState.value
+                old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, stale))
+                old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+                testScheduler.runCurrent()
+                assertEquals(fresh.buses, expected.live?.buses)
+                assertEquals(expected, viewModel.uiState.value)
+                assertFalse(viewModel.isPollingActive)
+            } finally {
+                fakeRepository.realtime.lineDetailHook = null
+                gate.complete(Unit)
+            }
+        }
+    }
+
+    @Test
+    fun meishanPush_newTcpDetail_isNotOverwrittenByLateHttpResponse() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, realtime, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            val session = push.subscriptions.single()
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, session.base))
+            testScheduler.runCurrent()
+
+            val gate = CompletableDeferred<Unit>()
+            realtime.gate = gate
+            val stale = session.base.copy(buses = listOf(buses.single().copy(busId = "late-http")))
+            fakeRepository.lineDetailResult = Result.success(stale)
+            try {
+                // 手动刷新独立于周期轮询，不会因推送 ONLINE 暂停轮询而取消。
+                viewModel.refreshNow(fromPull = true)
+                testScheduler.runCurrent()
+                assertTrue(viewModel.isLoadInFlight)
+                assertTrue(viewModel.uiState.value.isPullRefreshing)
+                assertEquals(listOf<Int?>(2, 2), realtime.lineDetailTargetOrders)
+
+                val fresh = session.base.copy(
+                    buses = listOf(buses.single().copy(busId = "new-tcp", etaSeconds = 20)),
+                    updatedAtMillis = 2_000L
+                )
+                session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
+                testScheduler.runCurrent()
+                assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+                assertTrue(viewModel.isLoadInFlight)
+
+                gate.complete(Unit)
+                testScheduler.runCurrent()
+                assertFalse(viewModel.isLoadInFlight)
+                assertFalse(viewModel.uiState.value.isRefreshing)
+                assertFalse(viewModel.uiState.value.isPullRefreshing)
+                assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+                assertEquals(fresh.updatedAtMillis, viewModel.uiState.value.live?.updatedAtMillis)
+                assertFalse(viewModel.isPollingActive)
+                assertEquals(1, push.subscriptions.size)
+            } finally {
+                realtime.gate = null
+                gate.complete(Unit)
+            }
+        }
     }
 
     @Test

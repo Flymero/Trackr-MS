@@ -76,6 +76,7 @@ val lineModule = module {
             settings = get(),
             favorites = get(),
             realtime = get(),
+            pushRepository = get(),
             reminderRepository = get(),
             trackingRepository = get(),
             trackingController = get(),
