@@ -1,5 +1,8 @@
 package com.trackr.core.network.provider.meishan
 
+import com.trackr.core.domain.arrival.ArrivalRules
+import com.trackr.core.domain.arrival.ArrivalText
+import com.trackr.core.domain.arrival.ArrivalState
 import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.model.LineOperatingState
@@ -46,9 +49,10 @@ private fun pushBus(
     index: Int = 2,
     lat: Double = 30.065,
     speed: Double = 0.0,
-    id: Int = 0
+    id: Int = 0,
+    arrived: Int = 1
 ): String = """
-    {"b_id":$id,"b_plate_num":"$plate","index":$index,"isArriveSite":1,
+    {"b_id":$id,"b_plate_num":"$plate","index":$index,"isArriveSite":$arrived,
      "b_latitude":$lat,"b_longitude":103.825,"b_sd":$speed}
 """.trimIndent()
 
@@ -107,7 +111,9 @@ private fun lineDetailJson(
     bsd: Double = 0.0,
     withYardBuses: Boolean = false,
     firstLast: Pair<String, String> = "06:30" to "19:00",
-    latOverride: String? = null
+    latOverride: String? = null,
+    busIndex: Int = 2,
+    busArrived: Int = 0
 ): String {
     val lat = latOverride ?: if (hit <= 1) "30.065" else "30.06527"
     // 场站车：index=0、isArriveSite=1、速度 0（实测运营时段大量存在于起点站 / 车场）
@@ -131,8 +137,8 @@ private fun lineDetailJson(
         {"s_id":3,"s_name":"千禾味业","latitude":30.08,"longitude":103.84,"index":3}
       ],
       "busList":[
-        {"b_id":0,"l_copy_id":11,"b_plate_num":"川Z10091D","index":2,"state":0,
-         "isArriveSite":0,"b_latitude":$lat,"b_longitude":103.825,"b_sd":$bsd,"areaId":1}$yardBuses
+        {"b_id":0,"l_copy_id":11,"b_plate_num":"川Z10091D","index":$busIndex,"state":0,
+         "isArriveSite":$busArrived,"b_latitude":$lat,"b_longitude":103.825,"b_sd":$bsd,"areaId":1}$yardBuses
       ]
     }}
     """.trimIndent()
@@ -151,6 +157,8 @@ class MeishanTransitProviderTest {
         val hits = HashMap<String, Int>()
         var byIdHits = 0
         var listJson = lineListJson
+        var detailResponse: String? = null
+        var siteResponse: String? = null
 
         /** 注入车辆 b_sd（服务端下发的实时速度）；默认 0 模拟字段无效 */
         var byIdBsd = 0.0
@@ -163,6 +171,10 @@ class MeishanTransitProviderTest {
 
         /** 线路详情车辆位置固定（不随命中前移）：模拟停场不动 */
         var byIdLatOverride: String? = null
+
+        /** 线路详情里那辆车的站序和到站标志 */
+        var byIdBusIndex = 2
+        var byIdBusArrived = 0
 
         /** `/line/site` 首/末班 + 车辆是否停在本站（isArriveSite=1） */
         var siteFirstLast: Pair<String, String> = "06:30" to "19:00"
@@ -178,14 +190,17 @@ class MeishanTransitProviderTest {
             when (path) {
                 "list" -> MockReply(listJson)
                 "byId" -> MockReply(
-                    lineDetailJson(++byIdHits, byIdBsd, withYardBuses, byIdFirstLast, byIdLatOverride)
+                    detailResponse ?: lineDetailJson(
+                        ++byIdHits, byIdBsd, withYardBuses, byIdFirstLast, byIdLatOverride,
+                        byIdBusIndex, byIdBusArrived
+                    )
                 )
                 "site" -> {
                     siteHits++
                     if (siteHits <= siteFailuresBeforeSuccess) {
                         MockReply("""{"code":500}""")
                     } else {
-                        MockReply(stopLinesJson(siteFirstLast, siteBusAtStop))
+                        MockReply(siteResponse ?: stopLinesJson(siteFirstLast, siteBusAtStop))
                     }
                 }
                 "siteAndRedPacket" -> MockReply(nearbyJson)
@@ -345,7 +360,11 @@ class MeishanTransitProviderTest {
         val running = assertNotNull(provider.applyPushFrame(waiting, frame, expectedTag = "11_0"))
         assertEquals(LineOperatingState.RUNNING, running.operatingState)
         assertEquals(1, running.buses.size)
-        clock.setWallClock("2026-11-05T11:01:00Z") // 北京时间 19:01
+        clock.setWallClock("2026-11-05T11:01:00Z") // 北京时间 19:01：末班刚发出，车还在路上
+        val lastRun = assertNotNull(provider.applyPushFrame(running, frame, expectedTag = "11_0"))
+        assertEquals(LineOperatingState.RUNNING, lastRun.operatingState)
+        assertEquals(1, lastRun.buses.size)
+        clock.setWallClock("2026-11-05T13:01:00Z") // 北京时间 21:01：末班宽限期也过了
         val ended = assertNotNull(provider.applyPushFrame(running, frame, expectedTag = "11_0"))
         assertEquals(LineOperatingState.ENDED, ended.operatingState)
         assertTrue(ended.buses.isEmpty())
@@ -365,34 +384,108 @@ class MeishanTransitProviderTest {
     }
 
     @Test
-    fun pushFrame_replayDoesNotAdvanceOrResetParkedCounter() = runBlocking {
+    fun pushFrame_replayDoesNotAdvanceOrResetParkedTimer() = runBlocking {
         val clock = FakeClock()
         val backend = MockBackend()
         val provider = newProvider(backend, clock)
         val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
-        val frames = (1..5).map { n -> pushFrame(pushBus(), time = "2026-11-04 18:00:${(n * 3).toString().padStart(2, '0')}") }
-        for (i in 0..3) {
+        var second = 0
+        fun nextFrame(speed: Double = 0.0) = pushFrame(
+            pushBus(speed = speed),
+            time = "2026-11-04 18:${(second / 60).toString().padStart(2, '0')}:${(second % 60).toString().padStart(2, '0')}"
+        ).also { second += 3 }
+        // 停站上下客、等红灯：3 秒一帧连续 4 分半钟不动，车不能被剔除
+        repeat(90) {
             clock.advanceBy(3_000)
-            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frames[i], expectedTag = "11_0")).buses.size)
-            // 同时订阅的另一个页面在相同时间拿相同帧，不能把 stillFrames 重置为 0。
-            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frames[i], targetOrder = 2, expectedTag = "11_0")).buses.size)
-            // 稍后换站重放也不能把 stillFrames 多加一次。
+            val frame = nextFrame()
+            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frame, expectedTag = "11_0")).buses.size, "第 ${it + 1} 帧不应剔除")
+            // 同时订阅的另一个页面拿相同帧、换站重放：不能让静止计时重来或多算
+            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frame, targetOrder = 2, expectedTag = "11_0")).buses.size)
+        }
+        // 静止满 5 分钟 → 停场 / 离线，剔除
+        repeat(15) {
             clock.advanceBy(3_000)
-            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frames[i], stationId = "ms-st:3", expectedTag = "11_0")).buses.size)
-            // 旧帧重放不能回写旧的速度样本。
-            assertEquals(1, assertNotNull(provider.applyPushFrame(base, frames[0], expectedTag = "11_0")).buses.size)
+            provider.applyPushFrame(base, nextFrame(), expectedTag = "11_0")
         }
         clock.advanceBy(3_000)
-        val parked = assertNotNull(provider.applyPushFrame(base, frames[4], expectedTag = "11_0"))
-        assertTrue(parked.buses.isEmpty(), "HTTP 首样本后五个独立静止帧才剔除")
+        val parked = assertNotNull(provider.applyPushFrame(base, nextFrame(), expectedTag = "11_0"))
+        assertTrue(parked.buses.isEmpty(), "静止满 5 分钟应判停场")
         clock.advanceBy(3_000)
-        assertTrue(assertNotNull(provider.applyPushFrame(base, frames[4], expectedTag = "11_0")).buses.isEmpty())
-        clock.advanceBy(3_000)
-        val resumed = assertNotNull(provider.applyPushFrame(base, pushFrame(
-            pushBus(speed = 18.0), time = "2026-11-04 18:00:30"
-        ), expectedTag = "11_0"))
+        val resumed = assertNotNull(provider.applyPushFrame(base, nextFrame(speed = 18.0), expectedTag = "11_0"))
         assertEquals(18.0, resumed.buses.single().speedKmh, "有效下发速度应解除停场")
         assertEquals(1, backend.hits["byId"])
+    }
+
+    @Test
+    fun departedBus_isPastPreviousStop_andApproachesNextStopForHttpAndPush() = runBlocking {
+        val provider = newProvider(MockBackend())
+        val request = LineDetailRequest(lineId = "ms:1_1_0", targetOrder = 2)
+        val base = provider.getLineDetail(city, request)
+        val bus = base.buses.single()
+        assertEquals(3, bus.order, "离开第2站后，正在接近第3站")
+        assertFalse(bus.isArrived)
+        assertFalse(ArrivalRules.isBusStopped(bus))
+        assertNull(ArrivalText.nearestBus(2, base.buses), "已离开候车站的车不能继续报到站")
+        assertNull(bus.distanceToTargetMeters)
+        assertEquals(-1, bus.etaSeconds)
+        val pushed = assertNotNull(provider.applyPushFrame(
+            base, pushFrame(pushBus(index = 2, arrived = 0)), targetOrder = 2, expectedTag = "11_0"
+        ))
+        assertEquals(base.buses, pushed.buses, "HTTP与TCP必须使用相同转换")
+        val approaching = provider.getLineDetail(city, request.copy(targetOrder = 3)).buses.single()
+        assertTrue(assertNotNull(approaching.distanceToTargetMeters) > 0)
+        assertTrue(approaching.etaSeconds > 45)
+        assertTrue(ArrivalText.stateForBus(3, approaching) is ArrivalState.OnTheWay)
+    }
+
+    @Test
+    fun stopAndLine_shareArrivalState_forArrivingStoppedAndDepartedBus() = runBlocking {
+        for ((index, arrived) in listOf(1 to 0, 2 to 1, 2 to 0)) {
+            val response = lineDetailJson(1, busIndex = index, busArrived = arrived)
+            val backend = MockBackend().apply {
+                detailResponse = response
+                siteResponse = response.replace("\"result\":{", "\"result\":[{").replace("}}", "}]}")
+            }
+            val provider = newProvider(backend)
+            val detail = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0", targetOrder = 2))
+            val status = provider.getStopDetail(city, StopDetailRequest(stopId = "ms-st:2")).single().lines.single()
+            val nearest = ArrivalText.nearestBus(2, detail.buses)
+            if (index == 2 && arrived == 0) {
+                assertNull(nearest)
+                assertTrue(status.approachingBuses.isEmpty())
+            } else {
+                assertEquals(assertNotNull(nearest), status.approachingBuses.single())
+                assertEquals(ArrivalText.stateForBus(2, nearest), ArrivalText.stateForBus(status.targetOrder, status.approachingBuses.single()))
+                assertEquals(arrived == 1, ArrivalRules.isBusStopped(nearest))
+            }
+        }
+    }
+
+    @Test
+    fun nonContinuousOrders_useNextListedStop_andCountActualStops() = runBlocking {
+        val response = lineDetailJson(1, busIndex = 1, busArrived = 0)
+            .replace("\"index\":2", "\"index\":10").replace("\"index\":3", "\"index\":30")
+        val backend = MockBackend().apply { detailResponse = response }
+        val provider = newProvider(backend)
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0", targetOrder = 30))
+        val bus = base.buses.single()
+        assertEquals(listOf(1, 10, 30), bus.stopOrders)
+        assertEquals(10, bus.order)
+        assertEquals(1, bus.stopsTo(30))
+        assertEquals(ArrivalState.OnTheWay(1, ArrivalText.minutesOf(bus.etaSeconds)), ArrivalText.stateForBus(30, bus))
+        val pushed = assertNotNull(provider.applyPushFrame(base, pushFrame(pushBus(index = 10, arrived = 0)), targetOrder = 30, expectedTag = "11_0"))
+        assertEquals(30, pushed.buses.single().order)
+        assertEquals(0, pushed.buses.single().stopsTo(30))
+    }
+
+    @Test
+    fun authoritativeArrival_doesNotTreatGpsProjectionAsStop() = runBlocking {
+        val provider = newProvider(MockBackend())
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val bus = assertNotNull(provider.applyPushFrame(base, pushFrame(pushBus(index = 1, arrived = 0, lat = 30.08)), expectedTag = "11_0")).buses.single()
+        assertTrue(bus.segmentProgress < 1.0f)
+        assertFalse(ArrivalRules.isBusStopped(bus.copy(segmentProgress = 1.0f)))
+        assertTrue(ArrivalRules.isBusStopped(bus.copy(isArrived = true)))
     }
 
     @Test
@@ -428,20 +521,22 @@ class MeishanTransitProviderTest {
     fun lineDetail_eta_polylineToTargetStop_atMeasuredOrFallbackSpeed() = runBlocking {
         val provider = newProvider(MockBackend())
 
-        // 未选上车站：目标站 = 终点站（千禾味业，下标 2）。车在紫竹西街前方：
-        // 折线 = 车辆GPS→紫竹西街→千禾味业 ≈ 2.2km；车速无效 → 按 4 m/s 兜底 ≈ 545 秒
+        // 未选上车站：目标站 = 终点站。车已驶离紫竹西街：
+        // 距离从车辆 GPS 到正在接近的千禾味业；速度无效按 4 m/s 兜底。
         val toTerminus = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
         val bus = toTerminus.buses[0]
-        assertTrue(bus.distanceToTargetMeters in 2100..2300, "折线距离应≈2.2km，实际 ${bus.distanceToTargetMeters}")
-        assertTrue(bus.etaSeconds in 500..600, "折线≈2.2km ÷ 4m/s ≈ 545s，实际 ${bus.etaSeconds}")
+        val expected = assertNotNull(RouteProjectionMath.calculateDistanceMeters(30.065, 103.825, 30.08, 103.84))
+        assertEquals(expected, bus.distanceToTargetMeters)
+        assertEquals((expected / 4.0).roundToInt(), bus.etaSeconds)
 
         // 指定上车站 = 终点站（order 3）：同样有距离与 ETA（车又前移了一帧，数值略变）
         val withTarget = provider.getLineDetail(
             city,
             LineDetailRequest(lineId = "ms:1_1_0", targetOrder = 3)
         )
-        assertTrue(withTarget.buses[0].distanceToTargetMeters in 2100..2300)
-        assertTrue(withTarget.buses[0].etaSeconds in 500..600)
+        val movedMeters = assertNotNull(RouteProjectionMath.calculateDistanceMeters(30.06527, 103.825, 30.08, 103.84))
+        assertEquals(movedMeters, withTarget.buses[0].distanceToTargetMeters)
+        assertEquals((movedMeters / 4.0).roundToInt(), withTarget.buses[0].etaSeconds)
 
         // 目标站是车辆后方（已过站）：不给 ETA
         val passed = provider.getLineDetail(
@@ -464,7 +559,7 @@ class MeishanTransitProviderTest {
         )
         // ≈2206m ÷ (36/3.6 = 10 m/s) ≈ 221s（4 m/s 兜底会是 ~550s，完全不同）
         val detail = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
-        assertTrue(detail.buses[0].etaSeconds in 210..230, "实测速度 ETA 应≈221s，实际 ${detail.buses[0].etaSeconds}")
+        assertEquals((assertNotNull(detail.buses[0].distanceToTargetMeters) / 10.0).roundToInt(), detail.buses[0].etaSeconds)
     }
 
     @Test
@@ -480,7 +575,7 @@ class MeishanTransitProviderTest {
         assertEquals("1路", status.line.name)
         assertEquals(2, status.targetOrder)
         // 车在本站后方一站：还有 1 站（05 §1.2 的下标做差）
-        assertEquals("1站", status.statusText)
+        assertEquals("下一站就到", status.statusText)
         assertEquals(1, status.approachingBuses.size)
         assertEquals("川Z10091D", status.approachingBuses[0].plateOrFleetNo)
     }
@@ -492,7 +587,7 @@ class MeishanTransitProviderTest {
         val stops = provider.getStopDetail(city, StopDetailRequest(stopId = "ms-st:2"))
         assertEquals(1, stops.size)
         assertEquals("紫竹西街", stops[0].name) // 站名从 siteList 里找到并清洗
-        assertEquals("1站", stops[0].lines.single().statusText)
+        assertEquals("下一站就到", stops[0].lines.single().statusText)
         // 第三方前缀不认
         assertFalse(provider.supportsStop(StopDetailRequest(stopId = "12345")))
     }
@@ -505,7 +600,7 @@ class MeishanTransitProviderTest {
 
         assertEquals(2, backend.hits["site"], "失败后应重试一次")
         assertEquals(1, stops.size, "重试后应正常返回，而不是整页「暂无运营车辆」")
-        assertEquals("1站", stops[0].lines.single().statusText)
+        assertEquals("下一站就到", stops[0].lines.single().statusText)
     }
 
     @Test
@@ -545,8 +640,8 @@ class MeishanTransitProviderTest {
     }
 
     @Test
-    fun lineDetail_parkedBus_filteredAfterStillFrames() = runBlocking {
-        // 运营时段内连续 5 帧位移 <30m 且无下发速度 → 停场车，从车辆列表剔除（06 §4.1）
+    fun lineDetail_parkedBus_filteredAfterFiveStillMinutes() = runBlocking {
+        // 运营时段内无下发速度、位置不动：停站 / 等灯（几十秒到两三分钟）不剔除，静止满 5 分钟才判停场（06 §4.1）
         var now = 0L
         val backend = MockBackend()
         backend.byIdLatOverride = "30.065" // 每帧位置不变
@@ -557,12 +652,59 @@ class MeishanTransitProviderTest {
         )
         val request = LineDetailRequest(lineId = "ms:1_1_0")
 
-        repeat(5) { // 停场帧 0..4：还没到阈值，车辆仍在列表
-            now += 15_000
-            assertEquals(1, provider.getLineDetail(city, request).buses.size, "第 ${it + 1} 帧不应剔除")
+        repeat(29) { // 10 秒一帧，共 290 秒：还没满 5 分钟，车辆仍在列表
+            assertEquals(1, provider.getLineDetail(city, request).buses.size, "静止 ${it * 10} 秒不应剔除")
+            now += 10_000
         }
-        now += 15_000 // 第 6 帧：停场帧满 5 → 剔除
-        assertTrue(provider.getLineDetail(city, request).buses.isEmpty(), "连续 5 帧不动应判停场")
+        now += 20_000 // 静止 310 秒
+        assertTrue(provider.getLineDetail(city, request).buses.isEmpty(), "静止满 5 分钟应判停场")
+    }
+
+    @Test
+    fun lineDetail_afterLastDeparture_keepsLastBusesStillRunning() = runBlocking {
+        // 末班 19:00 是始发站发车时刻：19:20 末班车还在路上，不能直接显示「今天没车了」
+        val backend = MockBackend()
+        val clock = FakeClock()
+        clock.setWallClock("2026-11-04T11:20:00Z") // 北京时间 19:20
+        val detail = newProvider(backend, clock).getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        assertEquals(LineOperatingState.RUNNING, detail.operatingState)
+        assertEquals("川Z10091D", detail.buses.single().plateOrFleetNo)
+    }
+
+    @Test
+    fun lineDetail_afterLastDeparture_dropsBusesThatFinishedOrStayAtOrigin() = runBlocking {
+        val clock = FakeClock()
+        clock.setWallClock("2026-11-04T11:20:00Z") // 北京时间 19:20，末班 19:00 已发出 20 分钟
+        val request = LineDetailRequest(lineId = "ms:1_1_0")
+
+        // 车停在终点站：末班车跑完了，今天收车
+        val atTerminal = MockBackend().apply { byIdBusIndex = 3; byIdBusArrived = 1 }
+        val finished = newProvider(atTerminal, clock).getLineDetail(city, request)
+        assertTrue(finished.buses.isEmpty(), "已到终点站的末班车跑完了")
+        assertEquals(LineOperatingState.ENDED, finished.operatingState, "车都跑完了才算今天收车")
+
+        // 车停在始发站：末班发出 20 分钟还没走，不会再发
+        val atOrigin = MockBackend().apply { byIdBusIndex = 1; byIdBusArrived = 1 }
+        val origin = newProvider(atOrigin, clock).getLineDetail(city, request)
+        assertTrue(origin.buses.isEmpty())
+        assertEquals(LineOperatingState.ENDED, origin.operatingState)
+    }
+
+    @Test
+    fun lineDetail_lastBusGrace_endsAfterTwoHours() = runBlocking {
+        val clock = FakeClock()
+        clock.setWallClock("2026-11-04T13:01:00Z") // 北京时间 21:01，末班 19:00 已过 2 小时
+        val detail = newProvider(MockBackend(), clock).getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        assertEquals(LineOperatingState.ENDED, detail.operatingState)
+        assertTrue(detail.buses.isEmpty(), "宽限期过后不再把车辆当末班车")
+    }
+
+    @Test
+    fun stopStatuses_afterLastDeparture_showsLastBusStillComing() = runBlocking {
+        val clock = FakeClock()
+        clock.setWallClock("2026-11-04T11:20:00Z") // 北京时间 19:20，末班 19:00
+        val stops = newProvider(MockBackend(), clock).getStopDetail(city, StopDetailRequest(stopId = "ms-st:2"))
+        assertEquals("下一站就到", stops[0].lines.single().statusText, "末班车还没到本站：照样显示站数")
     }
 
     @Test

@@ -127,7 +127,7 @@ internal fun widgetEtaOf(favorite: FavoriteStationLine, detail: BusLineDetail?):
     val progress = when {
         state is ArrivalState.Arriving -> 100
         nearestBus == null -> 0
-        favorite.targetOrder - nearestBus.order <= 0 -> 92
+        nearestBus.stopsTo(favorite.targetOrder) <= 0 -> 92
         else -> {
             val totalToTarget = favorite.targetOrder.coerceAtLeast(1)
             val currentSegment = (nearestBus.order - 1).coerceAtLeast(0) + nearestBus.segmentProgress

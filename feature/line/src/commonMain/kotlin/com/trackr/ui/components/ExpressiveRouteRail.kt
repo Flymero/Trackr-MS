@@ -221,8 +221,10 @@ private fun RouteRailStopItem(
             isLast = isLast,
             topTrackColor = topTrackColor,
             bottomTrackColor = bottomTrackColor,
-            // 查找停靠或正在接近本站的在途车辆：O(1) Map 查找
-            stationBuses = busesByOrder[stop.order].orEmpty(),
+            // 首站没有上游连接段，仍在站行显示，避免车辆标签消失。
+            stationBuses = busesByOrder[stop.order].orEmpty().filter {
+                index == 0 || !it.hasAuthoritativeArrival || it.isArrived
+            },
             selectedBusId = selectedBusId,
             onSelectStop = { onSelectStop(stop) },
             onSelectBus = onSelectBus
@@ -232,7 +234,11 @@ private fun RouteRailStopItem(
         if (!isLast) {
             VerticalTrackSegment(
                 segmentColor = bottomTrackColor,
-                hasArrow = (index % 3 == 0)
+                hasArrow = (index % 3 == 0),
+                buses = busesByOrder[stops[index + 1].order].orEmpty().filter {
+                    it.hasAuthoritativeArrival && !it.isArrived
+                },
+                onSelectBus = onSelectBus
             )
         }
     }
@@ -507,31 +513,37 @@ private fun VerticalTimelineRow(
 
         // 4. 到站车辆小标签
         stationBuses.forEach { bus ->
-            Surface(
-                shape = MaterialTheme.shapes.small,
-                color = if (bus.isArrived) busColors.busArrivingAmber else busColors.busChipContainer,
-                onClick = { onSelectBus(bus) },
-                modifier = Modifier.padding(start = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = vectorResource(Res.drawable.ic_bus),
-                        contentDescription = stringResource(LineRes.string.line_rail_bus),
-                        tint = if (bus.isArrived) Color.White else busColors.busChipContent,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = if (bus.isArrived) stringResource(LineRes.string.line_arrived) else formatBusChipShortText(bus.plateOrFleetNo),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (bus.isArrived) Color.White else busColors.busChipContent
-                    )
-                }
-            }
+            RouteRailBusChip(bus = bus, onSelectBus = onSelectBus)
+        }
+    }
+}
+
+@Composable
+private fun RouteRailBusChip(bus: LiveBus, onSelectBus: (LiveBus) -> Unit) {
+    val busColors = MaterialTheme.busColors
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = if (bus.isArrived) busColors.busArrivingAmber else busColors.busChipContainer,
+        onClick = { onSelectBus(bus) },
+        modifier = Modifier.padding(start = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = vectorResource(Res.drawable.ic_bus),
+                contentDescription = stringResource(LineRes.string.line_rail_bus),
+                tint = if (bus.isArrived) Color.White else busColors.busChipContent,
+                modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+                text = if (bus.isArrived) stringResource(LineRes.string.line_arrived) else formatBusChipShortText(bus.plateOrFleetNo),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (bus.isArrived) Color.White else busColors.busChipContent
+            )
         }
     }
 }
@@ -543,12 +555,14 @@ private fun VerticalTimelineRow(
 private fun VerticalTrackSegment(
     segmentColor: Color,
     hasArrow: Boolean,
+    buses: List<LiveBus>,
+    onSelectBus: (LiveBus) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(16.dp)
+            .height(if (buses.isEmpty()) 16.dp else 48.dp)
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -591,5 +605,9 @@ private fun VerticalTrackSegment(
                     }
                 }
         )
+        Spacer(modifier = Modifier.width(8.dp))
+        buses.forEach { bus ->
+            RouteRailBusChip(bus = bus, onSelectBus = onSelectBus)
+        }
     }
 }

@@ -42,6 +42,8 @@ class MeishanPushClientTest {
         private val sentLock = Any()
         var connectFailures = 0
         var autoAck = true
+        var failHeartbeat = false
+        val readTimeouts = mutableListOf<Long>()
         @Volatile var closed = false
 
         override suspend fun connect(host: String, port: Int, timeoutMs: Long) {
@@ -56,13 +58,14 @@ class MeishanPushClientTest {
         override suspend fun read(): String? = channel.receiveCatching().getOrNull()
 
         override suspend fun write(text: String) {
+            if (failHeartbeat && text.contains("\"msgType\":1")) throw IOException("heartbeat failed")
             synchronized(sentLock) { sent += text }
             if (autoAck && text.contains("\"msgType\":3")) {
                 channel.trySend("""{"msgType":4,"sourceType":0,"clientId":"server"}""")
             }
         }
 
-        override fun setReadTimeoutMs(ms: Long) = Unit
+        override fun setReadTimeoutMs(ms: Long) { readTimeouts.add(ms) }
         override fun close() {
             closed = true
             channel.close()
@@ -184,6 +187,32 @@ class MeishanPushClientTest {
             advanceTimeBy(30_000)
             runCurrent()
             assertTrue(fake.sent.any { it.contains("\"msgType\":1") })
+        } finally {
+            client.cancel()
+            external.cancel()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun heartbeatFailure_closesBlockedReaderAndReconnects() = runTest {
+        val fake = FakePushSocket().apply { failHeartbeat = true }
+        val (client, external, clock) = newClient(fake)
+        try {
+            client.acquire("11_0_1")
+            runCurrent()
+            assertEquals(45_000L, fake.readTimeouts.last())
+            advanceTimeBy(29_999)
+            clock.advanceBy(30_000)
+            advanceTimeBy(1)
+            runCurrent()
+            assertTrue(fake.closed)
+            assertEquals(MeishanPushState.DISCONNECTED, client.state.value)
+            fake.failHeartbeat = false
+            advanceTimeBy(MeishanPushClient.RECONNECT_MIN_MS)
+            runCurrent()
+            assertEquals(MeishanPushState.ONLINE, client.state.value)
+            assertEquals(2, fake.sent.count { it.contains("\"msgType\":2") })
         } finally {
             client.cancel()
             external.cancel()

@@ -1,5 +1,7 @@
 package com.trackr.core.network.remote.meishan.push
 
+import android.util.Log
+import com.trackr.core.network.json.JSONObject
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -33,6 +35,7 @@ internal class AndroidPushSocket : MeishanPushSocket {
                 socket = s
                 input = s.getInputStream()
                 writer = BufferedWriter(OutputStreamWriter(s.getOutputStream(), Charsets.UTF_8))
+                trace("connected")
             } catch (failure: Throwable) {
                 runCatching { s.close() }
                 throw failure
@@ -44,7 +47,7 @@ internal class AndroidPushSocket : MeishanPushSocket {
         val stream = input ?: return null
         return cancellableIo(onCancel = { runCatching { socket?.close() } }) {
             try {
-                readFrame(stream)
+                readFrame(stream).also { frame -> if (frame != null) traceFrame("receive", frame) }
             } catch (_: IOException) {
                 null // connection closed / read timeout
             }
@@ -56,6 +59,7 @@ internal class AndroidPushSocket : MeishanPushSocket {
             val w = writer ?: throw IOException("socket not connected")
             w.write(text)
             w.flush()
+            traceFrame("send", text.removeSuffix(MeishanPushProtocol.DELIMITER))
         }
     }
 
@@ -65,12 +69,28 @@ internal class AndroidPushSocket : MeishanPushSocket {
 
     override fun close() {
         // Interrupt a blocking read first. Closing the input wrapper first can wait on its lock.
+        if (socket != null) trace("closed")
         runCatching { socket?.close() }
         runCatching { input?.close() }
         runCatching { writer?.close() }
         input = null
         writer = null
         socket = null
+    }
+
+    private fun trace(message: String) {
+        if (Log.isLoggable("TrackrPush", Log.DEBUG)) Log.d("TrackrPush", message)
+    }
+
+    private fun traceFrame(direction: String, text: String) {
+        if (!Log.isLoggable("TrackrPush", Log.DEBUG)) return
+        runCatching {
+            val json = JSONObject(text)
+            val content = json.optString("content").takeIf { it.isNotBlank() }?.let(::JSONObject)
+            trace("$direction type=${json.optInt("msgType", -1)}" +
+                if (content != null) " tag=${content.optString("tag")} time=${content.optString("pushTime")} buses=${content.optJSONArray("busInfos")?.length()}"
+                else " tags=${json.optString("data")}")
+        }
     }
 
     private suspend fun <T> cancellableIo(

@@ -148,7 +148,7 @@ class MeishanPushClient(
         socket.setReadTimeoutMs(MeishanPushProtocol.HANDSHAKE_TIMEOUT_MS)
         write(socket, connectFrame())
         awaitChannelAck(socket)
-        socket.setReadTimeoutMs(0)
+        socket.setReadTimeoutMs(45_000L)
         write(socket, subscribeFrame(activeTags()))
     }
 
@@ -180,7 +180,14 @@ class MeishanPushClient(
         while (true) {
             delay(HEARTBEAT_TICK_MS)
             if (wallClock.now().toEpochMilliseconds() - lastSendMs >= HEARTBEAT_AFTER_MS) {
-                runCatching { write(socket, heartbeatFrame()) }
+                try {
+                    write(socket, heartbeatFrame())
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    socket.close()
+                    return
+                }
             }
         }
     }

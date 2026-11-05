@@ -10,6 +10,7 @@ import com.trackr.core.model.BusStop
 import com.trackr.core.model.LiveBus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -154,6 +155,72 @@ class ExpressiveRouteRailUiTest {
         composeTestRule.onNodeWithText("1234").assertIsDisplayed()
         // 已到站的车辆保持展示“已到站”
         composeTestRule.onNodeWithText("已到站").assertIsDisplayed()
+    }
+
+    @Test
+    fun officialMovingBus_column_isBetweenPreviousAndTargetStop_andClickable() {
+        assertBusPlacement(lazy = false)
+    }
+
+    @Test
+    fun officialMovingBus_lazy_isBetweenPreviousAndTargetStop_andClickable() {
+        assertBusPlacement(lazy = true)
+    }
+
+    private fun assertBusPlacement(lazy: Boolean) {
+        val stops = listOf(
+            BusStop(stopId = "a", name = "上一站", order = 3),
+            BusStop(stopId = "b", name = "目标站", order = 20)
+        )
+        val moving = LiveBus(
+            busId = "moving", plateOrFleetNo = "1234", order = 20,
+            hasAuthoritativeArrival = true, isArrived = false
+        )
+        val buses = listOf(
+            moving,
+            moving.copy(busId = "arrived", isArrived = true),
+            moving.copy(busId = "legacy", plateOrFleetNo = "5678", hasAuthoritativeArrival = false),
+            moving.copy(busId = "first", plateOrFleetNo = "9012", order = 3)
+        )
+        var selected: LiveBus? = null
+        composeTestRule.setContent {
+            TrackrTheme {
+                if (lazy) {
+                    LazyColumn {
+                        routeRailItems(
+                            stops = stops,
+                            busesByOrder = buses.groupBy { it.order },
+                            selectedOrder = null,
+                            selectedBusId = null,
+                            onSelectStop = {},
+                            onSelectBus = { selected = it }
+                        )
+                    }
+                } else {
+                    ExpressiveRouteRail(
+                        stops = stops,
+                        buses = buses,
+                        selectedStop = null,
+                        onSelectStop = {},
+                        onSelectBus = { selected = it }
+                    )
+                }
+            }
+        }
+
+        val previous = composeTestRule.onNodeWithText("上一站").fetchSemanticsNode().boundsInRoot
+        val target = composeTestRule.onNodeWithText("目标站").fetchSemanticsNode().boundsInRoot
+        val chip = composeTestRule.onNodeWithText("1234").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(chip.top >= previous.bottom)
+        assertTrue(chip.bottom <= target.top)
+        listOf("已到站", "5678").forEach { text ->
+            val bounds = composeTestRule.onNodeWithText(text).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals(target.center.y, bounds.center.y, 1f)
+        }
+        val first = composeTestRule.onNodeWithText("9012").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertEquals(previous.center.y, first.center.y, 1f)
+        composeTestRule.onNodeWithText("1234").performClick()
+        assertEquals(moving, selected)
     }
 
     @Test

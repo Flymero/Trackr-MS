@@ -69,6 +69,22 @@ class BusListContentTest {
     }
 
     @Test
+    fun sparseStopOrders_showsActualStopCount() {
+        setContent(
+            LiveBus(
+                busId = "sparse",
+                plateOrFleetNo = "川Z1234",
+                order = 1,
+                stopOrders = listOf(1, 3, 5),
+                hasAuthoritativeArrival = true
+            )
+        )
+
+        composeTestRule.onNodeWithText("还有 2 站 · 正在接近第 1 站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("还有 4 站", substring = true).assertDoesNotExist()
+    }
+
+    @Test
     fun passedBus_hidesDistance() {
         setContent(
             LiveBus(

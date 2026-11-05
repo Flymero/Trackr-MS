@@ -78,7 +78,7 @@ internal object GroupLegTracker {
     fun pickBoardedBus(boardOrder: Int, buses: List<LiveBus>, maxAhead: Int = 1): LiveBus? {
         if (boardOrder <= 0) return null
         return buses
-            .filter { it.order in boardOrder..(boardOrder + maxAhead) }
+            .filter { it.stopsTo(boardOrder) in -maxAhead..0 }
             .minWithOrNull(
                 compareBy<LiveBus> { distanceToBoardStop(boardOrder, it) }
                     .thenByDescending { it.order }
@@ -117,7 +117,7 @@ internal object GroupLegTracker {
             currentBusId = picked?.busId ?: session.currentBusId,
             currentBusOrder = picked?.order ?: session.currentBusOrder,
             currentBusProgress = picked?.segmentProgress ?: session.currentBusProgress,
-            stopsRemaining = picked?.let { (session.targetOrder - it.order).coerceAtLeast(0) } ?: session.stopsRemaining,
+            stopsRemaining = picked?.stopsTo(session.targetOrder)?.coerceAtLeast(0) ?: session.stopsRemaining,
             etaSeconds = picked?.etaSeconds ?: session.etaSeconds,
             // 乘车区间从上车站算起
             startTrackingOrder = if (boardOrder > 0) boardOrder else session.startTrackingOrder,
@@ -282,7 +282,7 @@ internal object GroupLegTracker {
     /** 锁定 [busId] 并进入 ON_BOARD（[bus] 为本轮数据中的这辆车，可能为 null） */
     private fun boardBus(session: TrackingSessionState, bus: LiveBus?, busId: String, nowMillis: Long): LegUpdate {
         val order = bus?.order ?: session.currentBusOrder
-        val stopsToDrop = (session.targetOrder - order).coerceAtLeast(0)
+        val stopsToDrop = (bus?.stopsTo(session.targetOrder) ?: (session.targetOrder - order)).coerceAtLeast(0)
         val locked = BoardingDetector.clearBoardingFields(session).copy(
             legPhase = LegPhase.ON_BOARD,
             lockedBusId = busId,
@@ -333,7 +333,7 @@ internal object GroupLegTracker {
             session
         }
 
-        val stopsRemaining = (boardOrder - best.order).coerceAtLeast(0)
+        val stopsRemaining = best.stopsTo(boardOrder).coerceAtLeast(0)
         val arrivedBoard = isArrivedAtOrder(boardOrder, best)
 
         if (arrivedBoard) {
@@ -461,7 +461,7 @@ internal object GroupLegTracker {
         }
 
         val targetOrder = session.targetOrder
-        val stopsRemaining = (targetOrder - locked.order).coerceAtLeast(0)
+        val stopsRemaining = locked.stopsTo(targetOrder).coerceAtLeast(0)
         val arrivedDrop = isArrivedAtOrder(targetOrder, locked)
 
         val etaText = formatEtaSeconds(locked.etaSeconds)

@@ -55,6 +55,64 @@ class TrackingEngineTest {
         const val ELAPSED_NOW = 5_000_000L
     }
 
+    @Test
+    fun single_sparseStopOrders_countsStopsForApproachingAlert() {
+        val bus = singleBus("sparse", order = 3).copy(stopOrders = listOf(1, 3, 7, 10))
+        val update = SingleLegTracker.processPoll(singleSession(), listOf(bus), nowMillis = NOW_MILLIS)
+
+        assertEquals(2, update.state.stopsRemaining)
+        assertEquals(SingleLegTracker.AlertKind.APPROACHING, update.alert)
+        assertTrue(update.state.statusSummary.contains("还有 2 站"))
+    }
+
+    @Test
+    fun group_sparseStopOrders_countsWaitingBoardingAndRidingStops() {
+        val session = groupWaitingSession().copy(boardStopOrder = 7, targetOrder = 20)
+        val bus = groupBus("sparse", order = 3).copy(stopOrders = listOf(1, 3, 7, 12, 20))
+        val waiting = GroupLegTracker.processPoll(session, listOf(bus), nowMillis = NOW_MILLIS)
+        assertEquals(1, waiting.state.stopsRemaining)
+
+        val atBoard = bus.copy(order = 7, isArrived = true, hasAuthoritativeArrival = true)
+        val boarded = GroupLegTracker.processPoll(session, listOf(atBoard), nowMillis = NOW_MILLIS)
+        assertTrue(boarded.reachedBoardStop)
+        assertEquals(2, boarded.state.stopsRemaining)
+
+        val justLeft = bus.copy(order = 12)
+        val confirmed = GroupLegTracker.confirmBoarded(session, listOf(justLeft), nowMillis = NOW_MILLIS)
+        assertEquals("sparse", confirmed.lockedBusId)
+        assertEquals(1, confirmed.stopsRemaining)
+        val riding = GroupLegTracker.processPoll(confirmed, listOf(justLeft), nowMillis = NOW_MILLIS)
+        assertEquals(1, riding.state.stopsRemaining)
+        assertFalse(riding.reachedDropStop)
+    }
+
+    @Test
+    fun group_sparseStopOrders_boardingRangeUsesStopCount() {
+        val bus = groupBus("sparse", order = 20).copy(stopOrders = listOf(1, 3, 7, 12, 20))
+        assertNull(GroupLegTracker.pickBoardedBus(7, listOf(bus)))
+        assertEquals(bus, GroupLegTracker.pickBoardedBus(7, listOf(bus), maxAhead = 2))
+    }
+
+    @Test
+    fun watch_sparseStopOrders_usesStopCountForPrimaryAndAlerts() {
+        val sparse = watchLine("sparse", "跳号线", order = 20)
+        val legacy = watchLine("legacy", "连续线", order = 5)
+        val result = reduceWatch(
+            watchBegin(legacy, sparse),
+            stopPoll(
+                "sparse" to listOf(stopBus("a", order = 12).copy(stopOrders = listOf(1, 3, 7, 12, 20))),
+                "legacy" to listOf(stopBus("b", order = 3))
+            )
+        )
+
+        assertEquals("sparse", result.session.state.lineId)
+        assertEquals(1, result.session.state.stopsRemaining)
+        assertEquals(2, result.session.watchedLines.last().stopsRemaining)
+        val alert = assertIs<TrackingEngine.Effect.Alert>(result.effects.single())
+        assertEquals(TrackingEngine.AlertKind.APPROACHING, alert.kind)
+        assertEquals(1, alert.state.stopsRemaining)
+    }
+
     // ================================================================ 原 GroupLegTrackerTest
 
     private fun groupBus(id: String, order: Int, arrived: Boolean = false, progress: Float = 0.5f, eta: Int = 300) =

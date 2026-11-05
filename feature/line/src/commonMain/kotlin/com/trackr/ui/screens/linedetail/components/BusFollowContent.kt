@@ -126,7 +126,8 @@ fun BusFollowContent(
                 )
             }
         } else {
-            val stopsLeftToTerminus = (lineDetail.stops.size - followedBus.order).coerceAtLeast(0)
+            val terminusOrder = lineDetail.stops.lastOrNull()?.order ?: 0
+            val stopsLeftToTerminus = followedBus.stopsTo(terminusOrder).coerceAtLeast(0)
 
             // 统计概要卡
             Surface(
@@ -205,7 +206,7 @@ fun BusFollowContent(
                     val isCurrent = stop.order == followedBus.order
                     val isFirst = index == 0
                     val isLast = index == lineDetail.stops.size - 1
-                    val isNextStop = stop.order == followedBus.order + 1
+                    val isNextStop = followedBus.stopsTo(stop.order) == 1
 
                     // 计算相邻站点轨道的严格连贯颜色，保证接缝处颜色严格一致无突变
                     val topTrackColor = if (stop.order <= followedBus.order) {

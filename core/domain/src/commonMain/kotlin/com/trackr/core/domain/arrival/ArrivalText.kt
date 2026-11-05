@@ -14,7 +14,7 @@ import kotlin.time.Instant
  * 到站文字的颜色（v3「到站数字怎么上色」）：
  * - [Go] 绿：已到站 / ≤ 1 站 / ≤ 3 分钟
  * - [Normal] 正文色：在路上
- * - [Mute] 灰：车都过了、还没发车、加载中、没网
+ * - [Mute] 灰：等待发车（车都过了）、还没发车、加载中、没网
  * - [Warn] 橙：今天末班已过、停运 / 没数据
  */
 enum class ArrivalTone { Go, Normal, Mute, Warn }
@@ -142,7 +142,7 @@ object ArrivalText {
         return if (ArrivalRules.isBusArrivedAtOrder(targetOrder, bus)) {
             ArrivalState.Arriving()
         } else {
-            ArrivalState.OnTheWay(stopsAway = targetOrder - bus.order, minutes = minutesOf(bus.etaSeconds))
+            ArrivalState.OnTheWay(stopsAway = bus.stopsTo(targetOrder), minutes = minutesOf(bus.etaSeconds))
         }
     }
 
@@ -183,7 +183,7 @@ object ArrivalText {
             } else {
                 ArrivalState.Arriving(
                     nextBusMinutes = minutesOf(following.etaSeconds),
-                    nextBusStops = (targetOrder - following.order).takeIf { targetOrder > 0 && following.order > 0 }
+                    nextBusStops = following.stopsTo(targetOrder).takeIf { targetOrder > 0 && following.order > 0 }
                 )
             }
         }
@@ -266,18 +266,18 @@ object ArrivalText {
                         detail = from,
                         short = "下一班 $next $from",
                         tone = ArrivalTone.Mute,
-                        spoken = "${who}车都过了，下一班 ${spokenClock(state.nextDeparture)} $from"
+                        spoken = "${who}等待发车，下一班 ${spokenClock(state.nextDeparture)} $from"
                     )
                 } else {
                     val last = state.lastTime.takeIf { it.isNotBlank() }?.let(::clockText)
                     val detail = listOfNotNull("暂无下一班发车时间", last?.let { "末班 $it" }).joinToString(" · ")
                     ArrivalDisplay(
-                        value = "车都过了",
+                        value = "等待发车",
                         unit = null,
                         detail = detail,
-                        short = listOfNotNull("车都过了", last?.let { "末班 $it" }).joinToString(" · "),
+                        short = listOfNotNull("等待发车", last?.let { "末班 $it" }).joinToString(" · "),
                         tone = ArrivalTone.Mute,
-                        spoken = "${who}车都过了，暂无下一班发车时间" +
+                        spoken = "${who}等待发车，暂无下一班发车时间" +
                             (state.lastTime.takeIf { it.isNotBlank() }?.let { "，末班 ${spokenClock(it)}" } ?: "")
                     )
                 }

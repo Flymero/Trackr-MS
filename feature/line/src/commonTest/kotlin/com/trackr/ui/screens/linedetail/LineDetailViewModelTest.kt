@@ -294,6 +294,7 @@ class LineDetailViewModelTest {
             session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
             testScheduler.runCurrent()
 
+            assertTrue(viewModel.uiState.value.isPushOnline)
             assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
             assertEquals(fresh.updatedAtMillis, viewModel.uiState.value.live?.updatedAtMillis)
             assertEquals(stops[1], viewModel.uiState.value.selectedStop)
@@ -302,6 +303,7 @@ class LineDetailViewModelTest {
             testScheduler.advanceTimeBy(10_000L)
             testScheduler.runCurrent()
             assertEquals(listOf<Int?>(2), realtime.lineDetailTargetOrders)
+            assertTrue(viewModel.uiState.value.isPushOnline)
             assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
             assertEquals(1, push.subscriptions.size)
             assertTrue(push.cancellations.isEmpty())
@@ -327,6 +329,7 @@ class LineDetailViewModelTest {
             session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
             testScheduler.runCurrent()
             assertTrue(viewModel.isPollingActive)
+            assertFalse(viewModel.uiState.value.isPushOnline)
             assertEquals(listOf<Int?>(2, 2), realtime.lineDetailTargetOrders)
             assertEquals(fallback.buses, viewModel.uiState.value.live?.buses)
 
@@ -343,6 +346,7 @@ class LineDetailViewModelTest {
             testScheduler.advanceTimeBy(10_000L)
             testScheduler.runCurrent()
             assertEquals(3, realtime.lineDetailTargetOrders.size)
+            assertTrue(viewModel.uiState.value.isPushOnline)
             assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
             assertEquals(1, push.subscriptions.size)
         }
@@ -360,6 +364,7 @@ class LineDetailViewModelTest {
 
             viewModel.onScreenPaused()
             testScheduler.runCurrent()
+            assertFalse(viewModel.uiState.value.isPushOnline)
             assertEquals(listOf(old), push.cancellations)
             assertEquals(0, old.updates.subscriptionCount.value)
             assertFalse(viewModel.isPollingActive)
@@ -372,7 +377,7 @@ class LineDetailViewModelTest {
             )
             testScheduler.advanceTimeBy(10_000L)
             testScheduler.runCurrent()
-            assertEquals(beforePause, viewModel.uiState.value)
+            assertEquals(beforePause.copy(isPushOnline = false), viewModel.uiState.value)
             assertEquals(1, realtime.lineDetailTargetOrders.size)
 
             viewModel.onScreenResumed()
@@ -389,6 +394,7 @@ class LineDetailViewModelTest {
             val fresh = resumed.base.copy(buses = listOf(buses.single().copy(busId = "resumed-new")))
             resumed.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
             testScheduler.runCurrent()
+            assertTrue(viewModel.uiState.value.isPushOnline)
             assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
         }
     }
@@ -414,6 +420,7 @@ class LineDetailViewModelTest {
                 testScheduler.advanceTimeBy(10_000L)
                 testScheduler.runCurrent()
                 assertEquals(listOf<Int?>(2, 2), realtime.lineDetailTargetOrders)
+                assertFalse(viewModel.uiState.value.isPushOnline)
                 assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
                 assertTrue(push.subscriptions.isEmpty(), source.name)
                 assertTrue(push.cancellations.isEmpty(), source.name)
@@ -436,6 +443,7 @@ class LineDetailViewModelTest {
             viewModel.selectStop(stops[2])
             testScheduler.runCurrent()
 
+            assertFalse(viewModel.uiState.value.isPushOnline)
             assertEquals(listOf(old), push.cancellations)
             assertEquals(0, old.updates.subscriptionCount.value)
             assertEquals(2, push.subscriptions.size)
@@ -489,7 +497,8 @@ class LineDetailViewModelTest {
                 assertTrue(old.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, stale)))
                 viewModel.switchOppositeDirection()
                 testScheduler.runCurrent()
-                assertEquals(listOf(old), push.cancellations)
+                assertFalse(viewModel.uiState.value.isPushOnline)
+            assertEquals(listOf(old), push.cancellations)
                 assertEquals(0, old.updates.subscriptionCount.value)
                 assertTrue(viewModel.uiState.value.isLoading)
                 assertEquals(buses, viewModel.uiState.value.live?.buses)
@@ -548,7 +557,8 @@ class LineDetailViewModelTest {
                 )
                 session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
                 testScheduler.runCurrent()
-                assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+                assertTrue(viewModel.uiState.value.isPushOnline)
+            assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
                 assertTrue(viewModel.isLoadInFlight)
 
                 gate.complete(Unit)
@@ -556,7 +566,8 @@ class LineDetailViewModelTest {
                 assertFalse(viewModel.isLoadInFlight)
                 assertFalse(viewModel.uiState.value.isRefreshing)
                 assertFalse(viewModel.uiState.value.isPullRefreshing)
-                assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+                assertTrue(viewModel.uiState.value.isPushOnline)
+            assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
                 assertEquals(fresh.updatedAtMillis, viewModel.uiState.value.live?.updatedAtMillis)
                 assertFalse(viewModel.isPollingActive)
                 assertEquals(1, push.subscriptions.size)
@@ -613,7 +624,7 @@ class LineDetailViewModelTest {
         viewModel.onReadAloud()
         testScheduler.runCurrent()
 
-        assertEquals(listOf("49路，开往上海体育馆，车都过了，下一班 7点20分 从 汉口路 发车"), announcer.spoken)
+        assertEquals(listOf("49路，开往上海体育馆，等待发车，下一班 7点20分 从 汉口路 发车"), announcer.spoken)
     }
 
     @Test

@@ -23,7 +23,7 @@ object ArrivalRules {
 
     /** 车辆是否已停靠在它正在接近的站（order）：上游到站标志，或可信的站间插值 >= 0.98 */
     fun isBusStopped(bus: LiveBus): Boolean =
-        bus.isArrived || (bus.hasValidProgress && bus.segmentProgress >= STOPPED_PROGRESS_THRESHOLD)
+        bus.isArrived || (!bus.hasAuthoritativeArrival && bus.hasValidProgress && bus.segmentProgress >= STOPPED_PROGRESS_THRESHOLD)
 
     /**
      * 车辆是否到达 [targetOrder]：

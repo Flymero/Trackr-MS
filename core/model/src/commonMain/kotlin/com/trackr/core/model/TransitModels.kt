@@ -160,8 +160,16 @@ data class LiveBus(
     val distanceToTargetMeters: Int? = null,
     val etaSeconds: Int = -1,
     val expectedArrivalTimeText: String? = null, // 如 "21:03"
-    val nextStopName: String? = null
+    val nextStopName: String? = null,
+    val stopOrders: List<Int> = emptyList(), // 有完整站表时按位置计算站数，兼容站序跳号
+    val hasAuthoritativeArrival: Boolean = false // 上游明确提供停靠状态，不用 GPS 投影推断停靠
 ) {
+    fun stopsTo(targetOrder: Int): Int {
+        val targetPos = stopOrders.indexOf(targetOrder)
+        val busPos = stopOrders.indexOf(order)
+        return if (targetPos >= 0 && busPos >= 0) targetPos - busPos else targetOrder - order
+    }
+
     /**
      * 过滤系统内部机器哈希（如 40 位 SHA-1）后的友好展示名称
      */

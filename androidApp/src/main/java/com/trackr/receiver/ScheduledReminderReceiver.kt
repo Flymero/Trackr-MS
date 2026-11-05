@@ -122,7 +122,7 @@ class ScheduledReminderReceiver : BroadcastReceiver(), KoinComponent {
                 val bestBus = candidateBuses.maxByOrNull { it.order.toFloat() + it.segmentProgress }
 
                 if (bestBus != null) {
-                    val stopsAway = (reminder.targetOrder - bestBus.order).coerceAtLeast(0)
+                    val stopsAway = bestBus.stopsTo(reminder.targetOrder).coerceAtLeast(0)
                     val eta = if (bestBus.etaSeconds > 0) {
                         "${(bestBus.etaSeconds + 59) / 60} 分钟"
                     } else {

@@ -6,9 +6,13 @@ import android.content.pm.ServiceInfo
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.trackr.TrackrApp
+import com.trackr.core.data.repository.MeishanPushRepository
+import com.trackr.core.data.repository.MeishanPushUpdate
+import com.trackr.core.data.repository.MeishanPushAvailability
 import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.domain.tracking.LocationCadence
+import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.BusStop
@@ -30,6 +34,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.flow
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,6 +59,7 @@ class BusTrackingServiceTest {
     private lateinit var app: TrackrApp
     private lateinit var location: FakeLocationSource
     private lateinit var transit: FakeTransitRepository
+    private lateinit var push: ServicePushFake
     private val trackingRepository: TrackingRepository get() = GlobalContext.get().get()
     private val notificationManager: NotificationManager
         get() = app.getSystemService(Application.NOTIFICATION_SERVICE) as NotificationManager
@@ -60,12 +69,163 @@ class BusTrackingServiceTest {
         app = ApplicationProvider.getApplicationContext()
         location = FakeLocationSource(precisePermission = true)
         transit = FakeTransitRepository()
+        push = ServicePushFake()
         loadKoinModules(
             module {
                 single<LocationSource> { location }
                 single<ITransitRepository> { transit }
+                single<MeishanPushRepository> { push }
             }
         )
+    }
+
+    private class ServicePushFake : MeishanPushRepository {
+        data class Subscription(val base: BusLineDetail, val order: Int?, val updates: MutableSharedFlow<MeishanPushUpdate> = MutableSharedFlow(extraBufferCapacity = 16))
+        val subscriptions = mutableListOf<Subscription>()
+        val released = mutableListOf<Subscription>()
+        override fun stream(base: BusLineDetail, targetOrder: Int?, stationId: String?): Flow<MeishanPushUpdate> = flow {
+            val subscription = Subscription(base, targetOrder)
+            subscriptions.add(subscription)
+            try { subscription.updates.collect { emit(it) } }
+            finally { released.add(subscription) }
+        }
+    }
+
+    private fun officialTarget() = singleTarget().copy(lineId = "ms:1_1_0", source = DataSourceType.MEISHAN)
+
+    private fun officialDetail(id: String = "http", order: Int = 3) = lineDetail(
+        "ms:1_1_0", listOf(LiveBus(id, id, order, segmentProgress = 0.4f))
+    ).let { it.copy(line = it.line.copy(source = DataSourceType.MEISHAN)) }
+
+    @Test
+    fun officialTracking_pushUpdatesSharedState_disconnectFallsBack_stopReleases() {
+        transit.realtime.lineDetailResult = Result.success(officialDetail())
+        val session = requireNotNull(trackingRepository.start(officialTarget()))
+        val controller = startService(session.sessionId)
+        val service = controller.get()
+        try {
+            waitUntil("官方订阅建立") { push.subscriptions.size == 1 }
+            assertTrue(service.isTrackingWakeLockHeld)
+            val subscription = push.subscriptions.single()
+            subscription.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, officialDetail("http", 5)))
+            waitUntil("TCP写入首页共享仓库") { trackingRepository.legState.value.currentBusOrder == 5 }
+            val calls = transit.realtime.lineDetailCalls.size
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(12))
+            assertEquals(calls, transit.realtime.lineDetailCalls.size)
+            subscription.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            waitUntil("断开立即HTTP降级") { transit.realtime.lineDetailCalls.size > calls }
+            subscription.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, officialDetail("http", 6)))
+            waitUntil("TCP恢复") { trackingRepository.legState.value.currentBusOrder == 6 }
+            trackingRepository.stop()
+            waitUntil("订阅释放") { push.released.size == 1 }
+            assertFalse(service.isTrackingWakeLockHeld)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun officialTracking_destroyReleasesSubscriptionAndWakeLock() {
+        transit.realtime.lineDetailResult = Result.success(officialDetail())
+        val session = requireNotNull(trackingRepository.start(officialTarget()))
+        val controller = startService(session.sessionId)
+        val service = controller.get()
+        waitUntil("订阅建立") { push.subscriptions.size == 1 }
+        controller.destroy()
+        waitUntil("销毁释放订阅") { push.released.size == 1 }
+        assertFalse(service.isTrackingWakeLockHeld)
+        assertNull(trackingRepository.session.value)
+    }
+
+    @Test
+    fun officialRoute_sameGenerationBoarding_rebindsEtaTarget() {
+        val target = routeTarget().let { route -> route.copy(group = route.group.copy(legs = route.group.legs.map { leg ->
+            leg.copy(candidateLines = leg.candidateLines.map { it.copy(lineId = "ms:1_1_0", source = DataSourceType.MEISHAN) })
+        })) }
+        transit.realtime.lineDetailResult = Result.success(officialDetail(order = 3))
+        val session = requireNotNull(trackingRepository.start(target))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("上车站订阅") { push.subscriptions.size == 1 }
+            assertEquals(3, push.subscriptions.first().order)
+            trackingRepository.confirmBoarded()
+            waitUntil("下车站重新订阅") { push.subscriptions.size == 2 }
+            assertEquals(7, push.subscriptions.last().order)
+            assertEquals(session.generation, trackingRepository.session.value?.generation)
+            waitUntil("旧目标订阅释放") { push.released.contains(push.subscriptions.first()) }
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun thirdPartyTracking_doesNotSubscribeOrHoldWakeLock() {
+        transit.realtime.lineDetailResult = Result.success(lineDetail("L59", listOf(LiveBus("http", "http", 3))))
+        val session = requireNotNull(trackingRepository.start(singleTarget()))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("HTTP完成") { trackingRepository.legState.value.currentBusId == "http" }
+            assertTrue(push.subscriptions.isEmpty())
+            assertFalse(controller.get().isTrackingWakeLockHeld)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun officialWatchTogether_subscribesEachLine_andPartialUpdateKeepsOtherLines() {
+        val lines = listOf(WatchLine("ms:1_1_0", "1路", 7, source = DataSourceType.MEISHAN), WatchLine("ms:1_2_0", "2路", 7, source = DataSourceType.MEISHAN))
+        for (line in lines) transit.realtime.lineDetailsMap[line.lineId] = officialDetail().let { it.copy(line = it.line.copy(lineId = line.lineId)) }
+        val target = watchTarget().copy(lines = lines)
+        val session = requireNotNull(trackingRepository.start(target))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("两线订阅建立") { push.subscriptions.size == 2 && trackingRepository.session.value?.watchedLines?.all { it.hasData } == true }
+            val first = push.subscriptions.first()
+            val detail = first.base.copy(buses = listOf(LiveBus("http", "http", 5, segmentProgress = 0.4f)))
+            first.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, detail))
+            waitUntil("部分线路更新") { trackingRepository.session.value?.watchedLines?.any { it.busOrder == 5 } == true }
+            assertTrue(requireNotNull(trackingRepository.session.value).watchedLines.all { it.hasData })
+            assertEquals(0, transit.realtime.stopDetailCallCount)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun officialTracking_lateFallbackHttpDoesNotOverwriteRecoveredTcp() {
+        transit.realtime.lineDetailResult = Result.success(officialDetail())
+        val session = requireNotNull(trackingRepository.start(officialTarget()))
+        val controller = startService(session.sessionId)
+        val releaseHttp = CompletableDeferred<Unit>()
+        try {
+            waitUntil("订阅建立") { push.subscriptions.size == 1 }
+            val subscription = push.subscriptions.single()
+            subscription.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, officialDetail("http", 5)))
+            waitUntil("TCP首帧") { trackingRepository.legState.value.currentBusOrder == 5 }
+            var fallbackStarted = false
+            transit.realtime.lineDetailHook = { fallbackStarted = true; releaseHttp.await() }
+            subscription.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            waitUntil("降级HTTP挂起") { fallbackStarted }
+            subscription.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, officialDetail("http", 6)))
+            waitUntil("TCP先恢复") { trackingRepository.legState.value.currentBusOrder == 6 }
+            releaseHttp.complete(Unit)
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(500))
+            assertEquals(6, trackingRepository.legState.value.currentBusOrder)
+        } finally { releaseHttp.complete(Unit); controller.destroy() }
+    }
+
+    @Test
+    fun officialWatchTogether_partialDisconnectRefreshesOnlyOfflineLine() {
+        val lines = listOf(WatchLine("ms:1_1_0", "1路", 7, source = DataSourceType.MEISHAN), WatchLine("ms:1_2_0", "2路", 7, source = DataSourceType.MEISHAN))
+        for (line in lines) transit.realtime.lineDetailsMap[line.lineId] = officialDetail().let { it.copy(line = it.line.copy(lineId = line.lineId)) }
+        val session = requireNotNull(trackingRepository.start(watchTarget().copy(lines = lines)))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("双线订阅") { push.subscriptions.size == 2 }
+            push.subscriptions.forEach { it.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, it.base.copy(buses = listOf(LiveBus("http", "http", 5, segmentProgress = 0.4f))))) }
+            waitUntil("双线在线") { trackingRepository.session.value?.watchedLines?.all { it.busOrder == 5 } == true }
+            val failed = push.subscriptions.first()
+            val healthy = push.subscriptions.last()
+            val before = transit.realtime.lineDetailCalls.size
+            failed.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            waitUntil("离线线路HTTP补刷") { transit.realtime.lineDetailCalls.size > before }
+            assertEquals(listOf(failed.base.line.lineId), transit.realtime.lineDetailCalls.drop(before))
+            assertFalse(push.released.contains(healthy))
+            assertTrue(requireNotNull(trackingRepository.session.value).watchedLines.all { it.hasData })
+        } finally { controller.destroy() }
     }
 
     // ---------------------------------------------------------------- 样例数据

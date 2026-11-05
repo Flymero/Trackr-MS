@@ -1,5 +1,6 @@
 package com.trackr.core.network.provider.meishan
 
+import com.trackr.core.domain.arrival.ArrivalRules
 import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.domain.platform.ProcessMonotonicClock
@@ -23,6 +24,7 @@ import com.trackr.core.network.provider.ITransitProvider
 import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
 import com.trackr.core.network.remote.common.ServiceHours
+import com.trackr.core.network.remote.common.TimetableRules
 import com.trackr.core.network.remote.meishan.MeishanIds
 import com.trackr.core.network.remote.meishan.MeishanTransitClient
 import com.trackr.core.network.remote.meishan.push.MeishanPushFrame
@@ -81,9 +83,21 @@ class MeishanTransitProvider(
         /** 车速无效时的平均运营假设：4 m/s（14.4 km/h），与原客户端口径一致 */
         private const val DEFAULT_SPEED_KMH = 14.4
 
-        /** 停场车判定（06 §4.1）：连续 N 帧位移 < 30m 且无下发速度 → 离线/停场，从到站列表剔除 */
-        private const val PARKED_FRAMES = 5
+        /**
+         * 停场车判定（06 §4.1）：无下发速度、离开始静止的位置不到 30m，并且持续 5 分钟 → 停场 / 离线，
+         * 从到站列表剔除。按时长而不是帧数判：TCP 3 秒一帧，按帧数算十几秒就会把停站上下客、等红灯的车剔掉。
+         */
+        private const val PARKED_AFTER_MS = 5 * 60_000L
         private const val PARKED_MOVE_METERS = 30.0
+
+        /**
+         * 末班宽限期（分钟）：官方首末班是始发站的发车时刻，末班车发出后还要跑完全程。
+         * 宽限期内照样解析车辆，只留还在线路上跑的车；车都跑完了才算今天收车。
+         */
+        private const val LAST_BUS_GRACE_MINUTES = 120
+
+        /** 末班发出这么多分钟后，还在始发站的车不再当作末班车（留出晚发车的余量） */
+        private const val ORIGIN_DEPARTURE_TOLERANCE_MINUTES = 10
 
         /** 进程内车辆 / 推送缓存上限；不随订阅和收到的帧数无限增长。 */
         private const val MAX_CACHED_PUSH_FRAMES = 128
@@ -325,30 +339,39 @@ class MeishanTransitProvider(
             source = DataSourceType.MEISHAN
         )
         // 首末班可能在 HTTP 快照之后跨过边界，重放同一帧也必须重新判断。
-        val state = operatingState(base.line.firstTime, base.line.lastTime)
-        val buses = if (state == LineOperatingState.RUNNING) {
-            val key = PushFrameKey(base.line.lineId, frame.tag, frame.pushTime)
+        val scheduled = operatingState(base.line.firstTime, base.line.lastTime)
+        val grace = scheduled != LineOperatingState.RUNNING && isInLastBusGrace(base.line.firstTime, base.line.lastTime)
+        val buses = if (scheduled != LineOperatingState.RUNNING && !grace) {
+            emptyList()
+        } else {
+            val key = PushFrameKey(base.line.lineId, frame.tag, frame.pushTime, base.stops)
             val parsed = synchronized(pushFrameLock) {
                 // 多订阅和选站重放共用不带 ETA 的车辆，速度 / 停场计数每帧只更新一次。
-                parsedPushFrames[key] ?: parseBuses(ref, frame.busInfos).also { parsed ->
+                parsedPushFrames[key] ?: parseBuses(ref, frame.busInfos, base.stops).also { parsed ->
                     if (parsedPushFrames.size >= MAX_CACHED_PUSH_FRAMES) {
                         parsedPushFrames.remove(parsedPushFrames.keys.first())
                     }
                     parsedPushFrames[key] = parsed
                 }
             }
-            withEta(base.stops, parsed, request)
-        } else {
-            emptyList()
+            val inService = if (grace) {
+                lastBusesStillRunning(parsed, base.stops, base.line.lastTime)
+            } else {
+                parsed
+            }
+            withEta(base.stops, inService, request)
         }
         return base.copy(
             buses = buses,
-            operatingState = state,
+            // 宽限期内还有末班车在跑就算运营中；都跑完了按时刻表收车
+            operatingState = if (grace && buses.isNotEmpty()) LineOperatingState.RUNNING else scheduled,
             updatedAtMillis = wallClock.now().toEpochMilliseconds()
         )
     }
 
-    private data class PushFrameKey(val lineId: String, val tag: String, val pushTime: String)
+    private data class PushFrameKey(
+        val lineId: String, val tag: String, val pushTime: String, val stops: List<BusStop>
+    )
 
     private val pushFrameLock = SynchronizedObject()
     private val parsedPushFrames = linkedMapOf<PushFrameKey, List<LiveBus>>()
@@ -368,8 +391,8 @@ class MeishanTransitProvider(
 
     /**
      * 把 `/line/site` 的结果解析成每条经过线路在本站的状态。
-     * 站数判定按原 App 规则（05 §1.2）：车在选中站后方（数组下标更小）才算「还没到」；
-     * `arraysIndex − busPos` 是「还有几站」；正好在本站且已进站算「已到站」。
+     * 车辆先转换为正在接近 / 已停靠的站，随后与线路详情共用到站规则和距离计算。
+     * 站数按站表位置计算；驶离本站的车转换后位于下一站，不再进入本站候选列表。
      */
     private fun buildStopLineStatuses(stopLines: JSONArray, targetSId: Int): List<NearbyStopLineStatus> {
         val nowHHMM = beijingNowHHMM()
@@ -404,7 +427,7 @@ class MeishanTransitProvider(
                     )
                 }
                 if (sId == targetSId) {
-                    targetPos = j
+                    targetPos = stops.lastIndex
                     targetIndex = index
                     targetName = siteName
                 }
@@ -428,7 +451,8 @@ class MeishanTransitProvider(
             )
 
             // 发车状态机先行（05 §2）：未发车 / 末班已过时段不解析车辆——
-            // 服务端仍返回归场车快照，但它们不是在途车，显示「等待发车 / 末班已过」
+            // 服务端仍返回归场车快照，但它们不是在途车，显示「等待发车 / 末班已过」。
+            // 末班是始发站发车时刻：末班后的宽限期里末班车还在路上，照样解析（只留在途的末班车）
             val serviceState = ServiceHours.state(
                 nowHHMM = nowHHMM,
                 windows = listOfNotNull(
@@ -436,47 +460,38 @@ class MeishanTransitProvider(
                         .takeIf { it.first.isNotBlank() && it.last.isNotBlank() }
                 )
             )
+            val inGrace = isInLastBusGrace(line.firstTime, line.lastTime)
             val inService = serviceState == ServiceHours.State.IN_SERVICE ||
-                serviceState == ServiceHours.State.UNKNOWN // 没给首末班时无法判定，按现状解析
+                serviceState == ServiceHours.State.UNKNOWN || // 没给首末班时无法判定，按现状解析
+                inGrace
 
             // 筛「还没到本站」的车（05 §1.2）：站序匹配、下标做差
             val buses: JSONArray = lineJson.optJSONArray("busList") ?: JSONArray()
             val approaching = ArrayList<LiveBus>()
             if (inService) {
                 val ref = MeishanIds.Ref(area.areaId, lId, state)
-                for (bus in parseBuses(ref, buses)) {
-                    val busPos = stops.indexOfFirst { it.order == bus.order }
-                    if (busPos < 0) continue // 越界站序不参与「下一班」
-                    val remaining = targetPos - busPos
-                    if (remaining < 0 || (remaining == 0 && !bus.isArrived)) continue
-                    approaching.add(bus)
+                val parsed = parseBuses(ref, buses, stops).let { all ->
+                    if (inGrace) lastBusesStillRunning(all, stops, line.lastTime) else all
                 }
+                approaching.addAll(parsed.filter { bus ->
+                    busPosOf(stops, bus.order) >= 0 && bus.order <= targetIndex
+                })
             }
             approaching.sortBy { targetPos - stops.indexOfFirst { s -> s.order == it.order } }
-            // 附近卡片也带估算 ETA / 距离（车到本站）
-            val approachingWithEta = approaching.map { bus ->
-                val busPos = stops.indexOfFirst { it.order == bus.order }
-                val meters = when {
-                    busPos < 0 || busPos > targetPos -> null
-                    busPos == targetPos -> 0
-                    else -> polylineMeters(stops, busPos, targetPos, bus.wgsLat, bus.wgsLng)
-                }
-                if (meters == null) {
-                    bus
-                } else {
-                    bus.copy(distanceToTargetMeters = meters, etaSeconds = etaSeconds(meters, bus.speedKmh))
-                }
-            }
+            val approachingWithEta = withEta(
+                stops, approaching, LineDetailRequest(lineId = line.lineId, targetOrder = targetIndex)
+            )
 
-            val nearest = approaching.firstOrNull()
+            val nearest = approachingWithEta.firstOrNull()
             val statusText = when {
                 nearest == null -> when (serviceState) {
                     ServiceHours.State.AFTER_LAST -> "末班已过"
                     ServiceHours.State.BEFORE_FIRST -> "等待发车"
                     else -> "暂无车辆"
                 }
-                nearest.isArrived && targetPos - busPosOf(stops, nearest.order) == 0 -> "已到站"
-                else -> "${targetPos - busPosOf(stops, nearest.order)}站"
+                ArrivalRules.isBusArrivedAtOrder(targetIndex, nearest) -> "已到站"
+                nearest.stopsTo(targetIndex) == 0 -> "下一站就到"
+                else -> "${nearest.stopsTo(targetIndex)}站"
             }
 
             statuses.add(
@@ -555,13 +570,17 @@ class MeishanTransitProvider(
         }
 
         // 非运营时段（未发车 / 末班已过）：服务端仍返回归场车辆快照，但它们不是在途车——
-        // 车辆列表置空，主卡按运营状态显示「未发车 / 末班已过」（06 §4.1 软件层规则优先）
-        val state = operatingState(first, last)
-        val buses = if (state == LineOperatingState.RUNNING) {
-            withEta(stops, parseBuses(ref, optJSONArray("busList") ?: JSONArray()), request)
+        // 车辆列表置空，主卡按运营状态显示「未发车 / 末班已过」（06 §4.1 软件层规则优先）。
+        // 末班是始发站发车时刻：末班后的宽限期里只留还在跑的末班车，都跑完了才收车
+        val scheduled = operatingState(first, last)
+        val grace = scheduled != LineOperatingState.RUNNING && isInLastBusGrace(first, last)
+        val buses = if (scheduled == LineOperatingState.RUNNING || grace) {
+            val parsed = parseBuses(ref, optJSONArray("busList") ?: JSONArray(), stops)
+            withEta(stops, if (grace) lastBusesStillRunning(parsed, stops, last) else parsed, request)
         } else {
             emptyList()
         }
+        val state = if (grace && buses.isNotEmpty()) LineOperatingState.RUNNING else scheduled
         return BusLineDetail(
             line = line,
             reverseDirection = reverseDirection,
@@ -586,8 +605,8 @@ class MeishanTransitProvider(
             val busPos = stops.indexOfFirst { it.order == bus.order }
             val meters = when {
                 busPos < 0 || busPos > targetPos -> null // 已过目标站 / 站序异常：不给 ETA
-                busPos == targetPos -> 0
-                else -> polylineMeters(stops, busPos, targetPos, bus.wgsLat, bus.wgsLng)
+                busPos == targetPos && bus.isArrived -> 0
+                else -> polylineMeters(stops, if (bus.isArrived) busPos else busPos - 1, targetPos, bus.wgsLat, bus.wgsLng)
             } ?: return@map bus
             bus.copy(
                 distanceToTargetMeters = meters,
@@ -641,10 +660,11 @@ class MeishanTransitProvider(
      * 车辆快照解析：速度优先用数据源自带的 b_sd，字段无效（0/缺失）时用相邻帧位移兜底；
      * 连续多帧不动的停场车从列表剔除。
      */
-    private fun parseBuses(ref: MeishanIds.Ref, busList: JSONArray): List<LiveBus> {
+    private fun parseBuses(ref: MeishanIds.Ref, busList: JSONArray, stops: List<BusStop>): List<LiveBus> {
         val nowMs = monotonicClock.elapsedMillis()
         val cacheKey = "${ref.areaId}_${ref.lId}_${ref.state}"
         var anonymousSlot = 0
+        val stopOrders = stops.map { it.order }
 
         val buses = ArrayList<LiveBus>(busList.length())
         for (i in 0 until busList.length()) {
@@ -655,6 +675,16 @@ class MeishanTransitProvider(
             // 一堆 index=0 的车停在起点站）。它们不属于任何站，放进列表会被「最近的车」
             // 筛选（order <= 目标站）误判成目标站上「已到站」
             if (index < 1) continue
+            val position = stops.indexOfFirst { it.order == index }
+            if (position < 0) continue
+            val arrived = bus.optInt("isArriveSite", 0) == 1
+            // index 是已到达 / 最近驶离的站；通用模型的 order 是正在接近的站。
+            val next = stops.getOrNull(position + 1)
+            val order = if (arrived) index else next?.order ?: index
+            val progress = if (arrived) 1.0f else RouteProjectionMath.computeSegmentProgress(
+                bus.optDouble("b_latitude", 0.0), bus.optDouble("b_longitude", 0.0),
+                false, stops[position], next
+            ).coerceIn(0.0f, 0.97f)
             // b_id 常为 0：有车牌时不把站序或数组位置混入身份。
             // 无车牌优先用有效 b_id，否则使用匿名车序号；后者只在匿名车顺序稳定时可跟随。
             val identity = plate.ifBlank {
@@ -676,11 +706,15 @@ class MeishanTransitProvider(
                 LiveBus(
                     busId = "msb:${ref.areaId}:${ref.lId}:${ref.state}:$identity",
                     plateOrFleetNo = plate,
-                    order = index,
-                    isArrived = bus.optInt("isArriveSite", 0) == 1,
+                    order = order,
+                    segmentProgress = progress,
+                    isArrived = arrived,
                     wgsLat = lat,
                     wgsLng = lng,
-                    speedKmh = speedKmh
+                    speedKmh = speedKmh,
+                    nextStopName = if (arrived) stops[position].name else next?.name,
+                    stopOrders = stopOrders,
+                    hasAuthoritativeArrival = true
                 )
             )
         }
@@ -688,10 +722,11 @@ class MeishanTransitProvider(
     }
 
     /**
-     * 单辆车速度解析 + 停场帧计数（06 §4.1）：
+     * 单辆车速度解析 + 停场计时（06 §4.1）：
      * - b_sd 有效（>0）直接用；
      * - 无效时若上一帧可比（2–120s）且位移合理，按位移估算；
-     * - 位移 < 30m 且无下发速度 → 停场帧 +1，累计 ≥ [PARKED_FRAMES] 判为停场车。
+     * - 无下发速度、离开始静止的位置不到 30m → 记下开始静止的时刻，持续满 [PARKED_AFTER_MS] 判为停场车。
+     *   按时长判：停站上下客、等红灯一两分钟不会被剔除，不受推送帧率影响。
      */
     private fun resolveBusSpeed(
         key: String,
@@ -704,20 +739,28 @@ class MeishanTransitProvider(
         val previous = synchronized(speedLock) { speedSamples[key]?.get(plate) }
         val hasReportedSpeed = reported.isFinite() && reported > 0.0
         var speedKmh = if (hasReportedSpeed) reported else 0.0
-        var still = 0
         if (previous != null && !hasReportedSpeed) {
             val dtSec = (nowMs - previous.timeMs) / 1000.0
             val meters = RouteProjectionMath.calculateDistanceMeters(previous.lat, previous.lng, lat, lng)
-            if (dtSec in SPEED_DT_MIN..SPEED_DT_MAX && meters != null) {
-                if (meters < PARKED_MOVE_METERS) {
-                    still = (previous.stillFrames + 1).coerceAtMost(PARKED_FRAMES)
-                } else {
-                    val kmh = (meters / dtSec) * 3.6
-                    if (kmh in SPEED_NOISE_KMH..SPEED_MAX_KMH) speedKmh = kmh
-                }
+            if (dtSec in SPEED_DT_MIN..SPEED_DT_MAX && meters != null && meters >= PARKED_MOVE_METERS) {
+                val kmh = (meters / dtSec) * 3.6
+                if (kmh in SPEED_NOISE_KMH..SPEED_MAX_KMH) speedKmh = kmh
             }
         }
-        return Triple(speedKmh, SpeedSample(lat, lng, nowMs, still), still >= PARKED_FRAMES)
+        // 静止计时：以开始静止的位置为锚点，慢慢漂移的 GPS 也不会让计时一直重来
+        val anchor = previous?.stillSince?.let { since ->
+            val drift = RouteProjectionMath.calculateDistanceMeters(previous.stillLat, previous.stillLng, lat, lng)
+            if (!hasReportedSpeed && drift != null && drift < PARKED_MOVE_METERS) since else null
+        }
+        val sample = if (anchor != null) {
+            SpeedSample(lat, lng, nowMs, stillSince = anchor, stillLat = previous!!.stillLat, stillLng = previous.stillLng)
+        } else if (hasReportedSpeed) {
+            SpeedSample(lat, lng, nowMs)
+        } else {
+            SpeedSample(lat, lng, nowMs, stillSince = nowMs, stillLat = lat, stillLng = lng)
+        }
+        val parked = sample.stillSince != null && nowMs - sample.stillSince >= PARKED_AFTER_MS
+        return Triple(speedKmh, sample, parked)
     }
 
     private fun storeSample(key: String, plate: String, sample: SpeedSample) {
@@ -730,7 +773,18 @@ class MeishanTransitProvider(
         }
     }
 
-    private data class SpeedSample(val lat: Double, val lng: Double, val timeMs: Long, val stillFrames: Int = 0)
+    /**
+     * 一辆车上一帧的位置；[stillSince] 是开始静止（无下发速度、离锚点 < 30m）的时刻，
+     * [stillLat] / [stillLng] 是开始静止时的位置（锚点）。在动的车 [stillSince] 为 null。
+     */
+    private data class SpeedSample(
+        val lat: Double,
+        val lng: Double,
+        val timeMs: Long,
+        val stillSince: Long? = null,
+        val stillLat: Double = lat,
+        val stillLng: Double = lng
+    )
 
     /** 每个线路方向一份上一帧位置（内存态，进程内有效；车牌不落盘）。线路详情 / 站点状态两条路径共用，访问走 [speedLock] */
     private val speedSamples = linkedMapOf<String, Map<String, SpeedSample>>()
@@ -759,6 +813,50 @@ class MeishanTransitProvider(
         wallClock.now().toLocalDateTime(BEIJING).let { t ->
             "${t.hour.toString().padStart(2, '0')}:${t.minute.toString().padStart(2, '0')}"
         }
+
+    /**
+     * 末班（官方给的是始发站发车时刻）之后 [LAST_BUS_GRACE_MINUTES] 分钟内：末班车可能还在路上。
+     * 只在时刻表判为非运营时成立；首末班缺失或格式不对时不成立。
+     */
+    private fun isInLastBusGrace(first: String, last: String): Boolean {
+        if (first.isBlank() || last.isBlank()) return false
+        val lastMinute = minuteOfDay(last) ?: return false
+        val firstMinute = minuteOfDay(first) ?: return false
+        if (firstMinute == lastMinute) return false // 首末班相同（常见于缺失填 00:00）：判不了
+        val now = beijingNowHHMM()
+        val nowMinute = minuteOfDay(now) ?: return false
+        val inService = ServiceHours.state(now, listOf(ServiceHours.Window(first, last))) ==
+            ServiceHours.State.IN_SERVICE
+        return !inService && minutesSince(lastMinute, nowMinute) in 1..LAST_BUS_GRACE_MINUTES
+    }
+
+    /**
+     * 末班后的宽限期里，只留还在线路上跑的车：
+     * - 已到终点站的车跑完了；
+     * - 末班发出 [ORIGIN_DEPARTURE_TOLERANCE_MINUTES] 分钟后还停在始发站的车不会再发。
+     */
+    private fun lastBusesStillRunning(buses: List<LiveBus>, stops: List<BusStop>, last: String): List<LiveBus> {
+        if (stops.isEmpty()) return buses
+        val lastMinute = minuteOfDay(last)
+        val nowMinute = minuteOfDay(beijingNowHHMM())
+        val pastDeparture = lastMinute != null && nowMinute != null &&
+            minutesSince(lastMinute, nowMinute) > ORIGIN_DEPARTURE_TOLERANCE_MINUTES
+        return buses.filter { bus ->
+            val pos = stops.indexOfFirst { it.order == bus.order }
+            when {
+                pos == stops.lastIndex && bus.isArrived -> false
+                // 停在始发站（已到站标志）的车：末班发出一会儿还没走，就不会再发了
+                pos == 0 && bus.isArrived && pastDeparture -> false
+                else -> true
+            }
+        }
+    }
+
+    private fun minuteOfDay(hhmm: String): Int? =
+        TimetableRules.normalizeClock(hhmm)?.split(":")?.let { (h, m) -> h.toInt() * 60 + m.toInt() }
+
+    /** 从 [fromMinute] 到 [toMinute] 过了多少分钟（跨零点按次日算） */
+    private fun minutesSince(fromMinute: Int, toMinute: Int): Int = (toMinute - fromMinute + 24 * 60) % (24 * 60)
 
     private fun MeishanLine.toSummary(): BusLineSummary {
         val directions = buildList {

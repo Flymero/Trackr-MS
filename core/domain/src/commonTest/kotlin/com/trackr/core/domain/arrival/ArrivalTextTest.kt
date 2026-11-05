@@ -170,9 +170,9 @@ class ArrivalTextTest {
     fun allPassed_withoutNextDeparture_showsLastBus() {
         val state = runningLine(target = 5, buses = listOf(bus(order = 6)), now = LocalTime(21, 0))
         val d = ArrivalText.format(state)
-        assertEquals("车都过了", d.value)
+        assertEquals("等待发车", d.value)
         assertEquals("暂无下一班发车时间 · 末班 22:30", d.detail)
-        assertEquals("车都过了 · 末班 22:30", d.short)
+        assertEquals("等待发车 · 末班 22:30", d.short)
         assertEquals(ArrivalTone.Mute, d.tone)
     }
 
@@ -318,7 +318,7 @@ class ArrivalTextTest {
             assertTrue(d.value.isNotBlank(), "$state 缺大字")
             assertTrue(d.short.isNotBlank(), "$state 缺短文字")
         }
-        assertEquals("325路，车都过了，下一班 7点20分 从 白石洲 发车", ArrivalText.format(states[3], "325路").spoken)
+        assertEquals("325路，等待发车，下一班 7点20分 从 白石洲 发车", ArrivalText.format(states[3], "325路").spoken)
     }
 
     @Test
@@ -329,8 +329,8 @@ class ArrivalTextTest {
         assertEquals("${who}还有 2 站，大约 4 分钟到科技园站", say(ArrivalState.OnTheWay(2, 4)))
         assertEquals("${who}还有 3 站到科技园站", say(ArrivalState.OnTheWay(3, null)))
         assertEquals("${who}车到科技园站了，快去上车", say(ArrivalState.Arriving()))
-        assertEquals("${who}车都过了，下一班 7点20分 从 白石洲 发车", say(ArrivalState.AllPassed("07:20", "白石洲", "22:30")))
-        assertEquals("${who}车都过了，暂无下一班发车时间，末班 22点30分", say(ArrivalState.AllPassed(null, "白石洲", "22:30")))
+        assertEquals("${who}等待发车，下一班 7点20分 从 白石洲 发车", say(ArrivalState.AllPassed("07:20", "白石洲", "22:30")))
+        assertEquals("${who}等待发车，暂无下一班发车时间，末班 22点30分", say(ArrivalState.AllPassed(null, "白石洲", "22:30")))
         assertEquals("${who}还没发车，首班 6点30分 从 白石洲 发车", say(ArrivalState.NotStarted("06:30", null, "白石洲")))
         assertEquals("${who}还没发车，下一班 7点 从 白石洲 发车", say(ArrivalState.NotStarted("06:30", "7:00", "白石洲")))
         assertEquals("${who}今天没车了，明天首班 6点30分", say(ArrivalState.Ended("06:30", "22:30")))

@@ -124,7 +124,7 @@ fun BusListContent(
                 lineDetail.buses.sortedWith(
                     compareBy<LiveBus> { it.order > currentOrder }
                         .thenBy { if (it.etaSeconds > 0) it.etaSeconds else Int.MAX_VALUE }
-                        .thenBy { currentOrder - it.order }
+                        .thenBy { it.stopsTo(currentOrder) }
                 )
             }
 
@@ -132,7 +132,7 @@ fun BusListContent(
                 sortedBuses.forEach { bus ->
                     val isPassed = bus.order > currentOrder
                     val isAtStop = bus.order == currentOrder && bus.isArrived
-                    val stopsLeft = currentOrder - bus.order
+                    val stopsLeft = bus.stopsTo(currentOrder)
 
                     Surface(
                         onClick = { onSelectBus(bus) },

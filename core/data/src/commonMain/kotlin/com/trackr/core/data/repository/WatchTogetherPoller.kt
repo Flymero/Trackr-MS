@@ -145,7 +145,12 @@ class WatchTogetherPoller(
         val buses = if (shift == 0) {
             status.approachingBuses
         } else {
-            status.approachingBuses.map { it.copy(order = (it.order + shift).coerceAtLeast(1)) }
+            status.approachingBuses.map { bus ->
+                bus.copy(
+                    order = (bus.order + shift).coerceAtLeast(1),
+                    stopOrders = bus.stopOrders.map { (it + shift).coerceAtLeast(1) }
+                )
+            }
         }
         return LinePoll(buses = buses, fromLineDetail = false, statusText = status.statusText)
     }

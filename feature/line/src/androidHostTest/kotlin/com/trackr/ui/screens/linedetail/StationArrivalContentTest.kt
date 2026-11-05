@@ -106,7 +106,7 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
-        composeTestRule.onNodeWithText("车都过了").assertIsDisplayed()
+        composeTestRule.onNodeWithText("等待发车").assertIsDisplayed()
         composeTestRule.onNodeWithText("暂无下一班发车时间 · 末班 23:30").assertIsDisplayed()
     }
 
@@ -330,6 +330,29 @@ class StationArrivalContentTest {
         composeTestRule.onNodeWithContentDescription("换上车站", useUnmergedTree = true).performClick()
         assertEquals(1, openedList)
         assertTrue(picked >= 1)
+    }
+
+    @Test
+    fun followingBusText_sparseStopOrders_countsByPositionAndKeepsFallback() {
+        val bus = LiveBus(
+            busId = "sparse",
+            plateOrFleetNo = "川Z1234",
+            order = 3,
+            etaSeconds = 720,
+            stopOrders = listOf(1, 3, 7, 20)
+        )
+        assertEquals(
+            "下一辆 约 12 分钟 · 2 站",
+            com.trackr.ui.screens.linedetail.components.followingBusText(20, bus)
+        )
+        assertEquals(
+            "下一辆 约 12 分钟 · 17 站",
+            com.trackr.ui.screens.linedetail.components.followingBusText(20, bus.copy(stopOrders = emptyList()))
+        )
+        assertEquals(
+            "下一辆还有 2 站",
+            com.trackr.ui.screens.linedetail.components.followingBusText(20, bus.copy(etaSeconds = -1))
+        )
     }
 
     @Test

@@ -362,7 +362,7 @@ internal object WatchTogetherTracker {
             plate = best.friendlyPlate,
             busOrder = best.order,
             busProgress = best.segmentProgress,
-            stopsRemaining = (a - best.order).coerceAtLeast(0),
+            stopsRemaining = best.stopsTo(a).coerceAtLeast(0),
             etaSeconds = best.etaSeconds,
             isArrived = arrived,
             hasData = true,
@@ -568,7 +568,9 @@ internal object WatchTogetherTracker {
             currentBusId = busId,
             currentBusOrder = order,
             currentBusProgress = pick?.bus?.segmentProgress ?: 0f,
-            stopsRemaining = if (targetOrder > 0 && order > 0) (targetOrder - order).coerceAtLeast(0) else -1,
+            stopsRemaining = if (targetOrder > 0 && order > 0) {
+                (pick?.bus?.stopsTo(targetOrder) ?: (targetOrder - order)).coerceAtLeast(0)
+            } else -1,
             etaSeconds = -1,
             alertThresholdStops = session.state.alertThresholdStops,
             currentLegIndex = 0,

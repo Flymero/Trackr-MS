@@ -231,11 +231,16 @@ class WatchTogetherPollerTest {
     fun stopOrderDiffers_busOrdersShiftedToSessionOrder() = runTest {
         val watched = listOf(line(1, order = 8))
         val fake = FakeRealtimeRepository()
-        fake.stopDetailResult = Result.success(listOf(stop(listOf(status("L1", listOf(bus("b", 4)), targetOrder = 5)))))
+        fake.stopDetailResult = Result.success(listOf(stop(listOf(status(
+            "L1", listOf(bus("b", 4).copy(stopOrders = listOf(1, 4, 5, 10))), targetOrder = 5
+        )))))
 
         val poll = WatchTogetherPoller(fake).poll(target(watched), WatchPollPlan.Stop(watched), city).getOrThrow()
 
-        assertEquals(7, poll.lines.getValue("L1").buses.single().order)
+        val shifted = poll.lines.getValue("L1").buses.single()
+        assertEquals(7, shifted.order)
+        assertEquals(listOf(4, 7, 8, 13), shifted.stopOrders)
+        assertEquals(1, shifted.stopsTo(8))
     }
 
     @Test

@@ -415,7 +415,7 @@ class RouteDetailViewModel(
                             val candidateBuses = detail.buses.filter { it.order <= targetOrder }
                             val nearest = candidateBuses.maxByOrNull { it.order.toFloat() + it.segmentProgress }
                             if (nearest != null) {
-                                val stopsLeft = (targetOrder - nearest.order).coerceAtLeast(0)
+                                val stopsLeft = nearest.stopsTo(targetOrder).coerceAtLeast(0)
                                 // 到站口径统一走 ArrivalRules（ETA 1..45 秒、坐标缺失不信插值），文字走 ArrivalText
                                 val arrivalState = ArrivalText.stateForBus(targetOrder, nearest)
                                 val isArrived = arrivalState is ArrivalState.Arriving

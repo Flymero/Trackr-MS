@@ -95,7 +95,7 @@ internal object SingleLegTracker {
         }
 
         val isNewVehicle = trackedId == null || trackedId != best.busId
-        val stopsRemaining = (targetOrder - best.order).coerceAtLeast(0)
+        val stopsRemaining = best.stopsTo(targetOrder).coerceAtLeast(0)
         val isStoppedAtTarget = stopsRemaining == 0 && ArrivalRules.isBusStopped(best)
         val isArrivedCondition = ArrivalRules.isBusArrivedAtOrder(targetOrder, best)
 

@@ -115,6 +115,30 @@ class BusFollowContentTest {
     }
 
     @Test
+    fun sparseStopOrders_countsToTerminalAndMarksNextStop() {
+        val sparseStops = stops.mapIndexed { index, stop -> stop.copy(order = listOf(1, 7, 20)[index]) }
+        val followedBus = LiveBus(
+            busId = "sparse",
+            plateOrFleetNo = "川Z1234",
+            order = 7,
+            stopOrders = sparseStops.map { it.order },
+            hasAuthoritativeArrival = true
+        )
+        composeTestRule.setContent {
+            TrackrTheme {
+                BusFollowContent(
+                    lineDetail = BusLineDetail(line = lineDirection, stops = sparseStops, buses = listOf(followedBus)),
+                    followedBus = followedBus,
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("1 站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("下一站").assertIsDisplayed()
+    }
+
+    @Test
     fun testBusFollowContent_handlesNullBus() {
         val lineDetail = BusLineDetail(
             line = lineDirection,

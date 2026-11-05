@@ -116,6 +116,7 @@ data class LineDetailUiState(
     val entryStopOrder: Int? = null,
     /** 第一次网络请求还没回来 */
     val isLoading: Boolean = true,
+    val isPushOnline: Boolean = false,
     /** 有请求在进行（轮询、选站、手动刷新）；不用来画下拉圈 */
     val isRefreshing: Boolean = false,
     /** 用户下拉触发的刷新还没完成（只有它画下拉圈） */
@@ -511,6 +512,7 @@ class LineDetailViewModel(
     private fun setPushOnline(online: Boolean) {
         val wasOnline = pushOnline
         pushOnline = online
+        _uiState.update { it.copy(isPushOnline = online) }
         if (!screenResumed || !enableAutoPolling) return
         pollingCoordinator.setActive(!online)
         if (wasOnline && !online && activeLoads.load() == 0) {
@@ -524,6 +526,7 @@ class LineDetailViewModel(
         pushJob = null
         pushKey = null
         pushOnline = false
+        _uiState.update { it.copy(isPushOnline = false) }
     }
 
     private fun writeStopsCache(static: LineStatic) {

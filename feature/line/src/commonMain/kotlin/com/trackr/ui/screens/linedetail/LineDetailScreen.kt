@@ -1,5 +1,8 @@
 package com.trackr.ui.screens.linedetail
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
@@ -234,6 +237,7 @@ fun LineDetailScreen(
             LineTopBar(
                 title = static?.line?.name ?: state.lineNameHint,
                 source = static?.line?.source,
+                isPushOnline = state.isPushOnline,
                 isFavorite = state.isFavorite,
                 actionsEnabled = static != null && state.selectedStop != null,
                 onBack = { onEvent(LineDetailEvent.Back) },
@@ -437,6 +441,7 @@ fun LineDetailScreen(
 private fun LineTopBar(
     title: String,
     source: DataSourceType?,
+    isPushOnline: Boolean,
     isFavorite: Boolean,
     actionsEnabled: Boolean,
     onBack: () -> Unit,
@@ -456,14 +461,7 @@ private fun LineTopBar(
                 )
                 if (source != null) {
                     Spacer(modifier = Modifier.width(8.dp))
-                    DataSourceBadge(
-                        style = when (source) {
-                            DataSourceType.CHELAILE -> DataSourceBadgeStyle.CHELAILE
-                            DataSourceType.MYGOLBS -> DataSourceBadgeStyle.MYGOLBS
-                            DataSourceType.MEISHAN -> DataSourceBadgeStyle.MEISHAN
-                        },
-                        text = source.displayName
-                    )
+                    LineSourceBadge(source, isPushOnline)
                 }
             }
         },
@@ -723,6 +721,40 @@ private fun LineBottomBar(
                     imageVector = vectorResource(Res.drawable.ic_qr_code),
                     contentDescription = stringResource(Res.string.transit_code),
                     modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun LineSourceBadge(source: DataSourceType, isPushOnline: Boolean) {
+    val style = when (source) {
+        DataSourceType.CHELAILE -> DataSourceBadgeStyle.CHELAILE
+        DataSourceType.MYGOLBS -> DataSourceBadgeStyle.MYGOLBS
+        DataSourceType.MEISHAN -> DataSourceBadgeStyle.MEISHAN
+    }
+    if (source != DataSourceType.MEISHAN) {
+        DataSourceBadge(style = style, text = source.displayName)
+        return
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("眉山官方", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = style.contentColor)
+        AnimatedVisibility(
+            visible = isPushOnline,
+            enter = expandHorizontally(tween(220), expandFrom = Alignment.Start) + fadeIn(tween(180)),
+            exit = shrinkHorizontally(tween(180), shrinkTowards = Alignment.Start) + fadeOut(tween(120)),
+            label = "source_tcp"
+        ) {
+            Surface(
+                modifier = Modifier.padding(start = 4.dp),
+                shape = RoundedCornerShape(3.dp),
+                color = style.contentColor
+            ) {
+                Text(
+                    "TCP", modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                    color = style.containerColor, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.6.sp
                 )
             }
         }
