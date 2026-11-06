@@ -3,6 +3,7 @@ package com.trackr.core.navigation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,12 +49,14 @@ fun rememberNavigationState(
     // 每条栈用页签名作存档 key，不按调用位置。第 17 步页签从 4 个变 3 个，按位置存的话旧版存下的第 3 条（收藏）会被「更多」拿走
     val stackSaver = remember(configuration) { navBackStackSaver(configuration) }
     val stacks = topLevel.associateWith { tab ->
-        rememberSaveable(saver = stackSaver, key = "trackr.tabStack.$tab") { NavBackStack<NavKey>(tab) }.also { stack ->
-            // 兜底：恢复出来的栈底不是这个页签（旧版存档、页签改动）就丢掉，从页签根页重来
-            remember(stack) {
-                if (stack.firstOrNull() != tab) {
-                    stack.clear()
-                    stack.add(tab)
+        key(tab) {
+            rememberSaveable(saver = stackSaver) { NavBackStack<NavKey>(tab) }.also { stack ->
+                // 兜底：恢复出来的栈底不是这个页签（旧版存档、页签改动）就丢掉，从页签根页重来
+                remember(stack) {
+                    if (stack.firstOrNull() != tab) {
+                        stack.clear()
+                        stack.add(tab)
+                    }
                 }
             }
         }

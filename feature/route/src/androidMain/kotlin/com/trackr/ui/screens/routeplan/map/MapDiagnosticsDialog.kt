@@ -8,11 +8,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.AnnotatedString
+import com.trackr.ui.platform.plainTextClipEntry
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import com.trackr.core.designsystem.resources.Res
@@ -35,7 +37,8 @@ internal fun MapDiagnosticsDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipboardScope = rememberCoroutineScope()
 
     val packageName = context.packageName
     // 签名 SHA-1 经 AppSigningInfo 取（Android 实现转调 SignatureUtils，取不到时为空串）
@@ -79,7 +82,7 @@ internal fun MapDiagnosticsDialog(
         dismissButton = {
             TextButton(
                 onClick = {
-                    clipboardManager.setText(AnnotatedString(report))
+                    clipboardScope.launch { clipboard.setClipEntry(plainTextClipEntry(report)) }
                     Toast.makeText(context, "诊断信息已复制", Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.testTag("btn_copy_diagnostics")

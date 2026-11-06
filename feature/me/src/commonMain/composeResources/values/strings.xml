@@ -75,6 +75,11 @@
     <string name="me_status_chip_settings">通知设置</string>
     <string name="me_status_chip_on">已开启</string>
     <string name="me_status_chip_off">去开启</string>
+    <string name="me_notify_health">通知可靠性</string>
+    <string name="me_notify_health_permission">应用通知权限未开启</string>
+    <string name="me_notify_health_alert">到站提醒重要级别不足，可能没有横幅</string>
+    <string name="me_notify_health_live">实时追踪通知已关闭</string>
+    <string name="me_notify_health_fix">去设置</string>
     <string name="me_group_map">地图</string>
     <string name="me_about_app">关于追客</string>
     <string name="me_version">版本 %1$s</string>

@@ -28,6 +28,8 @@ import com.trackr.core.model.UserFix
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
@@ -309,6 +311,7 @@ class FakeRealtimeRepository(
 
     /** 每次 [getLineDetail] 请求的 lineId（按调用顺序） */
     val lineDetailCalls: MutableList<String> = mutableListOf()
+    private val lineDetailCallsMutex = Mutex()
 
     /** [getLineDetail] 返回前先跑一下（测试用来挂起、数并发）；null = 直接返回 */
     var lineDetailHook: (suspend (lineId: String) -> Unit)? = null
@@ -371,7 +374,7 @@ class FakeRealtimeRepository(
         lineNameHint: String,
         directionHint: Int
     ): Result<BusLineDetail> {
-        lineDetailCalls += lineId
+        lineDetailCallsMutex.withLock { lineDetailCalls += lineId }
         lineDetailHook?.invoke(lineId)
         lineDetailsMap[lineId]?.let { return Result.success(it) }
         lineDetailResult?.let { return it }

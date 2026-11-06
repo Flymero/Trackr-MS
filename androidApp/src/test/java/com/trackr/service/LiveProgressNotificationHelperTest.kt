@@ -153,7 +153,7 @@ class LiveProgressNotificationHelperTest {
         val title = notifApproaching.extras.getCharSequence("android.title")?.toString().orEmpty()
         val text = notifApproaching.extras.getCharSequence("android.text")?.toString().orEmpty()
         assertTrue("标题应包含线路名", title.contains("49路"))
-        assertEquals("上海体育馆：2 分钟 · 下一站就到", text)
+        assertEquals("上海体育馆：约 2 分钟 · 下一站就到", text)
         assertTrue("正文不应包含剩 0 站", !text.contains("剩 0 站"))
         assertFalse("没到 45 秒内不应说进站", text.contains("即将进站") || text.contains("到站了"))
         assertEquals("下一站到", liveNotifier.shortCriticalTextFor(stateApproaching))
@@ -214,7 +214,7 @@ class LiveProgressNotificationHelperTest {
     @Test
     fun buildTexts_waitingBoard() {
         val texts = liveNotifier.buildTexts(waitingState(), nextLineName = "M492")
-        assertEquals("B612 4 分钟到 科技园", texts.title)
+        assertEquals("B612 约 4 分钟到 科技园", texts.title)
         assertEquals("还有 2 站", texts.content)
         assertEquals("第 1/2 程 · 等车", texts.subText)
 
@@ -223,7 +223,7 @@ class LiveProgressNotificationHelperTest {
         assertEquals("暂无到站时间", noEta.content)
 
         val nextStop = liveNotifier.buildTexts(waitingState().copy(stopsRemaining = 0, etaSeconds = 90))
-        assertEquals("B612 2 分钟到 科技园", nextStop.title)
+        assertEquals("B612 约 2 分钟到 科技园", nextStop.title)
         assertEquals("下一站就到", nextStop.content)
         assertEquals("下一站到", liveNotifier.shortCriticalTextFor(waitingState().copy(stopsRemaining = 0, etaSeconds = 90)))
 
@@ -324,7 +324,7 @@ class LiveProgressNotificationHelperTest {
     @Test
     fun watchTogether_waiting_titleIsFastest_contentNamesOnlySecondLine() {
         val notification = liveNotifier.buildNotification(context, watchWaitingState(), watch = threeLines)
-        assertEquals("325 4 分钟到 科技园站", notification.extras.getCharSequence("android.title")?.toString())
+        assertEquals("325 约 4 分钟到 科技园站", notification.extras.getCharSequence("android.title")?.toString())
         val content = notification.extras.getCharSequence("android.text")?.toString().orEmpty()
         assertTrue(content, content.endsWith("M194 9 分钟"))
         // R6：只写前 2 条
@@ -439,6 +439,7 @@ class LiveProgressNotificationHelperTest {
         assertEquals("追客 · 追踪中", title)
         assertNull(public.extras.getCharSequence(Notification.EXTRA_TEXT))
         assertTrue(public.actions.isNullOrEmpty())
+        assertNotNull("脱敏锁屏通知仍应能打开 App", public.contentIntent)
         // 完整版照旧
         assertEquals("还有 2 站在 深大北门 下车", notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
     }

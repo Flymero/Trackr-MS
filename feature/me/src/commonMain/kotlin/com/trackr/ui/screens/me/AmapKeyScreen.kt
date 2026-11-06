@@ -31,12 +31,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalUriHandler
+import com.trackr.ui.platform.plainTextClipEntry
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,11 +81,12 @@ fun AmapKeyScreen(
     onEvent: (AmapKeyEvent) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipboardScope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
 
     fun copy(text: String, what: String) {
-        clipboard.setText(AnnotatedString(text))
+        clipboardScope.launch { clipboard.setClipEntry(plainTextClipEntry(text)) }
         onEvent(AmapKeyEvent.Copied(what))
     }
 

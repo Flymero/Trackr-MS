@@ -1,8 +1,12 @@
 package com.trackr.di
 
+import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
 import com.trackr.BuildConfig
 import com.trackr.core.data.local.LocalMigrationFlags
 import com.trackr.core.data.local.StoreMigrationFlags
@@ -15,12 +19,17 @@ import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.platform.speech.AndroidTtsAnnouncer
+import com.trackr.service.ArrivalAlertNotifier
+import com.trackr.service.LiveProgressNotifier
 import com.trackr.service.vendor.LiveUpdatePromotion
 import com.trackr.service.vendor.OppoFluidCloudAdapter
 import com.trackr.service.vendor.XiaomiFocusAdapter
 import com.trackr.ui.platform.LiveUpdateAccess
 import com.trackr.ui.platform.LiveUpdateSettings
 import com.trackr.ui.platform.LiveUpdateStatus
+import com.trackr.ui.platform.NotificationHealth
+import com.trackr.ui.platform.NotificationHealthAccess
+import com.trackr.ui.platform.NotificationHealthIssue
 import com.trackr.util.SignatureUtils
 import com.trackr.util.TransitCodeHelper
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +52,7 @@ val platformBridgeModule: Module = module {
     single<LiveUpdateSettings> { AndroidLiveUpdateSettings }
     // 「我的」页「状态栏胶囊」那一行（第 25 步）
     single<LiveUpdateAccess> { AndroidLiveUpdateAccess(androidContext(), get()) }
+    single<NotificationHealthAccess> { AndroidNotificationHealthAccess(androidContext()) }
     single<UserLocationStore> { TransitUserLocationStore(get()) }
     // 收藏分组一次性数据修复的版本号（原来在 viewModelModule 里给 FavoritesGroupViewModel 现建）
     single<LocalMigrationFlags> { StoreMigrationFlags(get()) }
@@ -125,6 +135,49 @@ class AndroidLiveUpdateAccess(
             settings.isColorOs() -> settings.openFluidCloudSettings(appContext)
             else -> settings.openAppNotificationSettings(appContext)
         }
+    }
+}
+
+/**
+ * “我的”页的通知可靠性体检：只检查系统公开 API 能确认的状态。
+ * 尚未创建的渠道视为正常，避免用户第一次追踪前看到误报。
+ */
+class AndroidNotificationHealthAccess(context: Context) : NotificationHealthAccess {
+    private val appContext: Context = context.applicationContext ?: context
+
+    override fun status(): NotificationHealth {
+        val notificationsEnabled = runCatching {
+            NotificationManagerCompat.from(appContext).areNotificationsEnabled()
+        }.getOrDefault(true)
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        val alertChannel = manager?.getNotificationChannel(ArrivalAlertNotifier.CHANNEL_ID_ALERT)
+        val liveChannel = manager?.getNotificationChannel(LiveProgressNotifier.CHANNEL_ID_LIVE_PROGRESS)
+        return NotificationHealth(
+            notificationsEnabled = notificationsEnabled,
+            alertChannelAudible = alertChannel == null ||
+                alertChannel.importance >= NotificationManager.IMPORTANCE_HIGH,
+            liveChannelEnabled = liveChannel == null ||
+                liveChannel.importance != NotificationManager.IMPORTANCE_NONE
+        )
+    }
+
+    override fun openSettings(issue: NotificationHealthIssue) {
+        val channelId = when (issue) {
+            NotificationHealthIssue.NOTIFICATIONS -> null
+            NotificationHealthIssue.ALERT_CHANNEL -> ArrivalAlertNotifier.CHANNEL_ID_ALERT
+            NotificationHealthIssue.LIVE_CHANNEL -> LiveProgressNotifier.CHANNEL_ID_LIVE_PROGRESS
+        }
+        val opened = if (channelId == null) {
+            LiveUpdatePromotion.openAppNotificationSettings(appContext)
+        } else {
+            val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, appContext.packageName)
+                putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching { appContext.startActivity(intent) }.isSuccess
+        }
+        if (!opened) LiveUpdatePromotion.openAppNotificationSettings(appContext)
     }
 }
 

@@ -12,6 +12,9 @@ import com.trackr.core.testing.MainDispatcherHolder
 import com.trackr.data.repository.FakeScheduledReminderRepository
 import com.trackr.ui.platform.LiveUpdateAccess
 import com.trackr.ui.platform.LiveUpdateStatus
+import com.trackr.ui.platform.NotificationHealth
+import com.trackr.ui.platform.NotificationHealthAccess
+import com.trackr.ui.platform.NotificationHealthIssue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
@@ -32,6 +35,7 @@ class MeViewModelTest {
     private lateinit var amapKeys: FakeAmapKeyRepository
     private lateinit var notices: MeNotices
     private lateinit var liveUpdate: FakeLiveUpdateAccess
+    private lateinit var notificationHealth: FakeNotificationHealthAccess
 
     @BeforeTest
     fun setup() {
@@ -41,6 +45,7 @@ class MeViewModelTest {
         amapKeys = FakeAmapKeyRepository()
         notices = MeNotices()
         liveUpdate = FakeLiveUpdateAccess()
+        notificationHealth = FakeNotificationHealthAccess()
     }
 
     @AfterTest
@@ -50,14 +55,16 @@ class MeViewModelTest {
 
     private fun createViewModel(
         liveUpdateAccess: LiveUpdateAccess? = liveUpdate,
-        versionName: String? = "0.0.3"
+        versionName: String? = "0.0.3",
+        notificationHealthAccess: NotificationHealthAccess? = notificationHealth
     ) = MeViewModel(
         settings = settings,
         reminderRepository = reminders,
         amapKeys = amapKeys,
         notices = notices,
         liveUpdateAccess = liveUpdateAccess,
-        versionName = versionName
+        versionName = versionName,
+        notificationHealthAccess = notificationHealthAccess
     )
 
     @Test
@@ -259,6 +266,30 @@ class MeViewModelTest {
     }
 
     @Test
+    fun notificationHealth_onlyShowsIssues_andRefreshesOnResume() = runTest(main.dispatcher) {
+        notificationHealth.current = NotificationHealth()
+        val viewModel = createViewModel()
+        assertNull(viewModel.uiState.value.notificationHealth)
+
+        notificationHealth.current = NotificationHealth(liveChannelEnabled = false)
+        viewModel.onScreenResumed()
+        testScheduler.advanceUntilIdle()
+        assertEquals(NotificationHealthIssue.LIVE_CHANNEL, viewModel.uiState.value.notificationHealth?.issue)
+
+        notificationHealth.current = NotificationHealth(notificationsEnabled = false, alertChannelAudible = false)
+        viewModel.onScreenResumed()
+        testScheduler.advanceUntilIdle()
+        assertEquals(NotificationHealthIssue.NOTIFICATIONS, viewModel.uiState.value.notificationHealth?.issue)
+    }
+
+    @Test
+    fun notificationHealth_openSettingsForwardsIssue() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        viewModel.onEvent(MeEvent.OpenNotificationSettings(NotificationHealthIssue.ALERT_CHANNEL))
+        assertEquals(NotificationHealthIssue.ALERT_CHANNEL, notificationHealth.openedIssue)
+    }
+
+    @Test
     fun amapKeyStatus_followsRepository() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
 
@@ -319,6 +350,18 @@ class MeViewModelTest {
 }
 
 /** 状态栏胶囊的 Fake：默认小米、没开权限 */
+class FakeNotificationHealthAccess(
+    var current: NotificationHealth = NotificationHealth()
+) : NotificationHealthAccess {
+    var openedIssue: NotificationHealthIssue? = null
+
+    override fun status(): NotificationHealth = current
+
+    override fun openSettings(issue: NotificationHealthIssue) {
+        openedIssue = issue
+    }
+}
+
 class FakeLiveUpdateAccess(
     var current: LiveUpdateStatus = LiveUpdateStatus(supported = true, allowed = false, systemName = "小米焦点通知")
 ) : LiveUpdateAccess {

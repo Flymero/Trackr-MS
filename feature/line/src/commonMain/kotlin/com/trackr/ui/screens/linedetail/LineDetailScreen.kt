@@ -121,6 +121,7 @@ import com.trackr.ui.screens.linedetail.components.BusFollowContent
 import com.trackr.ui.screens.linedetail.components.BusListContent
 import com.trackr.ui.screens.linedetail.components.FavoriteGroupPickerSheet
 import com.trackr.ui.screens.linedetail.components.StationArrivalContent
+import com.trackr.ui.screens.linedetail.components.overflowMarquee
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
@@ -505,7 +506,11 @@ private fun DirectionHeader(
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f, fill = false)
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .overflowMarquee()
             )
             // 反向切换只在这里一处（v3「换向贴在起终点旁」）
             if (static.reverseDirection != null) {

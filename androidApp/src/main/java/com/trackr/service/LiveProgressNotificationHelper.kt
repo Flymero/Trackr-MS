@@ -273,7 +273,7 @@ class LiveProgressNotifier(
         return notification
     }
 
-    /** 锁屏开关关掉时锁屏上看到的版本：不带线路、站名和按钮 */
+    /** 锁屏开关关掉时锁屏上看到的版本：不带线路、站名和按钮，但点了仍能打开 App */
     private fun buildLockScreenPublicVersion(context: Context): Notification =
         NotificationCompat.Builder(context, CHANNEL_ID_LIVE_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_trackr)
@@ -281,6 +281,14 @@ class LiveProgressNotifier(
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    context,
+                    CONTENT_REQUEST_CODE,
+                    contentIntent(context, watch = null),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
             .build()
 
     /** 通知上的文字 */
@@ -638,6 +646,7 @@ class LiveProgressNotifier(
         private const val CHANNEL_NAME_LIVE_PROGRESS = "实时在途追踪与进度"
 
         const val NOTIFICATION_ID_LIVE_PROGRESS = 10001
+        private const val CONTENT_REQUEST_CODE = 200
 
         /** Android 16 胶囊短文本的建议长度上限 */
         private const val MAX_SHORT_TEXT_LENGTH = 7

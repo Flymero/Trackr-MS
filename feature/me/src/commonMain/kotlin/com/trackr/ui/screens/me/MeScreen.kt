@@ -41,7 +41,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,6 +89,11 @@ import com.trackr.feature.me.resources.me_group_travel
 import com.trackr.feature.me.resources.me_live_notify
 import com.trackr.feature.me.resources.me_live_notify_desc
 import com.trackr.feature.me.resources.me_lockscreen
+import com.trackr.feature.me.resources.me_notify_health
+import com.trackr.feature.me.resources.me_notify_health_permission
+import com.trackr.feature.me.resources.me_notify_health_alert
+import com.trackr.feature.me.resources.me_notify_health_live
+import com.trackr.feature.me.resources.me_notify_health_fix
 import com.trackr.feature.me.resources.me_lockscreen_full
 import com.trackr.feature.me.resources.me_lockscreen_hidden
 import com.trackr.feature.me.resources.me_reminders
@@ -220,6 +226,26 @@ fun MeScreen(
                         checked = state.showOnLockScreen,
                         onCheckedChange = { onEvent(MeEvent.SetShowOnLockScreen(it)) }
                     )
+                    state.notificationHealth?.let { health ->
+                        GroupDivider()
+                        SettingRow(
+                            title = stringResource(MeRes.string.me_notify_health),
+                            subtitle = when (health.issue) {
+                                com.trackr.ui.platform.NotificationHealthIssue.NOTIFICATIONS ->
+                                    stringResource(MeRes.string.me_notify_health_permission)
+                                com.trackr.ui.platform.NotificationHealthIssue.ALERT_CHANNEL ->
+                                    stringResource(MeRes.string.me_notify_health_alert)
+                                com.trackr.ui.platform.NotificationHealthIssue.LIVE_CHANNEL ->
+                                    stringResource(MeRes.string.me_notify_health_live)
+                                null -> ""
+                            },
+                            value = stringResource(MeRes.string.me_notify_health_fix),
+                            valueColor = TrackrTheme.colors.warn,
+                            onClick = {
+                                health.issue?.let { onEvent(MeEvent.OpenNotificationSettings(it)) }
+                            }
+                        )
+                    }
                     state.liveUpdate?.let { liveUpdate ->
                         GroupDivider()
                         SettingRow(
@@ -547,7 +573,10 @@ private fun RemindersSheet(
     onToggle: (id: String, enabled: Boolean) -> Unit,
     onOpen: (id: String) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
+    )
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Row(
             modifier = Modifier

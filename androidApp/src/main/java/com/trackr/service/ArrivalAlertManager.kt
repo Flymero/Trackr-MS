@@ -1,5 +1,6 @@
 package com.trackr.service
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -29,35 +30,57 @@ import com.trackr.service.vendor.XiaomiFocusAdapter
  * @param liveProgressNotifier 读「实时通知」开关，与常驻通知共用同一个兜底值
  */
 class ArrivalAlertNotifier(
-    private val liveProgressNotifier: LiveProgressNotifier
+    private val liveProgressNotifier: LiveProgressNotifier,
+    private val showOnLockScreenSetting: () -> Boolean = { true }
 ) {
+
+    private fun alertNotification(
+        context: Context,
+        title: String,
+        content: String,
+        category: String,
+        requestCode: Int,
+        defaults: Int = NotificationCompat.DEFAULT_ALL
+    ): Notification {
+        val lockScreenOn = runCatching { showOnLockScreenSetting() }.getOrDefault(true)
+        return NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
+            .setSmallIcon(R.drawable.ic_stat_trackr)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(category)
+            .setAutoCancel(true)
+            .setDefaults(defaults)
+            .setVisibility(
+                if (lockScreenOn) NotificationCompat.VISIBILITY_PUBLIC
+                else NotificationCompat.VISIBILITY_PRIVATE
+            )
+            .setContentIntent(createMainActivityPendingIntent(context, requestCode))
+            .build()
+    }
 
     fun triggerTrackingExpired(context: Context, state: TrackingSessionState) {
         ensureNotificationChannel(context)
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
-            .setSmallIcon(R.drawable.ic_stat_trackr)
-            .setContentTitle("追踪已停止")
-            .setContentText("${state.lineName} 追踪已超过 ${maxTrackingDurationText()}，已停止追踪。")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setAutoCancel(true)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setContentIntent(createMainActivityPendingIntent(context, NOTIFICATION_ID_EXPIRED))
-            .build()
+        val notification = alertNotification(
+            context = context,
+            title = "追踪已停止",
+            content = "${state.lineName} 追踪已超过 ${maxTrackingDurationText()}，已停止追踪。",
+            category = NotificationCompat.CATEGORY_STATUS,
+            requestCode = NOTIFICATION_ID_EXPIRED
+        )
         runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_EXPIRED, notification) }
     }
 
     fun triggerTrackingInterrupted(context: Context, state: TrackingSessionState) {
         ensureNotificationChannel(context)
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
-            .setSmallIcon(R.drawable.ic_stat_trackr)
-            .setContentTitle("追踪已中断")
-            .setContentText("${state.lineName} 追踪未能自动接续，请打开应用重试。")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setAutoCancel(true)
-            .setContentIntent(createMainActivityPendingIntent(context, NOTIFICATION_ID_INTERRUPTED))
-            .build()
+        val notification = alertNotification(
+            context = context,
+            title = "追踪已中断",
+            content = "${state.lineName} 追踪未能自动接续，请打开应用重试。",
+            category = NotificationCompat.CATEGORY_STATUS,
+            requestCode = NOTIFICATION_ID_INTERRUPTED
+        )
         runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_INTERRUPTED, notification) }
     }
 
@@ -108,19 +131,13 @@ class ArrivalAlertNotifier(
             val title = "【即将到站】${state.lineName}"
             val content = "距 ${state.targetStopName} 还有 ${state.stopsRemaining} 站$etaText，请准备上车/下车！"
 
-            val contentPendingIntent = createMainActivityPendingIntent(context, NOTIFICATION_ID_APPROACHING)
-
-            val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
-                .setSmallIcon(R.drawable.ic_stat_trackr)
-                .setContentTitle(title)
-                .setContentText(content)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                .setAutoCancel(true)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setContentIntent(contentPendingIntent)
-                .build()
+            val notification = alertNotification(
+                context = context,
+                title = title,
+                content = content,
+                category = NotificationCompat.CATEGORY_REMINDER,
+                requestCode = NOTIFICATION_ID_APPROACHING
+            )
 
             try {
                 NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_APPROACHING, notification)
@@ -153,19 +170,13 @@ class ArrivalAlertNotifier(
             val title = "【车辆已到站】${state.lineName}"
             val content = "${state.lineName} 已到达 ${state.targetStopName}！请注意上车/下车。"
 
-            val contentPendingIntent = createMainActivityPendingIntent(context, NOTIFICATION_ID_ARRIVED)
-
-            val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
-                .setSmallIcon(R.drawable.ic_stat_trackr)
-                .setContentTitle(title)
-                .setContentText(content)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                .setAutoCancel(true)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setContentIntent(contentPendingIntent)
-                .build()
+            val notification = alertNotification(
+                context = context,
+                title = title,
+                content = content,
+                category = NotificationCompat.CATEGORY_REMINDER,
+                requestCode = NOTIFICATION_ID_ARRIVED
+            )
 
             try {
                 NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_ARRIVED, notification)
@@ -194,19 +205,13 @@ class ArrivalAlertNotifier(
         val title = "【换乘提醒】到达 $transferStationName"
         val content = "已到达换乘站 $transferStationName，已自动切换追踪下一程：$nextLineName"
 
-        val contentPendingIntent = createMainActivityPendingIntent(context, NOTIFICATION_ID_TRANSFER)
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
-            .setSmallIcon(R.drawable.ic_stat_trackr)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setAutoCancel(true)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setContentIntent(contentPendingIntent)
-            .build()
+        val notification = alertNotification(
+            context = context,
+            title = title,
+            content = content,
+            category = NotificationCompat.CATEGORY_REMINDER,
+            requestCode = NOTIFICATION_ID_TRANSFER
+        )
 
         var posted = false
         try {

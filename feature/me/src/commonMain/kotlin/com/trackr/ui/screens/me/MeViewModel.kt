@@ -13,6 +13,9 @@ import com.trackr.core.model.isMeishanLocal
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.ui.platform.LiveUpdateAccess
 import com.trackr.ui.platform.LiveUpdateStatus
+import com.trackr.ui.platform.NotificationHealth
+import com.trackr.ui.platform.NotificationHealthAccess
+import com.trackr.ui.platform.NotificationHealthIssue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +42,7 @@ data class MeUiState(
     val isLiveNotificationEnabled: Boolean = true,
     val showOnLockScreen: Boolean = true,
     val liveUpdate: LiveUpdateStatus? = null,
+    val notificationHealth: NotificationHealth? = null,
     val amapKeyStatus: String = amapKeyStatusText(hasMapKey = false, canShowMap = false),
     val versionName: String? = null,
     val elderMode: Boolean = false,
@@ -57,6 +61,7 @@ sealed interface MeEvent {
     data class SetLiveNotificationEnabled(val enabled: Boolean) : MeEvent
     data class SetShowOnLockScreen(val enabled: Boolean) : MeEvent
     data object OpenLiveUpdateSettings : MeEvent
+    data class OpenNotificationSettings(val issue: NotificationHealthIssue) : MeEvent
     data class SetElderMode(val enabled: Boolean) : MeEvent
     data class SetRailMode(val mode: RailMode) : MeEvent
     data class MessageShown(val id: Long) : MeEvent
@@ -75,10 +80,12 @@ class MeViewModel(
     private val amapKeys: AmapKeyRepository,
     private val notices: MeNotices,
     private val liveUpdateAccess: LiveUpdateAccess? = null,
-    private val versionName: String? = null
+    private val versionName: String? = null,
+    private val notificationHealthAccess: NotificationHealthAccess? = null
 ) : ViewModel() {
 
     private val liveUpdateStatus = MutableStateFlow(liveUpdateAccess?.status())
+    private val notificationHealthStatus = MutableStateFlow(notificationHealthAccess?.status())
 
     private val settingsPart = combine(
         settings.engineMode,
@@ -96,14 +103,18 @@ class MeViewModel(
         amapKeyStatusText(has, canShow)
     }
 
+    private val platformStatus = combine(liveUpdateStatus, notificationHealthStatus) { live, health ->
+        live to health
+    }
+
     val uiState: StateFlow<MeUiState> = combine(
         settingsPart,
         reminderRepository.reminders,
-        liveUpdateStatus,
+        platformStatus,
         mapKeyStatus,
         notices.messages
-    ) { part, reminders, liveUpdate, keyStatus, messages ->
-        buildState(part, reminders, liveUpdate, keyStatus, messages)
+    ) { part, reminders, platform, keyStatus, messages ->
+        buildState(part, reminders, platform.first, platform.second, keyStatus, messages)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
@@ -119,6 +130,7 @@ class MeViewModel(
             ),
             reminderRepository.reminders.value,
             liveUpdateStatus.value,
+            notificationHealthStatus.value,
             amapKeyStatusText(amapKeys.hasMapKey.value, amapKeys.canShowMap.value),
             notices.messages.value
         )
@@ -137,6 +149,7 @@ class MeViewModel(
             is MeEvent.SetLiveNotificationEnabled -> settings.setLiveNotificationEnabled(event.enabled)
             is MeEvent.SetShowOnLockScreen -> settings.setShowOnLockScreen(event.enabled)
             MeEvent.OpenLiveUpdateSettings -> liveUpdateAccess?.openSettings()
+            is MeEvent.OpenNotificationSettings -> notificationHealthAccess?.openSettings(event.issue)
             // 第 30 步只换主题；长辈版导航和页面在第 31–34 步
             is MeEvent.SetElderMode -> settings.setUiMode(if (event.enabled) UiMode.Elder else UiMode.Standard)
             is MeEvent.SetRailMode -> settings.setRailMode(event.mode)
@@ -149,12 +162,14 @@ class MeViewModel(
     /** 回到前台时重查状态栏胶囊权限（用户可能刚从系统设置回来） */
     fun onScreenResumed() {
         liveUpdateStatus.value = liveUpdateAccess?.status()
+        notificationHealthStatus.value = notificationHealthAccess?.status()
     }
 
     private fun buildState(
         part: SettingsPart,
         reminders: List<ScheduledReminder>,
         liveUpdate: LiveUpdateStatus?,
+        notificationHealth: NotificationHealth?,
         keyStatus: String,
         messages: List<UserMessage>
     ) = MeUiState(
@@ -170,6 +185,7 @@ class MeViewModel(
         isMeishanCity = part.meishanCity,
         // 和原来一样：实时通知关着时不显示胶囊权限
         liveUpdate = liveUpdate?.takeIf { part.liveNotification },
+        notificationHealth = notificationHealth?.takeIf { !it.healthy },
         amapKeyStatus = keyStatus,
         versionName = versionName,
         userMessages = messages

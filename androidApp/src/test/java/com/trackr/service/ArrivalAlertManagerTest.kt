@@ -45,6 +45,51 @@ class ArrivalAlertManagerTest {
     }
 
     @Test
+    fun alertNotifications_followLockScreenSetting() {
+        val notifier = ArrivalAlertNotifier(liveNotifier) { false }.apply {
+            liveNotificationEnabledProvider = { false }
+        }
+
+        fun assertPrivate(id: Int) {
+            assertEquals(
+                android.app.Notification.VISIBILITY_PRIVATE,
+                shadowOf(notificationManager).getNotification(id)?.visibility
+            )
+        }
+
+        notifier.triggerApproachingAlert(app, activeTrackingState(stopsRemaining = 2))
+        assertPrivate(ArrivalAlertNotifier.NOTIFICATION_ID_APPROACHING)
+        notifier.triggerArrivedAlert(
+            app,
+            activeTrackingState(stopsRemaining = 0).copy(isBusArrivedAtStop = true)
+        )
+        assertPrivate(ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED)
+        notifier.triggerTransferAlert(app, "换乘站", "下一条线")
+        assertPrivate(ArrivalAlertNotifier.NOTIFICATION_ID_TRANSFER)
+        notifier.triggerTrackingExpired(app, activeTrackingState(stopsRemaining = 3))
+        assertPrivate(ArrivalAlertNotifier.NOTIFICATION_ID_EXPIRED)
+        notifier.triggerTrackingInterrupted(app, activeTrackingState(stopsRemaining = 3))
+        assertPrivate(ArrivalAlertNotifier.NOTIFICATION_ID_INTERRUPTED)
+    }
+
+    @Test
+    fun alertSettingReadFailure_defaultsToPublic() {
+        val notifier = ArrivalAlertNotifier(liveNotifier) { error("unavailable") }.apply {
+            liveNotificationEnabledProvider = { false }
+        }
+
+        notifier.triggerArrivedAlert(
+            app,
+            activeTrackingState(stopsRemaining = 0).copy(isBusArrivedAtStop = true)
+        )
+
+        assertEquals(
+            android.app.Notification.VISIBILITY_PUBLIC,
+            shadowOf(notificationManager).getNotification(ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED)?.visibility
+        )
+    }
+
+    @Test
     fun testTriggerApproachingAlert_skipsStandaloneNotificationWhenLiveUpdateIsActive() {
         val state = activeTrackingState(stopsRemaining = 2)
 

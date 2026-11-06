@@ -185,7 +185,7 @@ class XiaomiFocusAdapterTest {
         val waitingV2 = JSONObject(XiaomiFocusAdapter.buildJsonPayload(waiting)).getJSONObject("param_v2")
         assertEquals("B612 2站", waitingV2.getJSONObject("capsule").getString("text"))
         // 等车标题和常驻通知同一套 ArrivalText：分钟为主
-        assertEquals("B612 4 分钟到 科技园", waitingV2.getJSONObject("baseInfo").getString("title"))
+        assertEquals("B612 约 4 分钟到 科技园", waitingV2.getJSONObject("baseInfo").getString("title"))
         assertEquals("第 1/2 程 · 等车", waitingV2.getJSONObject("baseInfo").getString("subTitle"))
         // 等车区间 2 → 5
         assertEquals(300, waitingV2.getJSONObject("progress").getInt("max"))

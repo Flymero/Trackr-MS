@@ -2,6 +2,7 @@ package com.trackr.core.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -139,7 +140,9 @@ fun rememberElderBackStack(
     configuration: SavedStateConfiguration = TrackrSavedStateConfiguration,
 ): NavBackStack<NavKey> {
     val saver = remember(configuration) { navBackStackSaver(configuration) }
-    val stack = rememberSaveable(saver = saver, key = "trackr.elderStack") { NavBackStack<NavKey>(ElderRoutes.root) }
+    val stack = key("elder") {
+        rememberSaveable(saver = saver) { NavBackStack<NavKey>(ElderRoutes.root) }
+    }
     remember(stack) {
         val valid = stack.firstOrNull() == ElderRoutes.root &&
             stack.all { it is ScreenKey && ElderRoutes.isSupported(it) }
