@@ -7,6 +7,7 @@ import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.core.okio.OkioStorage
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferencesSerializer
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -94,12 +95,17 @@ fun createPreferencesDataStore(
     path: String,
     scope: CoroutineScope,
     migrations: List<DataMigration<Preferences>> = emptyList()
-): DataStore<Preferences> = PreferenceDataStoreFactory.createWithPath(
+): DataStore<Preferences> = PreferenceDataStoreFactory.create(
+    storage = OkioStorage(
+        fileSystem = systemFileSystem(),
+        serializer = PreferencesSerializer,
+        producePath = { path.toPath() }
+    ),
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
     migrations = migrations,
-    scope = scope,
-    produceFile = { path.toPath() }
+    scope = scope
 )
+
 
 /** 建追踪会话的 DataStore（JSON 数组，没有会话时是空列表） */
 fun createTrackingSessionDataStore(
