@@ -306,13 +306,11 @@ internal object BusHomeMapper {
     // ---- 到站文字 ----
 
     /**
-     * 一条线在某站的到站文字。
+     * 一条线在某站的首页到站文字。
      *
-     * 有车：按最近那辆算（[ArrivalText]）。没车：
-     * - [nextDepartureIsFromStart] 为 true 时（收藏走的是线路详情接口，`preArrivalTime` 是始发站下一班发车时间）
-     *   写「下一班 07:20 · 从 X 发车」；
-     * - 数据源给了状态字（「等待发车」「末班已过」「预计 07:31 到达」）就照写；
-     * - 都没有写「暂无在途车辆」。
+     * 有车时首页只显示剩余站数或状态，不把每 15 秒轮询得到的 ETA 当成倒计时：
+     * 有站序写「还有 N 站」，没有站序写「在路上」。没车时保留下一班实际发车时间、
+     * 数据源状态字和「暂无在途车辆」。线路详情、追踪卡等其他入口仍直接使用 [ArrivalText]。
      */
     fun arrivalFor(status: NearbyStopLineStatus, nextDepartureIsFromStart: Boolean): ArrivalUi =
         ArrivalUi.of(arrivalDisplayFor(status, nextDepartureIsFromStart))
@@ -328,7 +326,35 @@ internal object BusHomeMapper {
         fun format(state: ArrivalState) = ArrivalText.format(state, lineName = lineName, stopName = stopName, towards = towards)
         val bus = status.approachingBuses.firstOrNull()
         if (bus != null) {
-            return format(ArrivalText.stateForBus(status.targetOrder, bus))
+            val state = ArrivalText.stateForBus(status.targetOrder, bus)
+            // 首页不展示静态轮询 ETA；到站状态保留，后车若只有站序也保留其站数。
+            val homepageState = when (state) {
+                is ArrivalState.OnTheWay -> state.copy(minutes = null)
+                is ArrivalState.Arriving -> state.copy(nextBusMinutes = null)
+                else -> state
+            }
+            val display = format(homepageState)
+            return when (homepageState) {
+                is ArrivalState.OnTheWay -> when (val stopsAway = homepageState.stopsAway) {
+                    null -> display.copy(
+                        detail = "",
+                        short = "在路上"
+                    )
+                    else -> {
+                        val stops = stopsAway.coerceAtLeast(0)
+                        val stopsText = "还有 $stops 站"
+                        val stopsDisplay = format(ArrivalState.OnTheWay(stopsAway = stops, minutes = null))
+                        display.copy(
+                            value = "还有 $stops",
+                            unit = "站",
+                            detail = "",
+                            short = stopsText,
+                            spoken = stopsDisplay.spoken.replace("下一站就", "$stopsText")
+                        )
+                    }
+                }
+                else -> display
+            }
         }
         val next = status.preArrivalTime?.takeIf { nextDepartureIsFromStart && ArrivalText.parseClock(it) != null }
         if (next != null && !isEndedText(status.statusText)) {

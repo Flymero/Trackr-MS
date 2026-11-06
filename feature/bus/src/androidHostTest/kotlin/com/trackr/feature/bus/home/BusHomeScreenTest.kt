@@ -232,14 +232,12 @@ class BusHomeScreenTest {
         assertTrue("终点方向被线路名挤没了：$directionWidth", directionWidth > 60.dp)
         composeTestRule.onNodeWithText("盘龙大观园河西旅游专线").assertIsDisplayed()
 
-        val arrival = composeTestRule.onAllNodes(hasText("分钟", substring = true), useUnmergedTree = true)
-            .fetchSemanticsNodes()
-            .single { it.boundsInRoot.top >= direction.boundsInRoot.bottom }
-        assertTrue("到站时间没在第二行", arrival.boundsInRoot.top >= direction.boundsInRoot.bottom)
-        val small = composeTestRule.onNodeWithText("还有 4 站", useUnmergedTree = true)
+        composeTestRule.onNodeWithText("约 9 分钟", useUnmergedTree = true).assertDoesNotExist()
+        val arrival = composeTestRule.onNodeWithText("还有 4 站", useUnmergedTree = true)
             .assertIsDisplayed().fetchSemanticsNode()
-        val gap = with(composeTestRule.density) { (row.boundsInRoot.right - small.boundsInRoot.right).toDp() }
-        assertTrue("第二行没右对齐，右边还空 $gap", gap < 24.dp)
+        assertTrue("到站信息没在方向下面", arrival.boundsInRoot.top >= direction.boundsInRoot.bottom)
+        val gap = with(composeTestRule.density) { (row.boundsInRoot.right - arrival.boundsInRoot.right).toDp() }
+        assertTrue("到站信息没右对齐，右边还空 $gap", gap < 24.dp)
     }
 
     @Test

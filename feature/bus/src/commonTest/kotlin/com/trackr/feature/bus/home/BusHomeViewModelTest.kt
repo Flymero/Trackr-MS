@@ -872,10 +872,10 @@ class BusHomeViewModelTest {
         testScheduler.runCurrent()
 
         val rows = viewModel.uiState.value.favoriteRows.map { it as FavoriteRowUi.Stop }
-        assertEquals("325路，开往科技园，还有 2 站，大约 4 分钟到科技园站", rows[0].spoken)
+        assertEquals("325路，开往科技园，还有 2 站到科技园站", rows[0].spoken)
         assertEquals("M194路，开往科技园，等待发车，下一班 7点20分 从 白石洲 发车", rows[1].spoken)
-        // 屏幕上的字不变
-        assertEquals("约 4 分钟", rows[0].arrival.big)
+        // 首页只保留剩余站数；下一班实际发车时间仍显示
+        assertEquals("还有 2 站", rows[0].arrival.big)
         assertEquals("下一班 07:20", rows[1].arrival.big)
     }
 

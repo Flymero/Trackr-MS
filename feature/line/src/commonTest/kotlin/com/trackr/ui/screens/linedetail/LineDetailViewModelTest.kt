@@ -80,6 +80,7 @@ private class CountingLineRepository(
     val lineDetailTargetOrders = mutableListOf<Int?>()
     val lineIds = mutableListOf<String>()
     var gate: CompletableDeferred<Unit>? = null
+    var gateTargetOrder: Int? = null
 
     override suspend fun getLineDetail(
         city: TransitCity,
@@ -94,7 +95,9 @@ private class CountingLineRepository(
     ): Result<BusLineDetail> {
         lineDetailTargetOrders += targetOrder
         lineIds += lineId
-        gate?.await()
+        if (gateTargetOrder == null || gateTargetOrder == targetOrder) {
+            gate?.await()
+        }
         return delegate.getLineDetail(city, lineId, targetOrder, stationId, wgsLat, wgsLng, source, lineNameHint, directionHint)
     }
 }
@@ -530,8 +533,10 @@ class LineDetailViewModelTest {
             assertEquals(listOf(old), push.cancellations)
                 assertEquals(0, old.updates.subscriptionCount.value)
                 assertTrue(viewModel.uiState.value.isLoading)
-                assertEquals("line_001", viewModel.uiState.value.static?.line?.lineId)
-                assertEquals(buses, viewModel.uiState.value.live?.buses)
+                assertNull(viewModel.uiState.value.static)
+                assertNull(viewModel.uiState.value.live)
+                assertNull(viewModel.uiState.value.selectedStop)
+                assertNull(viewModel.uiState.value.followedBusId)
 
                 gate.complete(Unit)
                 testScheduler.runCurrent()
@@ -558,6 +563,86 @@ class LineDetailViewModelTest {
                 gate.complete(Unit)
             }
         }
+    }
+
+    @Test
+    fun meishanPush_switchDirection_tcpDuringExactHttp_keepsReverseAndIgnoresSecondTapAndRefresh() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, realtime, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            val old = push.subscriptions.single()
+            val reverse = old.base.copy(
+                line = assertNotNull(old.base.reverseDirection),
+                reverseDirection = old.base.line,
+                stops = stops.reversed().mapIndexed { index, stop ->
+                    stop.copy(stopId = "r${index + 1}", order = index + 1)
+                },
+                buses = listOf(buses.single().copy(busId = "reverse-http"))
+            )
+            fakeRepository.lineDetailResult = Result.success(reverse)
+            realtime.gateTargetOrder = 2
+            realtime.gate = CompletableDeferred()
+
+            viewModel.switchOppositeDirection()
+            testScheduler.runCurrent()
+            assertEquals(listOf<Int?>(2, null, 2), realtime.lineDetailTargetOrders)
+            assertEquals("line_002", viewModel.uiState.value.static?.line?.lineId)
+            assertTrue(viewModel.uiState.value.isSwitchingDirection)
+            assertEquals(2, push.subscriptions.size)
+
+            // 换向已提交但精确 ETA 请求仍在等待时，重复操作和刷新都不能抢占请求。
+            viewModel.switchOppositeDirection()
+            viewModel.refreshNow()
+            testScheduler.runCurrent()
+            assertEquals(listOf<Int?>(2, null, 2), realtime.lineDetailTargetOrders)
+
+            val reversed = push.subscriptions.last()
+            val tcp = reverse.copy(
+                buses = listOf(buses.single().copy(busId = "reverse-tcp", etaSeconds = 18)),
+                updatedAtMillis = 2_000L
+            )
+            tcp.let { update ->
+                reversed.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, update))
+            }
+            testScheduler.runCurrent()
+            assertEquals("reverse-tcp", viewModel.uiState.value.live?.buses?.single()?.busId)
+            assertTrue(viewModel.uiState.value.isPushOnline)
+
+            realtime.gate?.complete(Unit)
+            testScheduler.runCurrent()
+            realtime.gate = null
+            realtime.gateTargetOrder = null
+
+            assertEquals("line_002", viewModel.uiState.value.static?.line?.lineId)
+            assertEquals("reverse-tcp", viewModel.uiState.value.live?.buses?.single()?.busId)
+            assertFalse(viewModel.uiState.value.isSwitchingDirection)
+            assertEquals(listOf<Int?>(2, null, 2), realtime.lineDetailTargetOrders)
+        }
+    }
+
+    @Test
+    fun switchDirection_failure_restoresDetailWithoutRestoringTrackingOrSettings() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+        assertTrue(viewModel.startTrackingSelectedStop())
+        testScheduler.runCurrent()
+        fakeRepository.settings.setRailMode(RailMode.Vertical)
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.isTrackingThisStop)
+
+        fakeRepository.lineDetailResult = Result.failure(IllegalStateException("boom"))
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals("line_001", state.static?.line?.lineId)
+        assertEquals(buses, state.live?.buses)
+        assertEquals(stops[1], state.selectedStop)
+        assertEquals(RailMode.Vertical, state.railMode)
+        assertFalse(state.isTrackingThisStop)
+        assertFalse(viewModel.activeTrackingSession.value.isActive)
+        assertTrue(state.userMessages.any { it.text == "已结束追踪" })
+        assertEquals("换向失败，请稍后重试", state.errorMessage)
     }
 
     @Test

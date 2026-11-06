@@ -240,6 +240,13 @@ class LineDetailViewModel(
     private var httpGeneration = 0L
     private var pushRevision = 0L
 
+    private data class DirectionSnapshot(
+        val lineId: String,
+        val source: DataSourceType,
+        val detail: BusLineDetail,
+        val state: LineDetailUiState
+    )
+
     /**
      * 每条线路方向的时刻表缓存，避免 10 秒轮询时反复拉取。
      * 必须在 [init] 之前初始化：`viewModelScope.launch` 跑在 `Dispatchers.Main.immediate` 上，
@@ -428,6 +435,7 @@ class LineDetailViewModel(
      * 加载当前线路详情与实时车辆（在 viewModelScope 中发起）
      */
     fun loadLineDetail(isInitial: Boolean = false, targetOrderOverride: Int? = null) {
+        if (_uiState.value.isSwitchingDirection) return
         viewModelScope.launch {
             fetchLineDetail(isInitial = isInitial, targetOrderOverride = targetOrderOverride)
         }
@@ -436,8 +444,14 @@ class LineDetailViewModel(
     /**
      * 挂起执行一次线路详情请求并更新 UI 状态
      */
-    private suspend fun fetchLineDetail(isInitial: Boolean = false, targetOrderOverride: Int? = null) {
+    private suspend fun fetchLineDetail(
+        isInitial: Boolean = false,
+        targetOrderOverride: Int? = null,
+        allowDuringDirectionSwitch: Boolean = false
+    ): Boolean {
+        if (_uiState.value.isSwitchingDirection && !allowDuringDirectionSwitch) return false
         activeLoads.incrementAndFetch()
+        var applied = false
         val generation = ++httpGeneration
         val requestedLineId = currentLineId
         val requestedSource = currentSource
@@ -464,10 +478,10 @@ class LineDetailViewModel(
                 lineNameHint = lineNameHint
             )
 
-            if (generation != httpGeneration || requestedLineId != currentLineId) return
+            if (generation != httpGeneration || requestedLineId != currentLineId) return false
             if (revision != pushRevision) {
                 _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
-                return
+                return false
             }
             result.onSuccess { detail ->
                 val selected = _uiState.value.selectedStop
@@ -484,6 +498,7 @@ class LineDetailViewModel(
                 }
 
                 applyDetail(detail, targetStop)
+                applied = true
                 startPush(detail, targetStop)
 
                 refreshFallbackNextDeparture(detail, targetStop)
@@ -504,12 +519,14 @@ class LineDetailViewModel(
                 }
             }
         } catch (ce: CancellationException) {
-            // 轮询暂停等取消场景：复位加载指示，不显示错误
-            _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
+            if (!_uiState.value.isSwitchingDirection) {
+                _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
+            }
             throw ce
         } finally {
             activeLoads.decrementAndFetch()
         }
+        return applied
     }
 
     /** 把一份新数据拆成静态 / 实时两半写进状态；静态没变就沿用旧实例 */
@@ -689,6 +706,7 @@ class LineDetailViewModel(
             return
         }
         screenResumed = true
+        if (_uiState.value.isSwitchingDirection) return
         currentDetail?.let { startPush(it, _uiState.value.selectedStop) }
         pollingCoordinator.setActive(!pushOnline)
     }
@@ -699,6 +717,7 @@ class LineDetailViewModel(
      */
     fun onScreenResumed() {
         screenResumed = true
+        if (_uiState.value.isSwitchingDirection) return
         currentDetail?.let { startPush(it, _uiState.value.selectedStop) }
         if (!enableAutoPolling) return
         pollingCoordinator.setActive(!pushOnline)
@@ -733,6 +752,7 @@ class LineDetailViewModel(
      * @param fromPull 是下拉触发的：完成前画下拉圈
      */
     fun refreshNow(fromPull: Boolean = false) {
+        if (_uiState.value.isSwitchingDirection) return
         pollingCoordinator.restart()
         if (fromPull) _uiState.update { it.copy(isPullRefreshing = true) }
         viewModelScope.launch {
@@ -748,6 +768,7 @@ class LineDetailViewModel(
      * 选中站点：以该站为 targetOrder 计算精确到站 ETA
      */
     fun selectStop(stop: BusStop) {
+        if (_uiState.value.isSwitchingDirection) return
         httpGeneration++
         userPickedStop = true
         _uiState.update {
@@ -807,6 +828,7 @@ class LineDetailViewModel(
         val detail = currentDetail ?: return
         val reverse = detail.reverseDirection?.takeIf { it.lineId.isNotBlank() } ?: return
         val currentStop = state.selectedStop ?: return
+        val snapshot = DirectionSnapshot(currentLineId, currentSource, detail, state)
         val wasTracking = state.isTrackingThisStop
 
         if (wasTracking) {
@@ -814,15 +836,27 @@ class LineDetailViewModel(
             postMessage("已结束追踪")
         }
         stopPush()
+        pollingCoordinator.pause()
         val switchGeneration = ++httpGeneration
+        currentLineId = reverse.lineId
+        currentSource = reverse.source
+        _uiState.update {
+            it.copy(
+                isSwitchingDirection = true,
+                isLoading = true,
+                isRefreshing = false,
+                static = null,
+                live = null,
+                selectedStop = null,
+                followedBusId = null,
+                panelMode = PanelMode.STATION_CARD,
+                errorMessage = null
+            )
+        }
+        publishTrackingState()
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isSwitchingDirection = true, isLoading = true) }
-            currentLineId = reverse.lineId
-            currentSource = reverse.source
-            publishTrackingState()
-            if (screenResumed && enableAutoPolling) pollingCoordinator.setActive(true)
-
+            var directionCommitted = false
             try {
                 val currentCity = settings.selectedCity.value
                 val reverseResult = realtime.getLineDetail(
@@ -832,33 +866,62 @@ class LineDetailViewModel(
                     lineNameHint = reverse.name
                 )
                 if (switchGeneration != httpGeneration || currentLineId != reverse.lineId) return@launch
-                reverseResult.onSuccess { revDetail ->
-                    val oppositeStop = RouteProjectionMath.findOppositeStop(
-                        currentStop = currentStop,
-                        reverseStops = revDetail.stops
-                    )
-                    val targetStop = oppositeStop ?: calculateDefaultStop(revDetail)
-                    applyDetail(revDetail, targetStop)
-                    startPush(revDetail, targetStop)
-                    _uiState.update { it.copy(panelMode = PanelMode.STATION_CARD, followedBusId = null) }
-                    if (oppositeStop == null && targetStop != null) {
-                        postMessage("反向线路没有「${currentStop.name}」，已选 ${targetStop.name}")
-                    }
-                    if (targetStop != null) {
-                        loadLineDetail(isInitial = false, targetOrderOverride = targetStop.order)
-                    }
-                }.onFailure {
-                    currentLineId = detail.line.lineId
-                    currentSource = detail.line.source
-                    publishTrackingState()
-                    currentDetail?.let { startPush(it, _uiState.value.selectedStop) }
-                    if (screenResumed && enableAutoPolling) pollingCoordinator.setActive(!pushOnline)
-                    _uiState.update { it.copy(isLoading = false, errorMessage = "换向失败，请稍后重试") }
+                val revDetail = reverseResult.getOrElse {
+                    restoreDirectionSnapshot(snapshot)
+                    return@launch
                 }
+                val oppositeStop = RouteProjectionMath.findOppositeStop(
+                    currentStop = currentStop,
+                    reverseStops = revDetail.stops
+                )
+                val targetStop = oppositeStop ?: calculateDefaultStop(revDetail)
+                applyDetail(revDetail, targetStop)
+                directionCommitted = true
+                startPush(revDetail, targetStop)
+                _uiState.update { it.copy(panelMode = PanelMode.STATION_CARD, followedBusId = null) }
+                if (oppositeStop == null && targetStop != null) {
+                    postMessage("反向线路没有「${currentStop.name}」，已选 ${targetStop.name}")
+                }
+                if (targetStop != null) {
+                    fetchLineDetail(
+                        isInitial = false,
+                        targetOrderOverride = targetStop.order,
+                        allowDuringDirectionSwitch = true
+                    )
+                }
+            } catch (ce: CancellationException) {
+                if (!directionCommitted) restoreDirectionSnapshot(snapshot)
+                throw ce
             } finally {
                 _uiState.update { it.copy(isSwitchingDirection = false) }
+                if (screenResumed && enableAutoPolling) {
+                    pollingCoordinator.setActive(!pushOnline)
+                }
             }
         }
+    }
+
+    private fun restoreDirectionSnapshot(snapshot: DirectionSnapshot) {
+        stopPush()
+        currentLineId = snapshot.lineId
+        currentSource = snapshot.source
+        currentDetail = snapshot.detail
+        _uiState.update {
+            it.copy(
+                isLoading = false,
+                isRefreshing = false,
+                isSwitchingDirection = true,
+                static = snapshot.state.static,
+                live = snapshot.state.live,
+                selectedStop = snapshot.state.selectedStop,
+                followedBusId = snapshot.state.followedBusId,
+                panelMode = snapshot.state.panelMode,
+                followBackTo = snapshot.state.followBackTo,
+                errorMessage = "换向失败，请稍后重试"
+            )
+        }
+        publishTrackingState()
+        startPush(snapshot.detail, snapshot.state.selectedStop)
     }
 
     private fun favoriteIdOf(state: LineDetailUiState): String? {

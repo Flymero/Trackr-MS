@@ -211,9 +211,12 @@ class ElderBusHomeScreenTest {
         setContent(stateOf(selectedGroupId = "g2"))
         composeTestRule.onNodeWithText("科技园站上车").assertIsDisplayed()
         composeTestRule.onNodeWithText("→ 科技园").assertIsDisplayed()
-        // 没车时给下一班发车时间
+        // 没车时给下一班实际发车时间；在途首页只显示剩余站数
         composeTestRule.onNodeWithText("下一班 07:20").assertIsDisplayed()
         composeTestRule.onNodeWithText("从 白石洲 发车").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(ElderBusHomeTags.LIST).performScrollToNode(hasText("高新园1 站"))
+        composeTestRule.onNodeWithText("还有 4 站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("约 9 分钟").assertDoesNotExist()
     }
 
     @Test

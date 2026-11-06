@@ -58,7 +58,7 @@ class BusArrivalBadgeTest {
             etaSeconds = 600
         )
         val status = computeArrivalStatus(targetOrder = 5, approachingBus = bus)
-        assertEquals("10 分钟 · 还有 2 站", status.text)
+        assertEquals("约 10 分钟 · 还有 2 站", status.text)
         assertFalse(status.isHighlighted)
     }
 
@@ -71,7 +71,7 @@ class BusArrivalBadgeTest {
             etaSeconds = 180
         )
         val status = computeArrivalStatus(targetOrder = 5, approachingBus = bus)
-        assertEquals("3 分钟 · 还有 2 站", status.text)
+        assertEquals("约 3 分钟 · 还有 2 站", status.text)
         assertTrue(status.isHighlighted)
     }
 
