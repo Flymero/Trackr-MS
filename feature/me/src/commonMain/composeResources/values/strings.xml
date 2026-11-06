@@ -80,6 +80,8 @@
     <string name="me_notify_health_alert">到站提醒重要级别不足，可能没有横幅</string>
     <string name="me_notify_health_live">实时追踪通知已关闭</string>
     <string name="me_notify_health_fix">去设置</string>
+    <string name="me_transit_code_button">显示乘车码按钮</string>
+    <string name="me_transit_code_button_desc">在首页、线路和站点页面显示快捷入口</string>
     <string name="me_group_map">地图</string>
     <string name="me_about_app">关于追客</string>
     <string name="me_version">版本 %1$s</string>

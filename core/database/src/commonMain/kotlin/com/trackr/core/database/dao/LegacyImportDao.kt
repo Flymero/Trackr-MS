@@ -15,6 +15,7 @@ import com.trackr.core.database.entity.RouteEntity
 import com.trackr.core.database.entity.RouteLegEntity
 import com.trackr.core.database.entity.SearchHistoryEntity
 import com.trackr.core.database.entity.StoreMetaEntity
+import com.trackr.core.database.entity.StoreMetaKeys
 
 /**
  * 一次导入的旧数据。某一项为 null 表示这次不动那张表（旧文件里没有这个 key，或者 JSON 坏了跳过）。
@@ -107,6 +108,8 @@ interface LegacyImportDao {
         data.favoriteGroups?.let {
             deleteFavoriteGroups()
             insertFavoriteGroups(it)
+            // 旧文件里有这个 key 就说明分组建过（旧版存成 "[]" 就是用户删光了），迁过来之后不再补默认分组
+            putMeta(StoreMetaEntity(StoreMetaKeys.FAVORITE_GROUPS_INITIALIZED, "1"))
         }
         data.reminders?.let {
             deleteReminders()

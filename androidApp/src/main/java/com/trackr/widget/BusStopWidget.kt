@@ -50,6 +50,7 @@ import androidx.glance.unit.ColorProvider
 import com.trackr.MainActivity
 import com.trackr.R
 import com.trackr.core.model.FavoriteStationLine
+import com.trackr.core.model.displayLineName
 import com.trackr.deeplink.DeepLinkIntents
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
@@ -200,7 +201,7 @@ private fun FavoriteContent(
         // 顶部信息行：线路名、城市/数据源标签、更新时间、刷新按钮
         Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = favorite.lineName,
+                text = favorite.displayLineName,
                 style = TextStyle(color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             )
             Spacer(GlanceModifier.width(6.dp))

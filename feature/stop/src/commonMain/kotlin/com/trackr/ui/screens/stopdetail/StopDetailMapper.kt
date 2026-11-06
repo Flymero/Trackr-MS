@@ -10,6 +10,7 @@ import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.NearbyStopLineStatus
 import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.WatchedLine
+import com.trackr.core.model.displayLineName
 
 /*
  * 站点详情页的纯映射（第 21 步）：原始数据 -> 页面直接用的扁平 UI 模型。全是纯函数，单测直接调。
@@ -64,7 +65,7 @@ internal fun arrivalOf(status: NearbyStopLineStatus): ArrivalDisplay {
         // 运营时间已写在行左边，这里不重复
         ArrivalState.NoService("暂无在途车辆")
     }
-    return ArrivalText.format(state, lineName = status.line.name, stopName = status.targetStopName)
+    return ArrivalText.format(state, lineName = status.line.displayLineName, stopName = status.targetStopName)
 }
 
 internal fun rowsOf(cityId: String, stop: NearbyStop?, favoriteIds: Set<String>): List<StopLineRowUi> =
@@ -73,7 +74,7 @@ internal fun rowsOf(cityId: String, stop: NearbyStop?, favoriteIds: Set<String>)
         StopLineRowUi(
             key = rowKeyOf(status),
             lineId = line.lineId,
-            lineName = line.name,
+            lineName = line.displayLineName,
             endStop = line.endStop,
             hours = hoursText(line.firstTime, line.lastTime),
             arrival = arrivalOf(status),

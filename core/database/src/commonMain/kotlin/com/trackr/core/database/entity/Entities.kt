@@ -210,3 +210,12 @@ data class StoreMetaEntity(
     @PrimaryKey val key: String,
     val value: String
 )
+
+/** `store_meta` 里用到的键 */
+object StoreMetaKeys {
+    /**
+     * 收藏分组建过没有。有这一行（值为 "1"）时，`favorite_group` 表空表示用户把分组都删了，不再补两个默认分组；
+     * 没有这一行才是从没建过（见 `DefaultFavoritesRepository.create`）。
+     */
+    const val FAVORITE_GROUPS_INITIALIZED = "favorite_groups_initialized"
+}

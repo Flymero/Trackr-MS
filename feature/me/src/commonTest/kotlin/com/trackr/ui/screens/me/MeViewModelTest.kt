@@ -79,6 +79,8 @@ class MeViewModelTest {
         assertNull(state.remindersSubtitle)
         assertTrue(state.isLiveNotificationEnabled)
         assertTrue(state.showOnLockScreen)
+        // 首页「乘车码」按钮默认显示
+        assertTrue(state.showTransitCodeButton)
         assertEquals("没填，不显示「路线」页", state.amapKeyStatus)
         assertEquals("0.0.3", state.versionName)
         // 没存过界面模式 = 标准版，开关关着
@@ -174,6 +176,22 @@ class MeViewModelTest {
         viewModel.onEvent(MeEvent.SetTransitCode(TransitCodeProvider.UNIONPAY))
         testScheduler.advanceUntilIdle()
         assertEquals(TransitCodeProvider.UNIONPAY, viewModel.uiState.value.preferredTransitCode)
+    }
+
+    @Test
+    fun transitCodeButton_switchWritesSetting_andStateFollows() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // 默认显示
+        assertTrue(viewModel.uiState.value.showTransitCodeButton)
+
+        viewModel.onEvent(MeEvent.SetShowTransitCodeButton(false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(settings.showTransitCodeButton.value)
+        assertFalse(viewModel.uiState.value.showTransitCodeButton)
+
+        viewModel.onEvent(MeEvent.SetShowTransitCodeButton(true))
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.showTransitCodeButton)
     }
 
     @Test

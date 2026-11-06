@@ -20,6 +20,7 @@ import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.WatchLine
+import com.trackr.core.model.displayLineName
 import com.trackr.ui.util.FixedDelayPollingStrategy
 import com.trackr.ui.util.PollingCoordinator
 import kotlinx.coroutines.CancellationException
@@ -98,7 +99,8 @@ class StopDetailViewModel(
         initialEnabled = enableAutoPolling
     ) {
         // 直接在轮询协程内挂起执行：暂停轮询时请求随之取消；上一轮未完成就跳过。
-        // 本站一起等进行中时追踪服务在轮询，页面自己不再请求（省服务器）
+        // 本站一起等进行中时追踪服务在轮询，页面自己不再请求（省服务器）；页面顶部那张
+        // 「最先到」的卡片用的是会话里的实时数据，下面的线路列表用打开页面时的那一份。
         if (activeLoads.load() == 0 && _uiState.value.watch == null) {
             fetchStopDetail(isInitial = false)
         }
@@ -124,8 +126,15 @@ class StopDetailViewModel(
                 _uiState.update { it.copy(preferredTransitCodeProvider = provider) }
             }
         }
+        // 「我的」里关掉「显示乘车码按钮」后，底栏这个圆钮和首页、线路页一起不画
         viewModelScope.launch {
-            trackingRepository.session.collectLatest { onSession(it) }
+            settings.showTransitCodeButton.collectLatest { visible ->
+                _uiState.update { it.copy(showTransitCodeButton = visible) }
+            }
+        }
+        // 同时可能追着好几项：只认这个站的那一份一起等（第 36 步）
+        viewModelScope.launch {
+            trackingRepository.sessions.collectLatest { onSession(watchSessionFor(it)) }
         }
 
         loadStopDetail(isInitial = true)
@@ -148,9 +157,11 @@ class StopDetailViewModel(
             StopDetailEvent.SaveSelectionAsRoute -> saveSelectionAsRoute()
             StopDetailEvent.StartWatching -> startWatching()
             StopDetailEvent.AddLine -> addLine()
-            StopDetailEvent.ConfirmBoarded -> trackingController.confirmBoarded()
-            StopDetailEvent.StopWatching -> trackingController.stopTracking()
-            is StopDetailEvent.ChooseBoardedBus -> trackingController.chooseBoardedBus(event.busId)
+            StopDetailEvent.ConfirmBoarded -> trackingController.confirmBoarded(session?.sessionId)
+            // 一起等会话 id 一定来自当前页面对上的那一份；对不上就不动，避免把别的追踪一起停掉
+            StopDetailEvent.StopWatching -> session?.sessionId?.let(trackingController::stopTracking)
+            is StopDetailEvent.ChooseBoardedBus ->
+                trackingController.chooseBoardedBus(event.busId, session?.sessionId)
             StopDetailEvent.DismissBoardChoice -> {
                 dismissedBoardChoiceSince = session?.boardChoice?.sinceMillis
                 publish { it }
@@ -321,7 +332,8 @@ class StopDetailViewModel(
                 cityId = cityId,
                 cityName = cityName,
                 lineId = lineStatus.line.lineId,
-                lineName = lineStatus.line.name,
+                // 数据源偶尔只给线路号不给名字：收藏里存兜底后的名字，首页徽标才不会空白（issue #20）
+                lineName = lineStatus.line.displayLineName,
                 lineNo = lineStatus.line.lineNo,
                 direction = lineStatus.line.direction,
                 startStop = lineStatus.line.startStop,
@@ -388,7 +400,7 @@ class StopDetailViewModel(
             lines = statuses.map { s ->
                 WatchLine(
                     lineId = s.line.lineId,
-                    lineName = s.line.name,
+                    lineName = s.line.displayLineName,
                     stopOrder = s.targetOrder,
                     endStopName = s.line.endStop,
                     direction = s.line.direction,
@@ -434,6 +446,16 @@ class StopDetailViewModel(
             .toSet()
         _uiState.update { it.copy(selecting = true, selectedLineKeys = keys) }
         if (activeLoads.load() == 0) loadStopDetail(isInitial = false)
+    }
+
+    /** 这个站的那一份一起等会话（别的站、单线路、路线都不算） */
+    private fun watchSessionFor(sessions: List<TrackingSession>): TrackingSession? = sessions.firstOrNull { candidate ->
+        if (candidate.interrupted) return@firstOrNull false
+        val watch = candidate.watchTarget ?: return@firstOrNull false
+        isWatchingHere(candidate, stopId, _uiState.value.stops) ||
+            (watch.stopId.isNotBlank() && watch.stopId == stopId) ||
+            (!watch.physicalStId.isNullOrBlank() && watch.physicalStId == physicalStId) ||
+            (!watch.namesakeStId.isNullOrBlank() && watch.namesakeStId == namesakeStId)
     }
 
     private fun onSession(next: TrackingSession?) {

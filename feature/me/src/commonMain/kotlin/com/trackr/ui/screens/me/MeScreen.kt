@@ -88,6 +88,8 @@ import com.trackr.feature.me.resources.me_group_notify
 import com.trackr.feature.me.resources.me_group_travel
 import com.trackr.feature.me.resources.me_live_notify
 import com.trackr.feature.me.resources.me_live_notify_desc
+import com.trackr.feature.me.resources.me_transit_code_button
+import com.trackr.feature.me.resources.me_transit_code_button_desc
 import com.trackr.feature.me.resources.me_lockscreen
 import com.trackr.feature.me.resources.me_notify_health
 import com.trackr.feature.me.resources.me_notify_health_permission
@@ -183,6 +185,13 @@ fun MeScreen(
                         title = stringResource(MeRes.string.me_data_source),
                         value = engineModeLabel(state.engineMode),
                         onClick = { showEngineModeDialog = true }
+                    )
+                    GroupDivider()
+                    SwitchRow(
+                        title = stringResource(MeRes.string.me_transit_code_button),
+                        subtitle = stringResource(MeRes.string.me_transit_code_button_desc),
+                        checked = state.showTransitCodeButton,
+                        onCheckedChange = { onEvent(MeEvent.SetShowTransitCodeButton(it)) }
                     )
                     GroupDivider()
                     SettingRow(

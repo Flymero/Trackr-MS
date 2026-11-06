@@ -33,7 +33,7 @@ internal object GroupLegTracker {
         val reachedDropStop: Boolean = false,
         /** 定位上车检测：车刚到上车站 A，但还没确认用户上车（应发“车已到站”提醒，阶段仍为 WAITING_BOARD） */
         val busArrivedAtBoard: Boolean = false,
-        /** 定位上车检测：判定用户没赶上待确认的那班车，已改为等下一班 */
+        /** 判定用户没赶上那班车、已改为等下一班：定位确认判定没上，或提醒过到站后那班车又开走了 */
         val missedBoarding: Boolean = false,
         /** 定位上车检测：ON_BOARD 阶段根据定位改锁了所乘车辆 */
         val relocked: Boolean = false
@@ -315,6 +315,14 @@ internal object GroupLegTracker {
         val candidates = buses.filter { it.order <= boardOrder }
         val best = candidates.maxByOrNull { it.order.toFloat() + it.segmentProgress }
 
+        // 上一班车已开过 A（或消失）而没有上车：提醒标志属于那班车，换到新车时重置
+        val previousBusGone = session.currentBusId != null && candidates.none { it.busId == session.currentBusId }
+        // 上一班车已经到了 / 就停在上车站，然后从数据里消失了（开走了，或者数据少给了一辆）：
+        // 认定没赶上。只看 previousBusGone 不够——数据抽风少给一辆车时它也是 true，
+        // 那时用户可能正站在车门口。所以再要求它上次确实停在站上（或已经提醒过到站）。
+        val missedPreviousBus = previousBusGone &&
+            (session.stopsRemaining == 0 || session.hasTriggeredArrivedAlert)
+
         if (best == null) {
             return LegUpdate(
                 session.copy(
@@ -324,12 +332,11 @@ internal object GroupLegTracker {
                     statusSummary = "暂无开往上车站的在途车辆，等待下一班",
                     isSignalLost = false,
                     updatedAtMillis = nowMillis
-                )
+                ),
+                missedBoarding = missedPreviousBus
             )
         }
 
-        // 上一班车已开过 A（或消失）而没有上车：提醒标志属于那班车，换到新车时重置
-        val previousBusGone = session.currentBusId != null && candidates.none { it.busId == session.currentBusId }
         val base = if (previousBusGone && session.currentBusId != best.busId) {
             session.copy(hasTriggeredApproachingAlert = false, hasTriggeredArrivedAlert = false)
         } else {
@@ -406,7 +413,10 @@ internal object GroupLegTracker {
                 isSignalLost = false,
                 statusSummary = summary,
                 updatedAtMillis = nowMillis
-            )
+            ),
+            // 刚错过上一班、已经换到下一班：让引擎补一条「错过了，下一班 X」，
+            // 否则用户只看到通知悄悄换了辆车，不知道自己已经错过
+            missedBoarding = missedPreviousBus
         )
     }
 

@@ -70,7 +70,8 @@ class ElderLineDetailScreenTest {
         nextDeparture: String? = null,
         tracking: Boolean = false,
         favorite: Boolean = false,
-        messages: List<LineUserMessage> = emptyList()
+        messages: List<LineUserMessage> = emptyList(),
+        showTransitCode: Boolean = true
     ): LineDetailUiState = LineDetailUiState(
         lineNameHint = "325",
         isLoading = false,
@@ -83,7 +84,8 @@ class ElderLineDetailScreenTest {
         } else {
             TrackingSessionState()
         },
-        userMessages = messages
+        userMessages = messages,
+        showTransitCodeButton = showTransitCode
     )
 
     @Composable
@@ -173,6 +175,14 @@ class ElderLineDetailScreenTest {
         assertEquals(LineDetailEvent.OpenTransitCode, events.last())
         composeTestRule.onNodeWithTag(ELDER_BACK_TAG).performClick()
         assertEquals(LineDetailEvent.Back, events.last())
+    }
+
+    @Test
+    fun transitCodeButton_hiddenWhenSettingOff() {
+        // 「我的」里关掉「显示乘车码按钮」：底部「出示乘车码」也不留
+        setContent(stateOf(showTransitCode = false))
+
+        composeTestRule.onNodeWithTag(SHOW_TRANSIT_CODE_TAG).assertDoesNotExist()
     }
 
     @Test

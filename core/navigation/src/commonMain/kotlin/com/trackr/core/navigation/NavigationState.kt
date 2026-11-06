@@ -46,9 +46,10 @@ fun rememberNavigationState(
     remember(current, topLevel) {
         if (current.value !in topLevel) current.value = start
     }
-    // 每条栈用页签名作存档 key，不按调用位置。第 17 步页签从 4 个变 3 个，按位置存的话旧版存下的第 3 条（收藏）会被「更多」拿走
+    // 每条栈跟着页签名走，不按调用位置。第 17 步页签从 4 个变 3 个，按位置存的话旧版存下的第 3 条（收藏）会被「更多」拿走
     val stackSaver = remember(configuration) { navBackStackSaver(configuration) }
     val stacks = topLevel.associateWith { tab ->
+        // key(tab) 给每条栈独立的组合身份，等价于以前 saveable 的自定义 key（循环里按位置会互相抢槽位）
         key(tab) {
             rememberSaveable(saver = stackSaver) { NavBackStack<NavKey>(tab) }.also { stack ->
                 // 兜底：恢复出来的栈底不是这个页签（旧版存档、页签改动）就丢掉，从页签根页重来

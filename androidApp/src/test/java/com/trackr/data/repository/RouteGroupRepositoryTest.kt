@@ -72,6 +72,17 @@ class RouteGroupRepositoryTest {
     }
 
     @Test
+    fun testDeleteDefaultFavoriteGroupsStaysDeleted() = runTest(testDispatcher) {
+        repository.deleteFavoriteGroup("commute")
+        repository.deleteFavoriteGroup("home")
+        assertTrue(repository.favoriteGroups.value.isEmpty())
+
+        // 重启（重开仓库）后不再补默认分组（issue #24）
+        val reloaded = RouteGroupRepository(context, testDispatcher)
+        assertTrue(reloaded.favoriteGroups.value.isEmpty())
+    }
+
+    @Test
     fun testCreateAndRenameFavoriteGroup() = runTest(testDispatcher) {
         val created = repository.createFavoriteGroup("健身房")
         assertNotNull(created.id)

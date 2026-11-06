@@ -7,6 +7,7 @@ import com.trackr.core.domain.arrival.ArrivalText
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.TransitCity
+import com.trackr.core.model.displayLineName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withTimeoutOrNull
@@ -74,7 +75,7 @@ class BusStopWidgetUpdater(
                     targetOrder = favorite.targetOrder,
                     stationId = favorite.targetStopId,
                     source = favorite.source,
-                    lineNameHint = favorite.lineName,
+                    lineNameHint = favorite.displayLineName,
                     directionHint = favorite.direction
                 ).getOrNull()
             }

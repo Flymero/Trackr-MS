@@ -57,32 +57,44 @@ class FakeTrackingController(
         return true
     }
 
-    override fun stopTracking() {
+    /** 每次「结束」传的 sessionId（null = 全部 / 主会话） */
+    val stoppedSessionIds: MutableList<String?> = mutableListOf()
+
+    override fun stopTracking(sessionId: String?) {
         stopCount++
-        repository?.stop()
+        stoppedSessionIds += sessionId
+        repository?.stop(sessionId)
     }
 
-    override fun confirmBoarded() {
+    override fun confirmBoarded(sessionId: String?) {
         boardedCount++
-        repository?.confirmBoarded()
+        repository?.confirmBoarded(sessionId)
     }
 
     /** [chooseBoardedBus] 收到的选择（null =「还没上」） */
     val boardChoices: MutableList<String?> = mutableListOf()
 
-    override fun chooseBoardedBus(busId: String?) {
+    override fun chooseBoardedBus(busId: String?, sessionId: String?) {
         boardChoices += busId
-        repository?.chooseBoardedBus(busId)
+        repository?.chooseBoardedBus(busId, sessionId)
     }
 
-    override fun switchToNextLeg() {
+    /** 一起等里去掉的线（会话 id 到线 id） */
+    val removedWatchLines: MutableList<Pair<String, String>> = mutableListOf()
+
+    override fun removeWatchLine(sessionId: String, lineId: String) {
+        removedWatchLines += sessionId to lineId
+        repository?.removeWatchLine(sessionId, lineId)
+    }
+
+    override fun switchToNextLeg(sessionId: String?) {
         nextLegCount++
-        repository?.switchToNextLeg()
+        repository?.switchToNextLeg(sessionId)
     }
 
-    override fun cycleThreshold() {
+    override fun cycleThreshold(sessionId: String?) {
         cycleThresholdCount++
-        repository?.cycleThreshold()
+        repository?.cycleThreshold(sessionId)
     }
 
     override fun updateUserFix(fix: UserFix) {

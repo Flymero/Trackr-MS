@@ -31,7 +31,7 @@ class ElderArrivalAlertTest {
     val composeTestRule = createComposeRule()
 
     private val events = mutableListOf<ArrivalAlertEvent>()
-    private val alert = ArrivalAlertUi(key = "s1:bus1", lineName = "325", endStop = "科技园", stopName = "科技园")
+    private val alert = ArrivalAlertUi(key = "s1:bus1", sessionId = "s1", lineName = "325", endStop = "科技园", stopName = "科技园")
 
     private fun setContent(alert: ArrivalAlertUi = this.alert, fontScale: Float = 1f, darkTheme: Boolean = false) {
         composeTestRule.setContent {

@@ -11,6 +11,7 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.updateAll
 import com.trackr.core.model.FavoriteStationLine
+import com.trackr.core.model.displayLineName
 import com.trackr.core.navigation.deeplink.DeepLinkUris
 import com.trackr.deeplink.DeepLinkIntents
 import kotlinx.coroutines.CancellationException
@@ -61,9 +62,10 @@ class BusStopWidgetProvider : GlanceAppWidgetReceiver() {
                     val intent = DeepLinkIntents.activityIntent(context, fav.lineDetailLink()).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
+                    val lineName = fav.displayLineName
                     ShortcutInfoCompat.Builder(context, "shortcut_${fav.id}")
-                        .setShortLabel("${fav.lineName}·${fav.targetStopName}")
-                        .setLongLabel("${fav.lineName} 开往 ${fav.endStop} (${fav.targetStopName})")
+                        .setShortLabel("$lineName·${fav.targetStopName}")
+                        .setLongLabel("$lineName 开往 ${fav.endStop} (${fav.targetStopName})")
                         .setIcon(IconCompat.createWithResource(context, android.R.drawable.ic_dialog_map))
                         .setIntent(intent)
                         .setRank(index)
@@ -84,5 +86,6 @@ internal fun FavoriteStationLine.lineDetailLink(): String = DeepLinkUris.line(
     source = source,
     stopId = targetStopId,
     targetOrder = targetOrder,
-    lineName = lineName
+    // 老收藏里可能没存到名字：退回线路号，线路页顶栏才不是空的（issue #20）
+    lineName = lineName.ifBlank { lineNo }
 )

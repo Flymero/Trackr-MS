@@ -365,7 +365,8 @@ class ChelaileApiClient(
 
         for (i in 0 until linesArr.length()) {
             val l = linesArr.getJSONObject(i)
-            val name = l.optString("name")
+            // 车来了个别线路只给线路号、不给名字：名字为空时用线路号顶上，否则徽标画出来是空的（issue #20）
+            val name = l.optString("name").ifBlank { l.optString("lineNo") }
             val lineNo = l.optString("lineNo")
             val key = lineNo.ifBlank { "$name::${l.optString("lineId")}" }
             val isSubway = l.optInt("subwayV2", 0) == 1
@@ -579,7 +580,8 @@ class ChelaileApiClient(
 
             val dir = BusLineDirection(
                 lineId = lineObj.optString("lineId"),
-                name = lineObj.optString("name"),
+                // 有的线路上游只给 lineNo，名字为空时用它顶上，徽标和收藏卡才不会空白（issue #20）
+                name = lineObj.optString("name").ifBlank { lineObj.optString("lineNo") },
                 lineNo = lineObj.optString("lineNo"),
                 direction = lineObj.optInt("direction", 0),
                 startStop = lineObj.optString("startSn"),
@@ -685,8 +687,9 @@ class ChelaileApiClient(
         val data = executeEncrypted("$BASE_URL/bus/line!encryptedLineDetail.action", detailParams)
 
         val lineObj = data.optJSONObject("line") ?: JSONObject()
-        val name = lineObj.optString("name")
         val lineNo = lineObj.optString("lineNo")
+        // 名字为空时用线路号顶上（有的线路上游只给 lineNo）
+        val name = lineObj.optString("name").ifBlank { lineNo }
         val direction = lineObj.optInt("direction", 0)
         val startSn = lineObj.optString("startSn")
         val endSn = lineObj.optString("endSn")
@@ -707,12 +710,13 @@ class ChelaileApiClient(
             source = DataSourceType.CHELAILE
         )
 
-        // 反向线路
-        val otherlinesArr = data.optJSONArray("otherlines")
-        val reverseDirection = if (otherlinesArr != null && otherlinesArr.length() > 0) {
-            val revObj = otherlinesArr.getJSONObject(0)
+        // 反向线路：otherlines 为空 = 这条线没有对向（单程 / 环线 / 上游没维护）。
+        // lineId 为空也当没有：否则会造出一个「换向按钮在、点了必然失败」的反向线路。
+        val revObj = data.optJSONArray("otherlines")?.optJSONObject(0)
+        val reverseLineId = revObj?.optString("lineId").orEmpty()
+        val reverseDirection = if (revObj != null && reverseLineId.isNotBlank()) {
             BusLineDirection(
-                lineId = revObj.optString("lineId"),
+                lineId = reverseLineId,
                 name = name,
                 lineNo = lineNo,
                 direction = if (direction == 0) 1 else 0,
@@ -979,7 +983,8 @@ class ChelaileApiClient(
         val nextDepSource = resolved.source
 
         val lineObj = data.optJSONObject("line")
-        val lineName = lineObj?.optString("name") ?: lineNo
+        // `?:` 只管 null，不管空串：名字是空串时也要退回线路号
+        val lineName = lineObj?.optString("name")?.ifBlank { lineNo } ?: lineNo
         val depDesc = todayBlock?.optString("depDesc") ?: data.optString("depDesc")
 
         LineTimetable(

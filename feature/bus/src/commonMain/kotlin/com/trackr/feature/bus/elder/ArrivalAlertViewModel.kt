@@ -24,6 +24,8 @@ import kotlinx.coroutines.launch
  */
 data class ArrivalAlertUi(
     val key: String,
+    /** 哪一份追踪会话（「我上车了」只结束这一项） */
+    val sessionId: String,
     val lineName: String,
     val endStop: String,
     val stopName: String
@@ -44,6 +46,7 @@ fun arrivalAlertOf(session: TrackingSession?): ArrivalAlertUi? {
     if (!state.isActive || !state.hasTriggeredArrivedAlert || busId == null) return null
     return ArrivalAlertUi(
         key = "${session.sessionId}:$busId",
+        sessionId = session.sessionId,
         lineName = state.lineName,
         endStop = state.endStopName,
         stopName = state.targetStopName
@@ -77,8 +80,9 @@ class ArrivalAlertViewModel(
 
     private val dismissedKey = MutableStateFlow<String?>(null)
 
-    val alert: StateFlow<ArrivalAlertUi?> = combine(trackingRepository.session, dismissedKey) { session, dismissed ->
-        arrivalAlertOf(session)?.takeIf { it.key != dismissed }
+    val alert: StateFlow<ArrivalAlertUi?> = combine(trackingRepository.sessions, dismissedKey) { sessions, dismissed ->
+        // 同时可能追着好几项：哪一项的单线路车到站就提醒哪一项
+        sessions.firstNotNullOfOrNull { arrivalAlertOf(it) }?.takeIf { it.key != dismissed }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _transitCodeSheetOpen = MutableStateFlow(false)
@@ -98,8 +102,9 @@ class ArrivalAlertViewModel(
                 transitCodeLauncher.open(event.provider)
             }
             ArrivalAlertEvent.Boarded -> {
-                dismissedKey.update { alert.value?.key ?: it }
-                trackingController.stopTracking()
+                val current = alert.value
+                dismissedKey.update { current?.key ?: it }
+                trackingController.stopTracking(current?.sessionId)
             }
             ArrivalAlertEvent.Dismiss -> dismissedKey.update { alert.value?.key ?: it }
         }

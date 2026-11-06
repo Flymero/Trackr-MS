@@ -24,7 +24,6 @@
     <string name="bus_nearby_empty">附近 1 公里内没找到公交站</string>
     <string name="bus_nearby_stop_detail">站点详情</string>
     <string name="bus_nearby_loading">正在查车…</string>
-    <string name="bus_tracking_more_lines">还有 %1$s 条</string>
     <!-- 长辈版首页（第 32 步） -->
     <string name="bus_elder_search_hint">找线路、车站</string>
     <string name="bus_elder_favorites_title">我常坐的车</string>

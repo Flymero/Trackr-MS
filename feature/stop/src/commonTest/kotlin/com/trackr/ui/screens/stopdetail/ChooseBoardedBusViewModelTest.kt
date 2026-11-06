@@ -48,7 +48,7 @@ class ChooseBoardedBusViewModelTest {
     fun pendingChoice_isShown_andChoosingForwardsToController() = runTest(main.dispatcher) {
         val repo = newRepo()
         val session = assertNotNull(repo.start(target))
-        repo.update(session.generation) { it.copy(boardChoice = choice) }
+        repo.update(session.sessionId, session.generation) { it.copy(boardChoice = choice) }
         val controller = FakeTrackingController(repo)
         val viewModel = ChooseBoardedBusViewModel(session.sessionId, repo, controller)
         testScheduler.runCurrent()
@@ -79,7 +79,7 @@ class ChooseBoardedBusViewModelTest {
     fun otherSessionOrNoSession_closes() = runTest(main.dispatcher) {
         val repo = newRepo()
         val session = assertNotNull(repo.start(target))
-        repo.update(session.generation) { it.copy(boardChoice = choice) }
+        repo.update(session.sessionId, session.generation) { it.copy(boardChoice = choice) }
         val stale = ChooseBoardedBusViewModel("s-old", repo, FakeTrackingController(repo))
         testScheduler.runCurrent()
         assertEquals(ChooseBoardedBusState.Closed, stale.state.value)

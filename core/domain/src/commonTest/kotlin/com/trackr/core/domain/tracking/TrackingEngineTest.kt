@@ -1370,6 +1370,49 @@ class TrackingEngineTest {
     }
 
     @Test
+    fun engine_reducePollRoute_missedBus_emitsMissedAlertForNextBus() {
+        // 车停在上车站（还没到「到站」判定），下一轮数据里它已经不在候车范围
+        val atStop = poll(beginRoute(), detail(listOf(groupBus("busX", order = 3, progress = 0.9f, eta = 300))))
+        assertEquals(LegPhase.WAITING_BOARD, atStop.session.state.legPhase)
+        assertEquals(0, atStop.session.state.stopsRemaining)
+
+        val missed = poll(atStop.session, detail(listOf(groupBus("busY", order = 2, progress = 0.2f, eta = 480))))
+
+        val alert = missed.effects.filterIsInstance<TrackingEngine.Effect.Alert>().single()
+        assertEquals(TrackingEngine.AlertKind.MISSED, alert.kind)
+        assertEquals("上车站A", alert.state.targetStopName)
+        assertEquals(480, alert.state.etaSeconds)
+        assertTrue(alert.forceStandalone, "错过提醒必须独立发，藏进胶囊等于没提醒")
+        // 换到下一班继续等，不结束追踪
+        assertEquals("busY", missed.session.state.currentBusId)
+        assertEquals(LegPhase.WAITING_BOARD, missed.session.state.legPhase)
+    }
+
+    @Test
+    fun engine_reducePollRoute_missedBus_noNextBus_stillReportsMissed() {
+        val atStop = poll(beginRoute(), detail(listOf(groupBus("busX", order = 3, progress = 0.9f, eta = 300))))
+
+        val missed = poll(atStop.session, detail(emptyList()))
+
+        val alert = missed.effects.filterIsInstance<TrackingEngine.Effect.Alert>().single()
+        assertEquals(TrackingEngine.AlertKind.MISSED, alert.kind)
+        assertEquals(-1, alert.state.etaSeconds)
+    }
+
+    @Test
+    fun engine_reducePollRoute_busVanishesWhileStillApproaching_doesNotClaimMissed() {
+        // 车还在上一站（stopsRemaining = 1）就从数据里消失：可能只是数据抽风，不能断言用户错过了
+        val approaching = poll(beginRoute(), detail(listOf(groupBus("busX", order = 2, progress = 0.5f, eta = 120))))
+
+        val next = poll(approaching.session, detail(listOf(groupBus("busY", order = 1, progress = 0.5f, eta = 600))))
+
+        assertTrue(
+            next.effects.none { it is TrackingEngine.Effect.Alert && it.kind == TrackingEngine.AlertKind.MISSED },
+            "车没到站就消失，不该说用户错过了"
+        )
+    }
+
+    @Test
     fun engine_reducePollRoute_onBoardNotArrived_noTransition() {
         val session = beginRoute().onBoard("busX")
         val result = poll(session, detail(listOf(groupBus("busX", order = 5))))
@@ -1395,12 +1438,12 @@ class TrackingEngineTest {
         assertEquals(TrackingEngine.AlertKind.ARRIVED, alert.kind)
         assertEquals("上车站A", alert.state.targetStopName)
         assertEquals(session.generation, result.session.generation)
-        // 上车站到站不强制发独立通知：实时活动已在展示同一趟车，再弹一条是重复提醒
-        assertFalse(alert.forceStandalone)
+        // 上车站到站也要独立发通知：胶囊可用只说明权限给了，不说明用户看得见
+        assertTrue(alert.forceStandalone)
     }
 
     @Test
-    fun engine_reducePollRoute_boardArrivedDoesNotForceStandalone_dropArrivedDoes() {
+    fun engine_reducePollRoute_arrivedAlerts_alwaysForceStandalone() {
         // 上车站到站：BOARD_ARRIVED
         val boardAlert = assertIs<TrackingEngine.Effect.Alert>(
             poll(beginRoute(), detail(listOf(groupBus("busX", order = 3, arrived = true, progress = 1f))))
@@ -1410,7 +1453,7 @@ class TrackingEngineTest {
         )
         assertEquals(TrackingEngine.AlertKind.ARRIVED, boardAlert.kind)
         assertEquals("上车站A", boardAlert.state.targetStopName)
-        assertFalse(boardAlert.forceStandalone, "上车站到站不应强制独立通知")
+        assertTrue(boardAlert.forceStandalone, "上车站到站是唯一一次机会，必须独立发通知")
 
         // 下车站到站（最后一程）：DROP_ARRIVED
         val dropAlert = assertIs<TrackingEngine.Effect.Alert>(

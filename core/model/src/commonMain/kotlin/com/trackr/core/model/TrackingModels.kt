@@ -155,7 +155,8 @@ data class TrackingLegParams(
 )
 
 /**
- * 一次追踪会话（`TrackingRepository` 里唯一的一份，存 `tracking_session.json`）。
+ * 一份追踪会话（`TrackingRepository` 里可以同时有多份，一起存进 `tracking_session.json`；
+ * 第 36 步起同时追多项，每份各自有代际号、各自轮询、各自一条常驻通知）。
  *
  * @param sessionId 这次会话的标识，服务只收它
  * @param generation 代际号：开始 / 切程 / 停止都 +1；轮询结果回来先比对，旧的直接丢

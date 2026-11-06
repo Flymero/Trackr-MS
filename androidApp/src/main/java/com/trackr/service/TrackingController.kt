@@ -39,7 +39,7 @@ class AndroidTrackingController(
     private val appContext: Context = context.applicationContext ?: context
 
     override fun start(target: TrackingTarget): Boolean {
-        val previous = repository.session.value
+        val previous = repository.sessionReplacedBy(target.withAlertThresholdStops(alertThresholdStops()))
         val session = repository.start(target.withAlertThresholdStops(alertThresholdStops())) ?: return false
         return try {
             starter(appContext, session.sessionId)
@@ -66,10 +66,11 @@ class AndroidTrackingController(
      *   （真正的接续在 [appScope] 里等读盘完成后进行）
      */
     override fun resumeInterrupted(): Boolean {
-        repository.session.value?.takeIf { it.interrupted }?.let { return startResume(it) }
+        repository.sessions.value.firstOrNull { it.interrupted }?.let { return startResume(it) }
         appScope.launch {
             repository.awaitLoaded()
-            val session = repository.session.value?.takeIf { it.interrupted } ?: return@launch
+            // 进程重建后可能有好几份中断的会话：服务起来后自己会把它们全部接上（见 BusTrackingService）
+            val session = repository.sessions.value.firstOrNull { it.interrupted } ?: return@launch
             startResume(session)
         }
         return false
@@ -84,24 +85,28 @@ class AndroidTrackingController(
         false
     }
 
-    override fun stopTracking() {
-        repository.stop()
+    override fun stopTracking(sessionId: String?) {
+        repository.stop(sessionId)
     }
 
-    override fun confirmBoarded() {
-        repository.confirmBoarded()
+    override fun confirmBoarded(sessionId: String?) {
+        repository.confirmBoarded(sessionId)
     }
 
-    override fun chooseBoardedBus(busId: String?) {
-        repository.chooseBoardedBus(busId)
+    override fun chooseBoardedBus(busId: String?, sessionId: String?) {
+        repository.chooseBoardedBus(busId, sessionId)
     }
 
-    override fun switchToNextLeg() {
-        repository.switchToNextLeg()
+    override fun removeWatchLine(sessionId: String, lineId: String) {
+        repository.removeWatchLine(sessionId, lineId)
     }
 
-    override fun cycleThreshold() {
-        repository.cycleThreshold()
+    override fun switchToNextLeg(sessionId: String?) {
+        repository.switchToNextLeg(sessionId)
+    }
+
+    override fun cycleThreshold(sessionId: String?) {
+        repository.cycleThreshold(sessionId)
     }
 
     override fun updateUserFix(fix: UserFix) {

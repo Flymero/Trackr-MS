@@ -13,8 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import com.trackr.ui.platform.plainTextClipEntry
-import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import com.trackr.core.designsystem.resources.Res
@@ -24,6 +22,8 @@ import com.trackr.core.domain.platform.AppSigningInfo
 import com.trackr.data.remote.amap.AmapSdkManager
 import com.trackr.feature.route.resources.Res as RouteRes
 import com.trackr.feature.route.resources.route_map_diag_title
+import com.trackr.ui.platform.plainTextClipEntry
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 

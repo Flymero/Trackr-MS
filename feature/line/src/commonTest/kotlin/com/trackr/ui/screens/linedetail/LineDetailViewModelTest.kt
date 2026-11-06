@@ -23,6 +23,7 @@ import com.trackr.core.model.RailMode
 import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
+import com.trackr.core.model.WatchLine
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.testing.FakeAnnouncer
 import com.trackr.core.testing.FakeTrackingController
@@ -77,6 +78,7 @@ private class CountingLineRepository(
     private val delegate: FakeRealtimeRepository
 ) : RealtimeRepository by delegate {
     val lineDetailTargetOrders = mutableListOf<Int?>()
+    val lineIds = mutableListOf<String>()
     var gate: CompletableDeferred<Unit>? = null
 
     override suspend fun getLineDetail(
@@ -91,6 +93,7 @@ private class CountingLineRepository(
         directionHint: Int
     ): Result<BusLineDetail> {
         lineDetailTargetOrders += targetOrder
+        lineIds += lineId
         gate?.await()
         return delegate.getLineDetail(city, lineId, targetOrder, stationId, wgsLat, wgsLng, source, lineNameHint, directionHint)
     }
@@ -527,6 +530,7 @@ class LineDetailViewModelTest {
             assertEquals(listOf(old), push.cancellations)
                 assertEquals(0, old.updates.subscriptionCount.value)
                 assertTrue(viewModel.uiState.value.isLoading)
+                assertEquals("line_001", viewModel.uiState.value.static?.line?.lineId)
                 assertEquals(buses, viewModel.uiState.value.live?.buses)
 
                 gate.complete(Unit)
@@ -616,6 +620,19 @@ class LineDetailViewModelTest {
         assertEquals(RailMode.Vertical, viewModel.uiState.value.railMode)
     }
 
+    /** 底栏「乘车码」圆钮和首页悬浮按钮共用一个开关（用 NFC 的人两边都不用看） */
+    @Test
+    fun showTransitCodeButton_followsGlobalSetting() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.showTransitCodeButton)
+
+        fakeRepository.settings.setShowTransitCodeButton(false)
+        testScheduler.runCurrent()
+
+        assertFalse(viewModel.uiState.value.showTransitCodeButton)
+    }
+
     // ---------- 读给我听（第 33 步） ----------
 
     @Test
@@ -702,6 +719,8 @@ class LineDetailViewModelTest {
         )
 
         assertTrue(started)
+        // 追踪状态由 ViewModel 收集会话列表得到，跑一轮调度器
+        testScheduler.runCurrent()
         assertEquals(
             listOf<TrackingTarget>(
                 TrackingTarget.SingleLine(
@@ -729,6 +748,7 @@ class LineDetailViewModelTest {
         assertEquals(2, session.targetOrder)
 
         viewModel.stopTracking()
+        testScheduler.runCurrent()
 
         assertEquals(1, trackingController.stopCount)
         assertFalse(viewModel.activeTrackingSession.value.isActive)
@@ -1489,5 +1509,220 @@ class LineDetailViewModelTest {
         assertEquals("line_002", state.static?.line?.lineId)
         assertEquals("人民广场", state.selectedStop?.name)
         assertEquals(PanelMode.STATION_CARD, state.panelMode)
+    }
+
+    // ---------- 底栏换向 ----------
+
+    @Test
+    fun switchDirection_staysSwitchingUntilReverseLineArrives() = runTest(main.dispatcher) {
+        val counting = CountingLineRepository(fakeRepository.realtime)
+        val viewModel = createViewModel(targetOrder = 2, realtime = counting)
+        testScheduler.runCurrent()
+
+        fakeRepository.lineDetailResult = Result.success(reverseDetail())
+        counting.gate = CompletableDeferred()
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+
+        // 请求还没回来：底栏换向钮转圈并禁用，挡住连点
+        assertTrue(viewModel.uiState.value.isSwitchingDirection)
+
+        counting.gate?.complete(Unit)
+        counting.gate = null
+        testScheduler.runCurrent()
+
+        assertFalse(viewModel.uiState.value.isSwitchingDirection)
+        assertEquals("line_002", viewModel.uiState.value.static?.line?.lineId)
+    }
+
+    @Test
+    fun switchDirection_whileTracking_endsTrackingFirst() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+        assertTrue(viewModel.startTrackingSelectedStop())
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.isTrackingThisStop)
+
+        fakeRepository.lineDetailResult = Result.success(reverseDetail())
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+
+        assertEquals(1, trackingController.stopCount)
+        assertTrue(viewModel.uiState.value.userMessages.any { it.text == "已结束追踪" })
+        assertFalse(viewModel.uiState.value.isTrackingThisStop)
+    }
+
+    @Test
+    fun switchDirection_withoutSameNameStop_fallsBackAndExplains() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+
+        // 反向线站名全不一样：只能退回默认候车站，并说明为什么换了站
+        val renamed = listOf(
+            BusStop(stopId = "r1", name = "甲站", order = 1),
+            BusStop(stopId = "r2", name = "乙站", order = 2),
+            BusStop(stopId = "r3", name = "丙站", order = 3)
+        )
+        fakeRepository.lineDetailResult = Result.success(reverseDetail(stops = renamed))
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals("甲站", state.selectedStop?.name)
+        assertEquals(
+            "反向线路没有「人民广场」，已选 甲站",
+            state.userMessages.single().text
+        )
+    }
+
+    @Test
+    fun switchDirection_failure_rollsBackToCurrentLine() = runTest(main.dispatcher) {
+        val counting = CountingLineRepository(fakeRepository.realtime)
+        val viewModel = createViewModel(targetOrder = 2, realtime = counting)
+        testScheduler.runCurrent()
+        counting.lineIds.clear()
+
+        fakeRepository.lineDetailResult = Result.failure(IllegalStateException("boom"))
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+
+        assertEquals("换向失败，请稍后重试", viewModel.uiState.value.errorMessage)
+        assertFalse(viewModel.uiState.value.isSwitchingDirection)
+
+        // 失败后线路 id 回滚：下一轮刷新仍然请求原来的方向
+        fakeRepository.lineDetailResult = Result.success(
+            BusLineDetail(line = forwardDirection, reverseDirection = reverseDirection, stops = stops, buses = buses, targetOrder = 2)
+        )
+        viewModel.refreshNow(fromPull = false)
+        testScheduler.runCurrent()
+        assertEquals("line_001", counting.lineIds.last())
+    }
+
+    @Test
+    fun switchDirection_blankReverseLineId_isIgnored() = runTest(main.dispatcher) {
+        // 旧缓存里可能留着 lineId 为空的反向：当没有，别发一条必然失败的请求
+        fakeRepository.lineDetailResult = Result.success(
+            BusLineDetail(
+                line = forwardDirection,
+                reverseDirection = reverseDirection.copy(lineId = ""),
+                stops = stops,
+                buses = buses,
+                targetOrder = 2
+            )
+        )
+        val counting = CountingLineRepository(fakeRepository.realtime)
+        val viewModel = createViewModel(targetOrder = 2, realtime = counting)
+        testScheduler.runCurrent()
+        counting.lineIds.clear()
+
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+
+        assertTrue(counting.lineIds.isEmpty())
+        assertEquals("line_001", viewModel.uiState.value.static?.line?.lineId)
+        assertFalse(viewModel.uiState.value.isSwitchingDirection)
+    }
+
+    private fun reverseDetail(stops: List<BusStop> = reversedStops()) = BusLineDetail(
+        line = reverseDirection,
+        reverseDirection = forwardDirection,
+        stops = stops,
+        buses = emptyList()
+    )
+
+    private fun reversedStops(): List<BusStop> = stops.reversed().mapIndexed { i, stop ->
+        stop.copy(stopId = "r${i + 1}", order = i + 1)
+    }
+
+    @Test
+    fun multipleSessions_sameLine_selectsAndStopsSessionForSelectedStop() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+
+        assertTrue(viewModel.startTrackingSelectedStop())
+        testScheduler.runCurrent()
+        assertTrue(
+            viewModel.startTracking(
+                line = forwardDirection,
+                targetStop = stops[2],
+                totalStops = stops.size,
+                alertThresholdStops = LineDetailViewModel.DEFAULT_ALERT_THRESHOLD_STOPS
+            )
+        )
+        testScheduler.runCurrent()
+
+        // 同一线路有两个不同候车站时，页面仍显示当前所选站对应的会话。
+        assertEquals(2, viewModel.activeTrackingSession.value.targetOrder)
+        viewModel.selectStop(stops[2])
+        testScheduler.runCurrent()
+        assertEquals(3, viewModel.activeTrackingSession.value.targetOrder)
+        assertTrue(viewModel.uiState.value.isTrackingThisStop)
+
+        viewModel.stopTracking()
+        testScheduler.runCurrent()
+        assertEquals(1, trackingController.stopCount)
+        assertFalse(viewModel.activeTrackingSession.value.isActive)
+
+        // 停掉 3 站会话后，2 站会话仍然存在。
+        viewModel.selectStop(stops[1])
+        testScheduler.runCurrent()
+        assertEquals(2, viewModel.activeTrackingSession.value.targetOrder)
+        assertTrue(viewModel.uiState.value.isTrackingThisStop)
+    }
+
+    @Test
+    fun switchingLineId_clearsTrackingStateWhenSessionsDoNotChange() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+        assertTrue(
+            viewModel.startTracking(
+                line = forwardDirection,
+                targetStop = stops[2],
+                totalStops = stops.size,
+                alertThresholdStops = LineDetailViewModel.DEFAULT_ALERT_THRESHOLD_STOPS
+            )
+        )
+        testScheduler.runCurrent()
+
+        // 追踪的是同线另一站，当前选择的 2 站不应误显示为正在追踪。
+        assertFalse(viewModel.activeTrackingSession.value.isActive)
+        fakeRepository.lineDetailResult = Result.success(reverseDetail())
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+
+        assertEquals("line_002", viewModel.uiState.value.static?.line?.lineId)
+        assertFalse(viewModel.activeTrackingSession.value.isActive)
+        assertFalse(viewModel.uiState.value.isTrackingThisStop)
+    }
+
+    @Test
+    fun watchTogether_lineThatIsNotThePrimary_showsTrackingForThisStop() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+
+        // 一起等里排第一的是 9 路，这条线（49 路）是第二条
+        trackingController.start(
+            TrackingTarget.WatchTogether(
+                cityId = "034",
+                stopId = "s2",
+                stopName = "人民广场",
+                lines = listOf(WatchLine(lineId = "line_009", lineName = "9路", stopOrder = 2), WatchLine(lineId = "line_001", lineName = "49路", stopOrder = 2))
+            )
+        )
+        testScheduler.runCurrent()
+
+        val session = viewModel.activeTrackingSession.value
+        assertTrue(session.isActive)
+        // 状态按这条线自己的数据拼：站序、线名都是它的
+        assertEquals("line_001", session.lineId)
+        assertEquals("49路", session.lineName)
+        assertEquals(2, session.targetOrder)
+        assertTrue(viewModel.uiState.value.isTrackingThisStop)
+
+        // 结束追踪只去掉这一条，一起等还在
+        viewModel.stopTracking()
+        testScheduler.runCurrent()
+        assertEquals(listOf("line_009"), trackingRepository.session.value?.watchTarget?.lines?.map { it.lineId })
+        assertFalse(viewModel.activeTrackingSession.value.isActive)
     }
 }

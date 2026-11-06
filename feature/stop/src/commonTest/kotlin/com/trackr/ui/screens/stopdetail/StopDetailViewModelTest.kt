@@ -593,7 +593,7 @@ class StopDetailViewModelTest {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
         val session = assertNotNull(repo.start(watchHere(w49, w71)))
-        repo.update(session.generation) {
+        repo.update(session.sessionId, session.generation) {
             it.copy(
                 watchedLines = listOf(
                     WatchedLine(line = w71, busId = "b71", plate = "沪A·71001", stopsRemaining = 1, etaSeconds = 60, hasData = true),
@@ -619,7 +619,7 @@ class StopDetailViewModelTest {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
         val session = assertNotNull(repo.start(watchHere(w49, w71)))
-        repo.update(session.generation) {
+        repo.update(session.sessionId, session.generation) {
             it.copy(
                 watchedLines = emptyList(),
                 state = it.state.copy(legPhase = LegPhase.ON_BOARD, lineName = "71路", stopsRemaining = 5)
@@ -729,7 +729,7 @@ class StopDetailViewModelTest {
             ),
             sinceMillis = 1_000L
         )
-        repo.update(session.generation) { it.copy(boardChoice = choice) }
+        repo.update(session.sessionId, session.generation) { it.copy(boardChoice = choice) }
         testScheduler.runCurrent()
 
         val ui = assertNotNull(viewModel.uiState.value.boardChoice)
@@ -742,11 +742,11 @@ class StopDetailViewModelTest {
         assertEquals(listOf("b71", null), controller.boardChoices)
 
         // 划掉：这次待选不再弹；新的待选照样弹
-        repo.update(repo.session.value!!.generation) { it.copy(boardChoice = choice) }
+        repo.update(repo.session.value!!.sessionId, repo.session.value!!.generation) { it.copy(boardChoice = choice) }
         testScheduler.runCurrent()
         viewModel.onEvent(StopDetailEvent.DismissBoardChoice)
         assertNull(viewModel.uiState.value.boardChoice)
-        repo.update(repo.session.value!!.generation) { it.copy(boardChoice = choice.copy(sinceMillis = 2_000L)) }
+        repo.update(repo.session.value!!.sessionId, repo.session.value!!.generation) { it.copy(boardChoice = choice.copy(sinceMillis = 2_000L)) }
         testScheduler.runCurrent()
         assertNotNull(viewModel.uiState.value.boardChoice)
     }
@@ -782,6 +782,19 @@ class StopDetailViewModelTest {
         assertFalse(viewModel.uiState.value.isTransitCodeSheetOpen)
         assertEquals(listOf(TransitCodeProvider.UNIONPAY), launcher.opened)
         assertEquals(TransitCodeProvider.UNIONPAY, settings.preferredTransitCodeProvider.value)
+    }
+
+    /** 「显示乘车码按钮」开关和首页、线路页共用：关掉后站点页底栏也不画 */
+    @Test
+    fun testShowTransitCodeButton_followsGlobalSetting() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.showTransitCodeButton)
+
+        settings.setShowTransitCodeButton(false)
+        testScheduler.runCurrent()
+
+        assertFalse(viewModel.uiState.value.showTransitCodeButton)
     }
 
     @Test

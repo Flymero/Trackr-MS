@@ -366,7 +366,7 @@ class TrackrAppNavigationTest {
                 )
             )
         )
-        repo.update(session.generation) {
+        repo.update(session.sessionId, session.generation) {
             it.copy(
                 boardChoice = BoardChoice(
                     options = listOf(

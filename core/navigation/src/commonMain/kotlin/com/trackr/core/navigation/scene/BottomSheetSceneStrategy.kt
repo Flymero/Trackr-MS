@@ -68,6 +68,7 @@ internal data class BottomSheetScene<T : Any>(
     private var sheetState: SheetState? = null
 
     override val content: @Composable () -> Unit = {
+        // 保留半展开锚点（skipPartiallyExpanded = false 的等价写法）
         val state = rememberBottomSheetState(
             initialValue = SheetValue.Hidden,
             enabledValues = setOf(SheetValue.Hidden, SheetValue.PartiallyExpanded, SheetValue.Expanded)

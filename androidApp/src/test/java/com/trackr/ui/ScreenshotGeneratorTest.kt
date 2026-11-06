@@ -498,7 +498,7 @@ class ScreenshotGeneratorTest {
             )
         )
         checkNotNull(session)
-        trackingRepository.update(session.generation) { it.copy(state = activeTracking) }
+        trackingRepository.update(session.sessionId, session.generation) { it.copy(state = activeTracking) }
 
         // 附近站点丰富模拟数据
         val nearbyStops = listOf(

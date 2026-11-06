@@ -212,6 +212,22 @@ class BusHomeViewModelTest {
     }
 
     @Test
+    fun testTransitCodeButtonVisibility_followsSetting() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        // 默认显示
+        assertTrue(viewModel.uiState.value.showTransitCodeButton)
+
+        fakeRepository.settings.setShowTransitCodeButton(false)
+        testScheduler.runCurrent()
+        assertFalse(viewModel.uiState.value.showTransitCodeButton)
+
+        fakeRepository.settings.setShowTransitCodeButton(true)
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.showTransitCodeButton)
+    }
+
+    @Test
     fun testEngineModeSwitching() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
@@ -450,7 +466,7 @@ class BusHomeViewModelTest {
         assertTrue(viewModel.uiState.value.activeTracking.isActive)
         assertEquals("line_71", viewModel.uiState.value.activeTracking.lineId)
 
-        viewModel.stopTracking()
+        viewModel.stopTracking(assertNotNull(trackingRepository.session.value).sessionId)
         testScheduler.runCurrent()
 
         assertEquals(1, trackingController.stopCount)
@@ -712,7 +728,7 @@ class BusHomeViewModelTest {
     fun testTrackingCard_singleLine_endedByStopTracking() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
-        assertNull(viewModel.uiState.value.trackingCard)
+        assertTrue(viewModel.uiState.value.trackingCards.isEmpty())
 
         trackingController.start(
             TrackingTarget.SingleLine(
@@ -728,7 +744,7 @@ class BusHomeViewModelTest {
         )
         testScheduler.runCurrent()
 
-        val card = assertNotNull(viewModel.uiState.value.trackingCard)
+        val card = viewModel.uiState.value.trackingCards.single()
         assertEquals("追踪 71路 · 人民广场", card.title)
         // 长辈版「读给我听」：还没选到车时读「正在查车」
         assertEquals("71路，正在查车", card.spoken)
@@ -737,11 +753,89 @@ class BusHomeViewModelTest {
         // 点卡片按会话里的数据源打开线路页（旧首页写死 CHELAILE）
         assertEquals(DataSourceType.MYGOLBS, card.open.source)
 
-        viewModel.onEvent(BusHomeEvent.StopTracking)
+        viewModel.onEvent(BusHomeEvent.StopTracking(card.sessionId))
         testScheduler.runCurrent()
         assertEquals(1, trackingController.stopCount)
-        assertNull(viewModel.uiState.value.trackingCard)
+        assertTrue(viewModel.uiState.value.trackingCards.isEmpty())
         assertNull(trackingRepository.groupSession.value)
+    }
+
+    @Test
+    fun testTrackingCards_twoLines_stopOnlyTheOne() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        fun target(lineId: String, lineName: String, order: Int) = TrackingTarget.SingleLine(
+            cityId = "034",
+            lineId = lineId,
+            lineName = lineName,
+            targetStopId = "stop_$order",
+            targetStopName = "人民广场",
+            targetOrder = order,
+            totalStops = 20
+        )
+        trackingController.start(target("line_71", "71路", 5))
+        trackingController.start(target("line_59", "59路", 9))
+        testScheduler.runCurrent()
+
+        // 两项同时追：两张卡，各写自己的线路、各点进自己的线路页
+        val cards = viewModel.uiState.value.trackingCards
+        assertEquals(listOf("追踪 71路 · 人民广场", "追踪 59路 · 人民广场"), cards.map { it.title })
+        assertEquals(listOf("line_71", "line_59"), cards.map { it.open.lineId })
+
+        // 结束第一张：只停那一项，第二项还在
+        viewModel.onEvent(BusHomeEvent.StopTracking(cards[0].sessionId))
+        testScheduler.runCurrent()
+
+        assertEquals(1, trackingController.stopCount)
+        assertEquals(listOf("line_59"), viewModel.uiState.value.trackingCards.map { it.open.lineId })
+        assertEquals(1, trackingRepository.sessions.value.size)
+    }
+
+    @Test
+    fun testTrackingCards_tcpOnlineChangesIndependently_andStoppingOneKeepsOtherOnline() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        fun target(lineId: String) = TrackingTarget.SingleLine(
+            cityId = "ms", lineId = lineId, lineName = lineId, targetOrder = 5,
+            source = DataSourceType.MEISHAN
+        )
+        val first = assertNotNull(trackingRepository.start(target("ms:1_1_0")))
+        val second = assertNotNull(trackingRepository.start(target("ms:1_2_0")))
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.trackingCards.none { it.isPushOnline })
+        trackingRepository.setPushOnline(first.sessionId, first.generation, first.leg.lineId, true)
+        testScheduler.runCurrent()
+        assertEquals(listOf(true, false), viewModel.uiState.value.trackingCards.map { it.isPushOnline })
+        trackingRepository.setPushOnline(second.sessionId, second.generation, second.leg.lineId, true)
+        trackingRepository.setPushOnline(first.sessionId, first.generation, first.leg.lineId, false)
+        testScheduler.runCurrent()
+        assertEquals(listOf(false, true), viewModel.uiState.value.trackingCards.map { it.isPushOnline })
+        viewModel.onEvent(BusHomeEvent.StopTracking(first.sessionId))
+        testScheduler.runCurrent()
+        assertEquals(second.sessionId, viewModel.uiState.value.trackingCards.single().sessionId)
+        assertTrue(viewModel.uiState.value.trackingCards.single().isPushOnline)
+    }
+
+    @Test
+    fun testTrackingCards_watchTogetherTcpBadgeIsPerLine_andRemovedLineStaysRemoved() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        val lines = listOf(
+            com.trackr.core.model.WatchLine("ms:1_1_0", "1路", 5, source = DataSourceType.MEISHAN),
+            com.trackr.core.model.WatchLine("ms:1_2_0", "2路", 5, source = DataSourceType.MEISHAN)
+        )
+        val session = assertNotNull(trackingRepository.start(TrackingTarget.WatchTogether(
+            cityId = "ms", stopId = "stop", stopName = "站", lines = lines
+        )))
+        trackingRepository.setPushOnline(session.sessionId, session.generation, lines.first().lineId, true)
+        testScheduler.runCurrent()
+        assertEquals(listOf(true, false), viewModel.uiState.value.trackingCards.map { it.isPushOnline })
+        viewModel.onEvent(BusHomeEvent.StopTracking(session.sessionId, lines.first().lineId))
+        trackingRepository.setPushOnline(session.sessionId, session.generation, lines.first().lineId, true)
+        testScheduler.runCurrent()
+        assertEquals(lines.last().lineId, viewModel.uiState.value.trackingCards.single().open.lineId)
+        assertFalse(viewModel.uiState.value.trackingCards.single().isPushOnline)
     }
 
     // ---- 第 33 步：读给我听 ----

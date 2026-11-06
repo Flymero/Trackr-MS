@@ -655,6 +655,30 @@ internal object WatchTogetherTracker {
         return board(session, target, pick, emptyList(), nowMillis, byLocation = false)
     }
 
+    /**
+     * 从一起等里去掉一条线（首页那一张卡点「结束」）：只停这一条，其他线接着等。
+     * @return 新会话；返回 null 表示这份会话该结束（一条都不剩，或去掉的是已经上车正在追的那条）
+     */
+    fun removeLine(session: TrackingSession, lineId: String, nowMillis: Long): TrackingSession? {
+        val target = session.watchTarget ?: return null
+        if (target.lines.none { it.lineId == lineId }) return session
+        val lines = target.lines.filterNot { it.lineId == lineId }
+        if (session.state.legPhase != LegPhase.WAITING_BOARD) {
+            // 乘车中：去掉别的线只是不再列它；去掉正坐着的那条就是结束这一次追踪
+            if (session.state.lineId == lineId) return null
+            return session.copy(target = target.copy(lines = lines))
+        }
+        if (lines.isEmpty()) return null
+        val choice = session.boardChoice?.let { current ->
+            val options = current.options.filterNot { it.lineId == lineId }
+            if (options.isEmpty()) null else current.copy(options = options)
+        }
+        val watched = session.watchedLines.filterNot { it.line.lineId == lineId }
+        val remaining = target.copy(lines = lines)
+        // waitingSession 只重写 leg / state / watchedLines，目标里的线要自己换掉
+        return waitingSession(session, remaining, watched, choice, nowMillis).copy(target = remaining)
+    }
+
     /** 车到上车站的距离（站），同 [GroupLegTracker.pickBoardedBus] 的口径 */
     private fun distanceToStop(option: BoardingRule.Option): Float {
         val bus = requireNotNull(option.bus)

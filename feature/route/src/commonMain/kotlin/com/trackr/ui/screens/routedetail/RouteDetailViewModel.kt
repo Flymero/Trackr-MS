@@ -17,6 +17,7 @@ import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.GroupCategory
 import com.trackr.core.model.GroupTrackingSessionState
 import com.trackr.core.model.LineOperatingState
+import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitGroup
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -68,24 +70,34 @@ class RouteDetailViewModel(
 
     val groups: StateFlow<List<TransitGroup>> = groupRepository.groups
 
-    val activeGroupSession: StateFlow<GroupTrackingSessionState?> = trackingRepository.groupSession
+    /** 正在追的换乘路线（同时追多项时取列表里第一份路线会话） */
+    val activeGroupSession: StateFlow<GroupTrackingSessionState?> = trackingRepository.sessions
+        .map { sessions -> groupSessionOf(sessions)?.toGroupSessionState() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /**
      * 正在追踪、但不在已保存列表里的路线（如规划页"开始追踪"的临时方案）。
      * 收藏页在列表最上方显示为"临时追踪"卡片。
      */
     val temporaryTrackingGroup: StateFlow<TransitGroup?> = combine(
-        trackingRepository.session,
-        trackingRepository.groupSession,
+        trackingRepository.sessions,
         groups
-    ) { trackingSession, session, savedGroups ->
+    ) { sessions, savedGroups ->
         // 中断待恢复的会话当作没在追踪
-        val activeGroup = trackingSession?.takeIf { !it.interrupted }?.group
-        activeGroup?.takeIf { group ->
-            session != null && !session.isCompleted && session.groupId == group.id &&
-                savedGroups.none { it.id == group.id }
+        val active = groupSessionOf(sessions) ?: return@combine null
+        val group = active.group ?: return@combine null
+        val session = active.toGroupSessionState() ?: return@combine null
+        group.takeIf {
+            !session.isCompleted && session.groupId == group.id && savedGroups.none { saved -> saved.id == group.id }
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** 同时追多项时，路线相关的命令都作用在列表里第一份路线会话上 */
+    private fun groupSessionOf(sessions: List<TrackingSession>): TrackingSession? =
+        sessions.firstOrNull { !it.interrupted && it.group != null }
+
+    private val groupSessionId: String?
+        get() = groupSessionOf(trackingRepository.sessions.value)?.sessionId
 
     private val _legRealtimeSummary = MutableStateFlow<Map<String, String>>(emptyMap())
     val legRealtimeSummary: StateFlow<Map<String, String>> = _legRealtimeSummary.asStateFlow()
@@ -132,6 +144,14 @@ class RouteDetailViewModel(
     fun clearTrackingMessage() {
         _trackingMessage.value = null
     }
+
+    /**
+     * 收藏分组（详情页「改分组」和「收藏」弹层用）。
+     *
+     * 必须在 [init] 之前初始化：`viewModelScope.launch` 跑在 `Dispatchers.Main.immediate` 上，
+     * 构造期间就可能同步跑到用它（同 issue #20 线路页那次 NPE）。
+     */
+    val favoriteGroups: StateFlow<List<FavoriteGroup>> = groupRepository.favoriteGroups
 
     init {
         if (enableAutoRefresh) {
@@ -206,12 +226,12 @@ class RouteDetailViewModel(
 
     /** 手动确认“我已上车”，跳过等车阶段 */
     fun confirmBoarded() {
-        trackingController.confirmBoarded()
+        trackingController.confirmBoarded(groupSessionId)
     }
 
     /** 手动跳到下一程（乘车阶段使用） */
     fun switchToNextLeg() {
-        trackingController.switchToNextLeg()
+        trackingController.switchToNextLeg(groupSessionId)
     }
 
     /** 判断候选线路是否为合成/未对齐（合成 id / 非法站序）。和对齐时的判断不同（多一条 fromStopOrder <= 0），原样保留 */
@@ -250,13 +270,11 @@ class RouteDetailViewModel(
      * 停止换乘追踪
      */
     fun stopGroupTracking() {
-        trackingController.stopTracking()
+        // 没有正在追的路线时什么都不做，别把别的追踪一起停掉
+        trackingController.stopTracking(groupSessionId ?: return)
     }
 
     // ---- 路线详情页（第 22 步）：改名、改分组、生成返程、删除、临时方案存成收藏 ----
-
-    /** 收藏分组（详情页「改分组」和「收藏」弹层用） */
-    val favoriteGroups: StateFlow<List<FavoriteGroup>> = groupRepository.favoriteGroups
 
     /** 改路线名 */
     fun renameGroup(groupId: String, name: String) {

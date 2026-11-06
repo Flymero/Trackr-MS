@@ -113,6 +113,7 @@ fun ElderLineDetailScreen(
             },
             onBack = { pickingStop = false },
             onOpenTransitCode = { onEvent(LineDetailEvent.OpenTransitCode) },
+            showTransitCode = state.showTransitCodeButton,
             modifier = modifier
         )
     } else {
@@ -121,7 +122,12 @@ fun ElderLineDetailScreen(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             containerColor = MaterialTheme.colorScheme.background,
             topBar = { ElderTopBar(title = null, onBack = { onEvent(LineDetailEvent.Back) }) },
-            bottomBar = { ShowTransitCodeButton(onClick = { onEvent(LineDetailEvent.OpenTransitCode) }) }
+            bottomBar = {
+                // 「我的」里关掉「显示乘车码按钮」后，这里和标准版线路页一起不画
+                if (state.showTransitCodeButton) {
+                    ShowTransitCodeButton(onClick = { onEvent(LineDetailEvent.OpenTransitCode) })
+                }
+            }
         ) { innerPadding ->
             when {
                 static == null && state.isLoading -> FullscreenLoadingView(

@@ -37,7 +37,9 @@ data class StopDetailUiState(
     val watch: WatchTogetherUi? = null,
     val boardChoice: BoardChoiceUi? = null,
     val preferredTransitCodeProvider: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
-    val isTransitCodeSheetOpen: Boolean = false
+    val isTransitCodeSheetOpen: Boolean = false,
+    /** 乘车码圆钮显不显示（「我的」里的开关，和首页、线路页同一个） */
+    val showTransitCodeButton: Boolean = true
 ) {
     /** 当前站台名（选线模式顶栏小字「科技园站 · 往北」用）；只有一个站台时为空串 */
     val selectedPlatformLabel: String

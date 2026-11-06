@@ -91,7 +91,7 @@
 | 步 | 页面 | 主要改动 | 测试 |
 | --- | --- | --- | --- |
 | 9 | 公交首页 | 标题改城市名；删乘车码卡；新增 `ui/components/TransitCodeFab.kt`（往下滑缩小、往上滑展开，点开默认平台，「每次询问」才弹 Sheet）；收藏列表合一 + 分组 chips + 「编辑」；追踪卡支持一起等 | `HomeViewModelTest`、新增 `TransitCodeFabTest` |
-| 10 | 线路详情 | 删 `BottomFloatingToolbar`；`TopLineHeader` 加「换向」和「时刻表 ›」；顶栏时钟 + ☆；☆ 一点即收藏 + Snackbar「换分组」；主卡用 `ArrivalText`；删预警 chips；走向条只留竖向（删 `RouteRailLayoutMode.Horizontal`）；底栏 = 主按钮 + 乘车码 | `LineDetailViewModelTest`、`StationArrivalContentTest`、`ExpressiveRouteRailUiTest` |
+| 10 | 线路详情 | 删 `BottomFloatingToolbar`；`TopLineHeader` 加「换向」和「时刻表 ›」；顶栏时钟 + ☆；☆ 一点即收藏 + Snackbar「换分组」；主卡用 `ArrivalText`；删预警 chips；走向条只留竖向（删 `RouteRailLayoutMode.Horizontal`）；底栏 = 主按钮 + 乘车码。**后续调整**：换向是高频动作，从方向行挪到底栏（主按钮右侧 52dp 圆钮，单程线不占位，换向中转圈禁用），方向行整行留给站名；换向时若正在追踪先自动结束并提示 | `LineDetailViewModelTest`、`StationArrivalContentTest`、`ExpressiveRouteRailUiTest` |
 | 11 | 站点详情 | 站台 chips 按方向命名（没有方向数据时退回「站台 1 / 2」）；删「查看全线」；刷新改下拉；选线模式（勾选、条数不限、收藏 / 一起等）；一起等进行中视图；「上了哪辆？」Sheet | `StopDetailViewModelTest` |
 | 12 | 路线详情 + 编辑收藏 + 收藏 Sheet | 新页面按 v3 稿；时间轴复用 `LegTimelineItem` 的部分绘制；编辑页拖动排序；收藏 Sheet 只问名字和分组 | 新增 `RouteDetailViewModelTest`、`FavoritesEditViewModelTest` |
 | 13 | 搜索 | 删写死推荐词、双引擎卡；线路结果每方向一行直达 | 新增或补 `SearchScreen` 用例 |

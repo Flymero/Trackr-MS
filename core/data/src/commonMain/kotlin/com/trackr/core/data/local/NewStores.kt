@@ -26,6 +26,7 @@ class RoomDataStoreTransitStore(
             selectedCityJson = prefs[SettingsKeys.SELECTED_CITY_JSON],
             engineMode = prefs[SettingsKeys.ENGINE_MODE],
             transitCodeProvider = prefs[SettingsKeys.PREFERRED_TRANSIT_CODE_PROVIDER],
+            showTransitCodeButton = prefs[SettingsKeys.SHOW_TRANSIT_CODE_BUTTON],
             nearbyStopsCount = prefs[SettingsKeys.NEARBY_STOPS_COUNT],
             liveNotificationEnabled = prefs[SettingsKeys.LIVE_NOTIFICATION_ENABLED],
             showOnLockScreen = prefs[SettingsKeys.SHOW_ON_LOCK_SCREEN],
@@ -53,6 +54,9 @@ class RoomDataStoreTransitStore(
         settings.edit { it[SettingsKeys.NEARBY_STOPS_COUNT] = count }
     }
 
+    override suspend fun saveShowTransitCodeButton(enabled: Boolean) {
+        settings.edit { it[SettingsKeys.SHOW_TRANSIT_CODE_BUTTON] = enabled }
+    }
     override suspend fun saveLiveNotificationEnabled(enabled: Boolean) {
         settings.edit { it[SettingsKeys.LIVE_NOTIFICATION_ENABLED] = enabled }
     }
@@ -109,7 +113,8 @@ class RoomFavoritesStore(private val db: TrackrDatabase) : FavoritesStore {
             stops = rows.stops.map { it.toModel() },
             routes = if (rows.routes.isEmpty()) null else rows.routes.map { it.toModel() },
             groups = if (rows.groups.isEmpty()) null else rows.groups.map { it.toModel() },
-            items = if (rows.items.isEmpty()) null else rows.items.mapNotNull { it.toRecordOrNull() }
+            items = if (rows.items.isEmpty()) null else rows.items.mapNotNull { it.toRecordOrNull() },
+            groupsInitialized = rows.groupsInitialized
         )
     }
 
@@ -119,7 +124,8 @@ class RoomFavoritesStore(private val db: TrackrDatabase) : FavoritesStore {
             routes = change.routes?.mapIndexed { index, route -> route.toRows(index) },
             groups = change.groups?.mapIndexed { index, group -> group.toEntity(index) },
             items = change.items?.map { it.toEntity() },
-            itemUpdates = change.itemUpdates.map { it.toEntity() }
+            itemUpdates = change.itemUpdates.map { it.toEntity() },
+            markGroupsInitialized = change.markGroupsInitialized
         )
     }
 }

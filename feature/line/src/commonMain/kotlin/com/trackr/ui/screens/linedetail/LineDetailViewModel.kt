@@ -29,6 +29,7 @@ import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.RailMode
 import com.trackr.core.model.ScheduledReminder
+import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCodeProvider
@@ -124,6 +125,8 @@ data class LineDetailUiState(
     val isRefreshing: Boolean = false,
     /** 用户下拉触发的刷新还没完成（只有它画下拉圈） */
     val isPullRefreshing: Boolean = false,
+    /** 换向请求进行中：底栏换向钮转圈并禁用，避免连点改两次线路 */
+    val isSwitchingDirection: Boolean = false,
     val static: LineStatic? = null,
     val live: LineLive? = null,
     val selectedStop: BusStop? = null,
@@ -143,6 +146,8 @@ data class LineDetailUiState(
     val isReminderDialogOpen: Boolean = false,
     val preferredTransitCodeProvider: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val isTransitCodeSheetOpen: Boolean = false,
+    /** 底栏「乘车码」圆钮显不显示（「我的」里的开关，和首页悬浮按钮同一个） */
+    val showTransitCodeButton: Boolean = true,
     /** 走向条样式（「我的」全局设置）：横排只有横条，竖排是时间轴列表 */
     val railMode: RailMode = RailMode.Horizontal,
     /** 当前追踪会话（页面据此判断「本站是否正在追踪」） */
@@ -261,8 +266,9 @@ class LineDetailViewModel(
     val isPollingActive: Boolean
         get() = pollingCoordinator.isPollingActive
 
-    /** 当前追踪会话 */
-    val activeTrackingSession: StateFlow<TrackingSessionState> = trackingRepository.legState
+    /** 当前线路对应的追踪会话（一起等中也按当前线路返回该线独立状态） */
+    private val _trackedSession = MutableStateFlow(TrackingSessionState())
+    val activeTrackingSession: StateFlow<TrackingSessionState> = _trackedSession.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -287,9 +293,12 @@ class LineDetailViewModel(
             }
         }
         viewModelScope.launch {
-            trackingRepository.legState.collectLatest { session ->
-                _uiState.update { it.copy(trackingSession = session) }
+            settings.showTransitCodeButton.collectLatest { visible ->
+                _uiState.update { it.copy(showTransitCodeButton = visible) }
             }
+        }
+        viewModelScope.launch {
+            trackingRepository.sessions.collectLatest { publishTrackingState() }
         }
 
         // 站表先读磁盘缓存：网络还没回来时先画站序（只用来先显示，不挡请求）
@@ -316,6 +325,41 @@ class LineDetailViewModel(
             }
         }
         checkFavoriteState(favorites.favorites.value)
+    }
+
+    /** 这份会话里这条线此刻的状态：单线路、路线、一起等里含这条线都算。 */
+    private fun TrackingSession.stateForLine(lineId: String): TrackingSessionState? {
+        if (interrupted || !state.isActive) return null
+        if (state.lineId == lineId) return state
+        val watched = watchedLines.firstOrNull { it.line.lineId == lineId } ?: return null
+        return state.copy(
+            lineId = lineId,
+            lineName = watched.line.lineName,
+            endStopName = watched.line.endStopName,
+            targetOrder = watched.line.stopOrder,
+            totalStops = watched.line.stopOrder,
+            startTrackingOrder = (watched.line.stopOrder - 1).coerceAtLeast(1),
+            boardStopOrder = watched.line.stopOrder,
+            currentBusId = watched.busId,
+            currentBusOrder = watched.busOrder,
+            currentBusProgress = watched.busProgress,
+            stopsRemaining = watched.stopsRemaining,
+            etaSeconds = watched.etaSeconds,
+            isBusArrivedAtStop = watched.isArrived
+        )
+    }
+
+    /** 按当前线路和候车站发布状态；同线多会话时不能固定取会话列表第一项。 */
+    private fun publishTrackingState() {
+        val selectedOrder = _uiState.value.selectedStop?.order
+        val states = trackingRepository.sessions.value.mapNotNull { it.stateForLine(currentLineId) }
+        val state = if (selectedOrder == null) {
+            states.firstOrNull()
+        } else {
+            states.firstOrNull { it.targetOrder == selectedOrder }
+        } ?: TrackingSessionState()
+        _trackedSession.value = state
+        _uiState.update { it.copy(trackingSession = state) }
     }
 
     /**
@@ -363,7 +407,18 @@ class LineDetailViewModel(
 
     /** 结束追踪 */
     fun stopTracking() {
-        trackingController.stopTracking()
+        val selectedOrder = _uiState.value.selectedStop?.order
+        val candidates = trackingRepository.sessions.value.mapNotNull { session ->
+            session.stateForLine(currentLineId)?.let { state -> session to state }
+        }
+        val session = candidates.firstOrNull { (_, state) ->
+            selectedOrder == null || state.targetOrder == selectedOrder
+        }?.first ?: return
+        if (session.watchTarget != null) {
+            trackingController.removeWatchLine(session.sessionId, currentLineId)
+        } else {
+            trackingController.stopTracking(session.sessionId)
+        }
     }
 
     /** 当前所选城市名（保存定时提醒时写进提醒） */
@@ -483,6 +538,7 @@ class LineDetailViewModel(
         }
         checkFavoriteState(favorites.favorites.value)
         refreshFavoriteGroup(favorites.favoriteItems.value)
+        publishTrackingState()
         writeStopsCache(newStatic)
     }
 
@@ -703,6 +759,7 @@ class LineDetailViewModel(
         }
         checkFavoriteState(favorites.favorites.value)
         refreshFavoriteGroup(favorites.favoriteItems.value)
+        publishTrackingState()
         currentDetail?.let { startPush(it, stop) }
         if (!pushOnline && screenResumed && enableAutoPolling) pollingCoordinator.setActive(true)
         // 选站即刷新，同时重新计时，避免紧接着轮询又发一次
@@ -745,50 +802,61 @@ class LineDetailViewModel(
      * 换向：用 RouteProjectionMath.findOppositeStop 找反向线路上的同名候车站。
      */
     fun switchOppositeDirection() {
+        val state = _uiState.value
+        if (state.isSwitchingDirection) return
         val detail = currentDetail ?: return
-        val reverse = detail.reverseDirection ?: return
-        val currentStop = _uiState.value.selectedStop ?: return
+        val reverse = detail.reverseDirection?.takeIf { it.lineId.isNotBlank() } ?: return
+        val currentStop = state.selectedStop ?: return
+        val wasTracking = state.isTrackingThisStop
 
+        if (wasTracking) {
+            stopTracking()
+            postMessage("已结束追踪")
+        }
         stopPush()
         val switchGeneration = ++httpGeneration
-        currentLineId = reverse.lineId
-        currentSource = reverse.source
-        if (screenResumed && enableAutoPolling) pollingCoordinator.setActive(true)
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isSwitchingDirection = true, isLoading = true) }
+            currentLineId = reverse.lineId
+            currentSource = reverse.source
+            publishTrackingState()
+            if (screenResumed && enableAutoPolling) pollingCoordinator.setActive(true)
 
-            val currentCity = settings.selectedCity.value
-            val reverseResult = realtime.getLineDetail(
-                city = currentCity,
-                lineId = reverse.lineId,
-                source = reverse.source,
-                lineNameHint = reverse.name
-            )
-
-            if (switchGeneration != httpGeneration || currentLineId != reverse.lineId) return@launch
-            reverseResult.onSuccess { revDetail ->
-                val matched = RouteProjectionMath.findOppositeStop(
-                    currentStop = currentStop,
-                    reverseStops = revDetail.stops
+            try {
+                val currentCity = settings.selectedCity.value
+                val reverseResult = realtime.getLineDetail(
+                    city = currentCity,
+                    lineId = reverse.lineId,
+                    source = reverse.source,
+                    lineNameHint = reverse.name
                 )
-                val oppositeStop = matched ?: calculateDefaultStop(revDetail)
-
-                applyDetail(revDetail, oppositeStop)
-                startPush(revDetail, oppositeStop)
-                _uiState.update { it.copy(panelMode = PanelMode.STATION_CARD, followedBusId = null) }
-                // 反向没有对应的站：明确告诉用户换了站，不悄悄选一个
-                if (matched == null && oppositeStop != null) {
-                    postMessage("反方向没有「${currentStop.name}」，已改为「${oppositeStop.name}」")
+                if (switchGeneration != httpGeneration || currentLineId != reverse.lineId) return@launch
+                reverseResult.onSuccess { revDetail ->
+                    val oppositeStop = RouteProjectionMath.findOppositeStop(
+                        currentStop = currentStop,
+                        reverseStops = revDetail.stops
+                    )
+                    val targetStop = oppositeStop ?: calculateDefaultStop(revDetail)
+                    applyDetail(revDetail, targetStop)
+                    startPush(revDetail, targetStop)
+                    _uiState.update { it.copy(panelMode = PanelMode.STATION_CARD, followedBusId = null) }
+                    if (oppositeStop == null && targetStop != null) {
+                        postMessage("反向线路没有「${currentStop.name}」，已选 ${targetStop.name}")
+                    }
+                    if (targetStop != null) {
+                        loadLineDetail(isInitial = false, targetOrderOverride = targetStop.order)
+                    }
+                }.onFailure {
+                    currentLineId = detail.line.lineId
+                    currentSource = detail.line.source
+                    publishTrackingState()
+                    currentDetail?.let { startPush(it, _uiState.value.selectedStop) }
+                    if (screenResumed && enableAutoPolling) pollingCoordinator.setActive(!pushOnline)
+                    _uiState.update { it.copy(isLoading = false, errorMessage = "换向失败，请稍后重试") }
                 }
-
-                // 若找到了对应站，立即拉取到该站的精确 ETA
-                if (oppositeStop != null) {
-                    loadLineDetail(isInitial = false, targetOrderOverride = oppositeStop.order)
-                }
-            }.onFailure { ex ->
-                _uiState.update {
-                    it.copy(isLoading = false, errorMessage = "切换反向线路失败：${ex.message ?: "网络错误"}")
-                }
+            } finally {
+                _uiState.update { it.copy(isSwitchingDirection = false) }
             }
         }
     }

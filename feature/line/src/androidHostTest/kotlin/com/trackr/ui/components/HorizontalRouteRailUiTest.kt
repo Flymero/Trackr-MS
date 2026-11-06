@@ -1,15 +1,22 @@
 package com.trackr.ui.components
 
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.BusStop
 import com.trackr.core.model.LiveBus
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -111,5 +118,99 @@ class HorizontalRouteRailUiTest {
         }
 
         composeTestRule.onNodeWithContentDescription("汉口路").assertDoesNotExist()
+    }
+
+    @Test
+    fun longStopName_getsFullHeightWithoutEllipsis() {
+        val longName = "浦东国际机场T2航站楼"
+        composeTestRule.setContent {
+            TrackrTheme {
+                HorizontalRouteRail(
+                    stops = listOf(BusStop(stopId = "1", name = longName, order = 1)),
+                    buses = emptyList(),
+                    selectedStop = null,
+                    selectedBusId = null,
+                    scrollState = rememberScrollState(),
+                    onSelectStop = {},
+                    onSelectBus = {}
+                )
+            }
+        }
+
+        // 站名一个字一行，逐行读：字数全部渲染出来，最后一行没有省略号
+        val vertical = longName.map { it.toString() }.joinToString("\n")
+        val results = mutableListOf<TextLayoutResult>()
+        composeTestRule.onNodeWithText(vertical, useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .config.getOrNull(SemanticsActions.GetTextLayoutResult)
+            ?.action
+            ?.invoke(results)
+
+        val layout = results.single()
+        assertEquals(longName.length, layout.lineCount)
+        assertFalse("站名高度被裁", layout.didOverflowHeight)
+        assertFalse("站名被省略号截断", layout.isLineEllipsized(layout.lineCount - 1))
+    }
+
+    @Test
+    fun bracketedStopName_drawsBracketsInsteadOfText() {
+        // #23：整段还是一个 Text（拆成单字会被逐个截底），括号那两行换成占位空格，
+        // 横版括号画在占位上；读屏仍读完整站名
+        val name = "人民广场（武胜路）"
+        composeTestRule.setContent {
+            TrackrTheme {
+                HorizontalRouteRail(
+                    stops = listOf(BusStop(stopId = "1", name = name, order = 1)),
+                    buses = emptyList(),
+                    selectedStop = null,
+                    selectedBusId = null,
+                    scrollState = rememberScrollState(),
+                    onSelectStop = {},
+                    onSelectBus = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription(name).assertIsDisplayed()
+        // 括号不再是文字，位置留成全角空格
+        composeTestRule.onNodeWithText("（", useUnmergedTree = true).assertDoesNotExist()
+        composeTestRule.onNodeWithText("）", useUnmergedTree = true).assertDoesNotExist()
+        composeTestRule.onNodeWithText(railVerticalNameText(name), useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun rail_fillsFullWidthWithoutCard() {
+        composeTestRule.setContent {
+            TrackrTheme {
+                HorizontalRouteRail(
+                    stops = stops,
+                    buses = emptyList(),
+                    selectedStop = stops[1],
+                    selectedBusId = null,
+                    scrollState = rememberScrollState(),
+                    onSelectStop = {},
+                    onSelectBus = {}
+                )
+            }
+        }
+
+        // 没有卡片外壳：贴满整宽，左右不再留页面边距（轨道自己留 16dp）
+        val bounds = composeTestRule.onNodeWithTag(HorizontalRailTags.ROOT).getUnclippedBoundsInRoot()
+        assertEquals(360f, (bounds.right - bounds.left).value, 0.5f)
+    }
+
+    @Test
+    fun railHeight_followsLongestStopName() {
+        val short = listOf(BusStop(stopId = "1", name = "汉口路", order = 1))
+        val long = listOf(BusStop(stopId = "2", name = "浦东国际机场T2航站楼", order = 1))
+
+        assertEquals(3, railNameLines(short))
+        assertEquals(11, railNameLines(long))
+
+        val lineHeight = 14.dp
+        assertEquals(
+            horizontalRailHeight(short, lineHeight) + lineHeight * (11 - 3),
+            horizontalRailHeight(long, lineHeight)
+        )
     }
 }

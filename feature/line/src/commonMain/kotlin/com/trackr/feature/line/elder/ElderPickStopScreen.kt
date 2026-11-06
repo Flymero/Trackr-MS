@@ -52,6 +52,7 @@ internal object ElderPickStopTags {
  *
  * @param onPick 点了某站（调用方选站并回到线路页）
  * @param onBack 左上角「← 返回」：不换站
+ * @param showTransitCode 底部「出示乘车码」显不显示（跟着「我的」里的开关；关掉后列表铺满）
  */
 @Composable
 fun ElderPickStopScreen(
@@ -61,6 +62,7 @@ fun ElderPickStopScreen(
     onPick: (BusStop) -> Unit,
     onBack: () -> Unit,
     onOpenTransitCode: () -> Unit,
+    showTransitCode: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val selectedIndex = stops.indexOfFirst { it.order == selectedOrder }
@@ -75,7 +77,7 @@ fun ElderPickStopScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { ElderTopBar(title = stringResource(LineRes.string.line_elder_pick_stop_title), onBack = onBack) },
-        bottomBar = { ShowTransitCodeButton(onClick = onOpenTransitCode) }
+        bottomBar = { if (showTransitCode) ShowTransitCodeButton(onClick = onOpenTransitCode) }
     ) { innerPadding ->
         LazyColumn(
             state = listState,

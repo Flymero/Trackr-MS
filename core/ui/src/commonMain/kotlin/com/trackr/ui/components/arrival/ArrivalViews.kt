@@ -72,9 +72,10 @@ fun ArrivalTrailing(arrival: ArrivalUi, modifier: Modifier = Modifier) {
     }
 }
 
-/** 线路号小方块（v3：圆角 8dp，品牌浅蓝底） */
+/** 线路号小方块（v3：圆角 8dp，品牌浅蓝底）；名字为空时不画空壳，免得只剩一个空白圆角块（issue #20） */
 @Composable
 fun LineBadge(name: String, modifier: Modifier = Modifier) {
+    if (name.isBlank()) return
     Surface(
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.primaryContainer,

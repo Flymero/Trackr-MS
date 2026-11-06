@@ -16,6 +16,7 @@ import com.trackr.core.database.entity.RouteEntity
 import com.trackr.core.database.entity.RouteLegEntity
 import com.trackr.core.database.entity.SearchHistoryEntity
 import com.trackr.core.database.entity.StoreMetaEntity
+import com.trackr.core.database.entity.StoreMetaKeys
 import kotlinx.coroutines.flow.Flow
 
 /*
@@ -149,7 +150,9 @@ data class FavoritesRows(
     val stops: List<FavoriteLineEntity>,
     val routes: List<RouteRows>,
     val groups: List<FavoriteGroupEntity>,
-    val items: List<FavoriteItemEntity>
+    val items: List<FavoriteItemEntity>,
+    /** 分组建过没有（`store_meta`，见 [StoreMetaKeys.FAVORITE_GROUPS_INITIALIZED]） */
+    val groupsInitialized: Boolean
 )
 
 /**
@@ -243,8 +246,21 @@ interface FavoritesDao {
                 candidates = candidatesByRoute[route.id].orEmpty()
             )
         }
-        return FavoritesRows(stops = getStops(), routes = routes, groups = getGroups(), items = getItems())
+        return FavoritesRows(
+            stops = getStops(),
+            routes = routes,
+            groups = getGroups(),
+            items = getItems(),
+            groupsInitialized = getMeta(StoreMetaKeys.FAVORITE_GROUPS_INITIALIZED) != null
+        )
     }
+
+    /** `store_meta` 的键值（分组建过没有）；和收藏的写入放在同一个事务里 */
+    @Query("SELECT value FROM store_meta WHERE `key` = :key")
+    suspend fun getMeta(key: String): String?
+
+    @Upsert
+    suspend fun putMeta(entry: StoreMetaEntity)
 
     @Transaction
     suspend fun write(
@@ -252,7 +268,9 @@ interface FavoritesDao {
         routes: List<RouteRows>? = null,
         groups: List<FavoriteGroupEntity>? = null,
         items: List<FavoriteItemEntity>? = null,
-        itemUpdates: List<FavoriteItemEntity> = emptyList()
+        itemUpdates: List<FavoriteItemEntity> = emptyList(),
+        /** 记下分组建过了：`favorite_group` 表空之后就不再是「从没建过」 */
+        markGroupsInitialized: Boolean = false
     ) {
         stops?.let {
             deleteAllStops()
@@ -276,6 +294,7 @@ interface FavoritesDao {
             insertItems(it)
         }
         if (itemUpdates.isNotEmpty()) upsertItems(itemUpdates)
+        if (markGroupsInitialized) putMeta(StoreMetaEntity(StoreMetaKeys.FAVORITE_GROUPS_INITIALIZED, "1"))
     }
 }
 

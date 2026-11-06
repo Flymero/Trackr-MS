@@ -84,6 +84,9 @@ import org.jetbrains.compose.resources.stringResource
 /**
  * 站点详情（第 21 步，v3）：无状态，只读 [state]、只发 [StopDetailEvent]。三种样子：
  * 普通（线路列表 +「选几条一起等」）、选线（勾线 +「收藏 / 一起等这 N 条」）、本站一起等进行中。
+ *
+ * 一起等进行中**不替换线路列表**：只是在上方多一张「最先到」的小卡片（第 36 步）。
+ * 之前整页换成追踪视图，同时追好几条线时这个站的其他线路就都点不进去了。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,11 +146,9 @@ fun StopDetailScreen(
                     contentPadding = contentPadding,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (watch != null) {
-                        watchItems(watch, onEvent)
-                    } else {
-                        lineItems(state, onEvent)
-                    }
+                    // 一起等只多一张「最先到」的小卡片，下面的线路列表照常显示、照常能点进线路页
+                    if (watch != null) watchHeader(watch, onEvent)
+                    lineItems(state, onEvent)
                 }
             }
         }
@@ -262,7 +263,7 @@ private fun StopDetailBottomBar(state: StopDetailUiState, watch: WatchTogetherUi
                     ) {
                         Text(stringResource(Res.string.action_end), color = MaterialTheme.colorScheme.error)
                     }
-                    TransitCodeButton(onEvent)
+                    if (state.showTransitCodeButton) TransitCodeButton(onEvent)
                 }
 
                 else -> {
@@ -274,7 +275,7 @@ private fun StopDetailBottomBar(state: StopDetailUiState, watch: WatchTogetherUi
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(StopRes.string.stop_pick_lines))
                     }
-                    TransitCodeButton(onEvent)
+                    if (state.showTransitCodeButton) TransitCodeButton(onEvent)
                 }
             }
         }
@@ -452,10 +453,15 @@ private fun StopLineRow(
 
 // ------------------------------------------------------------------ 一起等进行中
 
-private fun LazyListScope.watchItems(watch: WatchTogetherUi, onEvent: (StopDetailEvent) -> Unit) {
+private fun LazyListScope.watchHeader(watch: WatchTogetherUi, onEvent: (StopDetailEvent) -> Unit) {
     if (watch.isOnBoard) {
         item(key = "watch_boarded", contentType = "watch_hero") {
-            HeroCard(kicker = stringResource(StopRes.string.stop_boarded_kicker), big = watch.boardedTitle, unit = null, detail = watch.boardedDetail)
+            HeroCard(
+                kicker = stringResource(StopRes.string.stop_boarded_kicker),
+                big = watch.boardedTitle,
+                unit = null,
+                detail = watch.boardedDetail
+            )
         }
         return
     }
@@ -470,9 +476,6 @@ private fun LazyListScope.watchItems(watch: WatchTogetherUi, onEvent: (StopDetai
             )
         }
     }
-    items(items = watch.lines, key = { "watch_${it.lineId}" }, contentType = { "watch_line" }) { line ->
-        WatchLineRow(line)
-    }
     item(key = "watch_add", contentType = "watch_add") {
         Row(
             modifier = Modifier
@@ -484,11 +487,12 @@ private fun LazyListScope.watchItems(watch: WatchTogetherUi, onEvent: (StopDetai
         ) {
             Icon(TrackrIcons.Plus, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
-            Text(stringResource(StopRes.string.stop_add_line), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                stringResource(StopRes.string.stop_add_line),
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodyLarge
+            )
         }
-    }
-    item(key = "watch_hint", contentType = "hint") {
-        Hint(stringResource(StopRes.string.stop_watch_hint))
     }
 }
 
@@ -517,39 +521,8 @@ private fun HeroCard(kicker: String, big: String, unit: String?, detail: String)
 }
 
 @Composable
-private fun WatchLineRow(line: WatchLineUi) {
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            LineBadge(line.lineName)
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (line.endStop.isNotBlank()) "→ ${line.endStop}" else line.lineName,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (line.plate.isNotBlank()) {
-                    Text(line.plate, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            ArrivalColumn(line.arrival, modifier = Modifier.widthIn(max = 160.dp))
-        }
-    }
-}
-
-// ------------------------------------------------------------------ 小件
-
-/** 线路号徽标；名字过长时按调用方给的最大宽度省略，不把同一行的终点挤走 */
-@Composable
 internal fun LineBadge(name: String, modifier: Modifier = Modifier) {
+    if (name.isBlank()) return
     Surface(
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.primaryContainer,

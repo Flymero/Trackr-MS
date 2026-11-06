@@ -57,6 +57,7 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
             aggregatedPriority = prefs.getString(KEY_AGGREGATED_PRIORITY, null)
         ),
         transitCodeProvider = prefs.getString(KEY_TRANSIT_CODE_PROVIDER, null),
+        showTransitCodeButton = if (prefs.contains(KEY_SHOW_TRANSIT_CODE_BUTTON)) prefs.getBoolean(KEY_SHOW_TRANSIT_CODE_BUTTON, true) else null,
         nearbyStopsCount = if (prefs.contains(KEY_NEARBY_STOPS_COUNT)) prefs.getInt(KEY_NEARBY_STOPS_COUNT, 4) else null,
         liveNotificationEnabled = if (prefs.contains(KEY_LIVE_NOTIFICATION)) prefs.getBoolean(KEY_LIVE_NOTIFICATION, true) else null,
         showOnLockScreen = if (prefs.contains(KEY_SHOW_ON_LOCK_SCREEN)) prefs.getBoolean(KEY_SHOW_ON_LOCK_SCREEN, true) else null,
@@ -81,6 +82,10 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
 
     override suspend fun saveNearbyStopsCount(count: Int) {
         prefs.edit().putInt(KEY_NEARBY_STOPS_COUNT, count).apply()
+    }
+
+    override suspend fun saveShowTransitCodeButton(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_TRANSIT_CODE_BUTTON, enabled).apply()
     }
 
     override suspend fun saveLiveNotificationEnabled(enabled: Boolean) {
@@ -127,6 +132,7 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
         private const val KEY_ENGINE_MODE = "engine_mode"
         private const val KEY_AGGREGATED_PRIORITY = "aggregated_source_priority"
         private const val KEY_TRANSIT_CODE_PROVIDER = "preferred_transit_code_provider"
+        private const val KEY_SHOW_TRANSIT_CODE_BUTTON = "show_transit_code_button"
         private const val KEY_NEARBY_STOPS_COUNT = "nearby_stops_count"
         private const val KEY_LIVE_NOTIFICATION = "is_live_notification_enabled"
         private const val KEY_SHOW_ON_LOCK_SCREEN = "show_on_lock_screen"
@@ -202,6 +208,16 @@ class SharedPrefsRouteGroupStore(private val prefs: SharedPreferences) {
         }
     }
 
+    /** 分组建过没有（写过默认分组，或者用户自己建过 / 删过分组）；和 `favorite_groups_list_json` 一起写 */
+    fun hasFavoriteGroupsInitialized(): Boolean = prefs.getBoolean(KEY_FAVORITE_GROUPS_INITIALIZED, false)
+
+    fun markFavoriteGroupsInitialized() {
+        try {
+            prefs.edit().putBoolean(KEY_FAVORITE_GROUPS_INITIALIZED, true).apply()
+        } catch (_: Exception) {
+        }
+    }
+
     fun saveFavoriteItems(list: List<FavoriteItemRecord>) {
         try {
             prefs.edit().putString(KEY_FAVORITE_ITEMS, legacyJson.encodeToString(list)).apply()
@@ -226,6 +242,12 @@ class SharedPrefsRouteGroupStore(private val prefs: SharedPreferences) {
         const val CORRUPT_BACKUP_SUFFIX = "_corrupt_backup_"
         private const val KEY_GROUPS_JSON = "groups_list_json"
         private const val KEY_FAVORITE_GROUPS_JSON = "favorite_groups_list_json"
+
+        /**
+         * 收藏分组建过没有（v0.1.6 起）。旧版本没有这个 key：那时写的 `[]` 就是「删光了」，
+         * 空列表已经能区分（见 DefaultFavoritesRepository.create）。
+         */
+        private const val KEY_FAVORITE_GROUPS_INITIALIZED = "favorite_groups_initialized"
 
         /** 合一索引；和 :core:data 里 LegacyPrefs.KEY_FAVORITE_ITEMS 必须一致（新存储导入时读它） */
         const val KEY_FAVORITE_ITEMS = "favorite_items_json"
@@ -254,11 +276,15 @@ class SharedPrefsFavoritesStore(
     override suspend fun load(): FavoritesSnapshot {
         val items = routeGroups.loadFavoriteItems()
         cachedItems = items
+        val groups = routeGroups.loadFavoriteGroups()
         return FavoritesSnapshot(
             stops = decodeOrEmpty<FavoriteStationLine>(transitPrefs.getString(SharedPrefsTransitStore.KEY_FAVORITES, null)),
             routes = routeGroups.loadGroups(),
-            groups = routeGroups.loadFavoriteGroups(),
-            items = items
+            groups = groups,
+            items = items,
+            // JSON 读不出来（null）说明文件坏了，按「没建过」处理，和旧版一样回落到两个默认分组；
+            // 存成 "[]" 读到的是空列表，那才是用户自己删光的
+            groupsInitialized = groups != null && routeGroups.hasFavoriteGroupsInitialized()
         )
     }
 
@@ -269,6 +295,7 @@ class SharedPrefsFavoritesStore(
         // 旧版删收藏分组时就是先写收藏分组、再写路线
         change.groups?.let { routeGroups.saveFavoriteGroups(it) }
         change.routes?.let { routeGroups.saveGroups(it) }
+        if (change.markGroupsInitialized) routeGroups.markFavoriteGroupsInitialized()
         if (change.items != null || change.itemUpdates.isNotEmpty()) {
             val full = change.items ?: mergeByKey(cachedItems.orEmpty(), change.itemUpdates)
             routeGroups.saveFavoriteItems(full)

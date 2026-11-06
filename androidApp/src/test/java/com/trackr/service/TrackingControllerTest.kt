@@ -49,12 +49,12 @@ class TrackingControllerTest {
         val readStarted = CompletableDeferred<Unit>()
         private val released = CompletableDeferred<Unit>()
         fun release() = released.complete(Unit)
-        override suspend fun read(): TrackingSession? {
+        override suspend fun read(): List<TrackingSession> {
             readStarted.complete(Unit)
             released.await()
             return delegate.read()
         }
-        override suspend fun write(session: TrackingSession?) = delegate.write(session)
+        override suspend fun write(sessions: List<TrackingSession>) = delegate.write(sessions)
     }
 
     @After
@@ -66,7 +66,7 @@ class TrackingControllerTest {
         val now = Clock.System.now().toEpochMilliseconds()
         val session = requireNotNull(TrackingEngine.begin("s1", 3, target, now))
         // 用 wall clock 的「现在」，仓库读回时才不会因为太旧被丢掉
-        write(session)
+        write(listOf(session))
     }
 
     private fun repoOn(store: TrackingSessionStore) =

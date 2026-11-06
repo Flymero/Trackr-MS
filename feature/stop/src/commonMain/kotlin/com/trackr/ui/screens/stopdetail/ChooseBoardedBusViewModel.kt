@@ -25,12 +25,12 @@ class ChooseBoardedBusViewModel(
     val state: StateFlow<ChooseBoardedBusState> = flow {
         // 冷启动从通知点进来时会话还在从盘里读：读完再判断，免得一打开就关
         trackingRepository.awaitLoaded()
-        emitAll(trackingRepository.session.map(::stateOf))
+        emitAll(trackingRepository.sessions.map { list -> stateOf(list.firstOrNull { it.sessionId == sessionId }) })
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ChooseBoardedBusState.Loading)
 
     /** 选了 [busId]，null =「还没上」 */
     fun choose(busId: String?) {
-        trackingController.chooseBoardedBus(busId)
+        trackingController.chooseBoardedBus(busId, sessionId)
     }
 
     private fun stateOf(session: TrackingSession?): ChooseBoardedBusState = when {

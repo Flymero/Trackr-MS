@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
  *
  * 统一特性：
  * - 顶部大圆角 (topStart = 24.dp, topEnd = 24.dp)
- * - 默认跳过半展开状态 (skipPartiallyExpanded = true)
+ * - 默认跳过半展开状态（锚点只有收起 / 完全展开）
  * - 默认自带安全边距处理 (导航栏 navigationBarsPadding + 软键盘 imePadding)
  * - 标准拖拽手柄规范
  */

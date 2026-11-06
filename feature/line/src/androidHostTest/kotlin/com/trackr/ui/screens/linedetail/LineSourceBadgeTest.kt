@@ -22,14 +22,11 @@ class LineSourceBadgeTest {
         compose.setContent {
             TrackrTheme { LineSourceBadge(DataSourceType.MEISHAN, online.value) }
         }
-        compose.onNodeWithText("眉山官方").assertIsDisplayed()
         compose.onNodeWithText("TCP").assertDoesNotExist()
         compose.runOnIdle { online.value = true }
-        compose.onNodeWithText("眉山官方").assertIsDisplayed()
         compose.onNodeWithText("TCP").assertIsDisplayed()
         compose.runOnIdle { online.value = false }
         compose.onNodeWithText("TCP").assertDoesNotExist()
-        compose.onNodeWithText("眉山官方").assertIsDisplayed()
     }
 
     @Test
@@ -37,7 +34,7 @@ class LineSourceBadgeTest {
         compose.setContent {
             TrackrTheme { LineSourceBadge(DataSourceType.CHELAILE, true) }
         }
-        compose.onNodeWithText(DataSourceType.CHELAILE.displayName).assertIsDisplayed()
+        compose.onNodeWithText(DataSourceType.CHELAILE.displayName).assertDoesNotExist()
         compose.onNodeWithText("TCP").assertDoesNotExist()
     }
 }

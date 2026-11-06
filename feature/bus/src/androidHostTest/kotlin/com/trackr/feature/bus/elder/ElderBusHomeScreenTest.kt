@@ -136,7 +136,7 @@ class ElderBusHomeScreenTest {
             ),
             favoriteGroups = listOf(FavoriteGroup(id = "g1", name = "上班"), FavoriteGroup(id = "g2", name = "回家")),
             selectedGroupId = selectedGroupId,
-            trackingSession = if (tracking) trackingSession() else null,
+            trackingSessions = if (tracking) listOf(trackingSession()) else emptyList(),
             nearbyStops = nearby,
             userMessages = messages
         )
@@ -272,16 +272,16 @@ class ElderBusHomeScreenTest {
         setContent(stateOf(tracking = true))
 
         composeTestRule.onNodeWithTag(ElderBusHomeTags.STOP_TRACKING).performClick()
-        assertFalse(events.contains(BusHomeEvent.StopTracking))
+        assertFalse(events.any { it is BusHomeEvent.StopTracking })
         composeTestRule.onNodeWithText("不再提醒这班车了吗？").assertIsDisplayed()
         composeTestRule.onNodeWithText("继续提醒").performClick()
-        assertFalse(events.contains(BusHomeEvent.StopTracking))
+        assertFalse(events.any { it is BusHomeEvent.StopTracking })
 
         composeTestRule.onNodeWithTag(ElderBusHomeTags.STOP_TRACKING).performClick()
         // 对话框里的确认按钮（卡片上那个也叫「不用叫了」，对话框在最后）
         val buttons = composeTestRule.onAllNodes(hasText("不用叫了") and hasClickAction())
         buttons[buttons.fetchSemanticsNodes().size - 1].performClick()
-        assertEquals(BusHomeEvent.StopTracking, events.last())
+        assertEquals(BusHomeEvent.StopTracking("x"), events.last())
     }
 
     @Test

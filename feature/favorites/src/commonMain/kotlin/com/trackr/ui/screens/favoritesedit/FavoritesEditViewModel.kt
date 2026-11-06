@@ -2,41 +2,30 @@ package com.trackr.ui.screens.favoritesedit
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.trackr.core.data.repository.SettingsRepository
+import com.trackr.core.data.repository.FavoritesRepository
 import com.trackr.core.data.route.FavoriteGroupSelection
 import com.trackr.core.data.route.FavoritesGroupDataFix
-import com.trackr.core.data.route.RouteAlignmentService
-import com.trackr.core.data.route.RouteGroupSaver
 import com.trackr.core.model.FavoriteGroup
-import com.trackr.core.model.GroupCategory
-import com.trackr.core.model.TransitCity
-import com.trackr.core.model.TransitGroup
-import com.trackr.data.repository.IRouteGroupRepository
+import com.trackr.core.model.FavoriteItem
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import com.trackr.core.data.route.isGroupInFavoriteGroup as isInFavoriteGroup
 
 /**
- * 编辑收藏的路线与分组（第 17 步从 `FavoritesGroupViewModel` 拆出，逻辑原样搬）：
- * 按场景 / 收藏分组筛选、分组增删改排序、路线删除 / 转存 / 新建 / 生成返程，以及一次性数据修复。
+ * 编辑收藏（v3 第 22 步，第 33 步修正）：分组和收藏都在这一页管 —— 拖动排序、改名、删除、改分组。
  *
- * 第 17 步旧收藏页（`FavoritesGroupScreen`，第 22 步删）拿它和 `RouteDetailViewModel` 两个；
- * 选中的收藏分组放在共用的 [FavoriteGroupSelection] 里，规划页「存入收藏」没选分组时回落到它（和原来一样）。
+ * 第 33 步之前这里读的是 `IRouteGroupRepository.groups`，那只是「路线」一个视图，首页收藏的车
+ * （线路详情点 ☆ 收的「线路 + 候车站」）根本不在里面，所以点进编辑页收藏区是空的、分组也一直是「暂无路线」。
+ * 现在读收藏合一仓库的 [FavoritesRepository.favoriteItems]，和首页「收藏」是同一份数据、同一个顺序、同一套分组。
+ *
+ * 分组上仍然保留一次性数据修复（[FavoritesGroupDataFix]），时机和原来一样：进这一页时跑一次。
  */
 class FavoritesEditViewModel(
-    private val groupRepository: IRouteGroupRepository,
-    private val settings: SettingsRepository,
-    private val alignment: RouteAlignmentService,
-    private val groupSaver: RouteGroupSaver,
+    private val favorites: FavoritesRepository,
+    /** 和规划页「存入收藏」共用的选中分组：编辑页不再筛选分组，但离开时要清掉，免得带上看不见的分组 */
     private val selection: FavoriteGroupSelection,
     /** 一次性数据修复；为 null 时不修（测试用） */
     private val dataFix: FavoritesGroupDataFix? = null,
@@ -44,30 +33,10 @@ class FavoritesEditViewModel(
     private val enableAutoMigration: Boolean = true
 ) : ViewModel() {
 
-    private val _selectedCategory = MutableStateFlow<GroupCategory?>(null)
-    val selectedCategory: StateFlow<GroupCategory?> = _selectedCategory.asStateFlow()
+    /** 收藏合一列表：车 + 路线，顺序就是首页「收藏」看到的顺序 */
+    val items: StateFlow<List<FavoriteItem>> = favorites.favoriteItems
 
-    val selectedFavoriteGroupId: StateFlow<String?> = selection.selectedFavoriteGroupId
-
-    val groups: StateFlow<List<TransitGroup>> = groupRepository.groups
-    val favoriteGroups: StateFlow<List<FavoriteGroup>> = groupRepository.favoriteGroups
-
-    val currentCity: StateFlow<TransitCity> = settings.selectedCity
-
-    fun isGroupInFavoriteGroup(group: TransitGroup, favGroupId: String): Boolean =
-        isInFavoriteGroup(group, favGroupId)
-
-    val filteredGroups: StateFlow<List<TransitGroup>> = combine(
-        groups,
-        selectedCategory,
-        selectedFavoriteGroupId
-    ) { allGroups, category, favGroupId ->
-        when {
-            favGroupId != null -> allGroups.filter { isGroupInFavoriteGroup(it, favGroupId) }
-            category != null -> allGroups.filter { it.category == category }
-            else -> allGroups
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, groups.value)
+    val favoriteGroups: StateFlow<List<FavoriteGroup>> = favorites.favoriteGroups
 
     init {
         if (enableAutoMigration) {
@@ -83,9 +52,66 @@ class FavoritesEditViewModel(
         dataFix?.runIfNeeded()
     }
 
-    fun selectCategory(category: GroupCategory?) {
-        _selectedCategory.value = category
-        selection.select(null)
+    // ---- 分组 ----
+
+    fun createFavoriteGroup(name: String) {
+        viewModelScope.launch {
+            favorites.createGroup(name)
+        }
+    }
+
+    fun renameFavoriteGroup(groupId: String, newName: String) {
+        viewModelScope.launch {
+            favorites.renameGroup(groupId, newName)
+        }
+    }
+
+    /** 删分组不删收藏：组里的车和路线都变成「不分组」（仓库一个事务里做完） */
+    fun deleteFavoriteGroup(groupId: String) {
+        viewModelScope.launch {
+            favorites.deleteGroup(groupId)
+            if (selection.selectedFavoriteGroupId.value == groupId) {
+                selection.select(null)
+            }
+        }
+    }
+
+    fun reorderFavoriteGroups(groupIds: List<String>) {
+        viewModelScope.launch {
+            favorites.reorderGroups(groupIds)
+        }
+    }
+
+    // ---- 收藏（车 + 路线） ----
+
+    /**
+     * 拖动排序：只传这一页列表的 [FavoriteItem.key]，按新先后占回它们原来的位置。
+     * 车和路线在一列里，所以这一列排出来就是首页的顺序。
+     */
+    fun moveItems(keys: List<String>) {
+        if (keys.size < 2) return
+        viewModelScope.launch {
+            favorites.move(keys)
+        }
+    }
+
+    /** 把一条收藏移到 [groupId]（null = 不分组） */
+    fun setItemGroup(key: String, groupId: String?) {
+        viewModelScope.launch {
+            favorites.setGroup(key, groupId)
+        }
+    }
+
+    /** 删掉一条收藏：车走 [FavoritesRepository.removeFavorite]，路线走 [FavoritesRepository.removeRoute] */
+    fun removeItem(key: String) {
+        viewModelScope.launch {
+            when {
+                key.startsWith(FavoriteItem.STOP_KEY_PREFIX) ->
+                    favorites.removeFavorite(key.removePrefix(FavoriteItem.STOP_KEY_PREFIX))
+                key.startsWith(FavoriteItem.ROUTE_KEY_PREFIX) ->
+                    favorites.removeRoute(key.removePrefix(FavoriteItem.ROUTE_KEY_PREFIX))
+            }
+        }
     }
 
     /**
@@ -95,105 +121,5 @@ class FavoritesEditViewModel(
     override fun onCleared() {
         selection.select(null)
         super.onCleared()
-    }
-
-    fun selectFavoriteGroup(groupId: String?) {
-        selection.select(groupId)
-        _selectedCategory.value = null
-    }
-
-    fun createFavoriteGroup(name: String) {
-        viewModelScope.launch {
-            groupRepository.createFavoriteGroup(name)
-        }
-    }
-
-    fun renameFavoriteGroup(groupId: String, newName: String) {
-        viewModelScope.launch {
-            groupRepository.renameFavoriteGroup(groupId, newName)
-        }
-    }
-
-    /** 路线列表拖动排序（第 22 步的编辑收藏页） */
-    fun reorderGroups(groupIds: List<String>) {
-        viewModelScope.launch {
-            groupRepository.reorderGroups(groupIds)
-        }
-    }
-
-    fun deleteFavoriteGroup(groupId: String) {
-        viewModelScope.launch {
-            groupRepository.deleteFavoriteGroup(groupId)
-            if (selection.selectedFavoriteGroupId.value == groupId) {
-                selection.select(null)
-            }
-        }
-    }
-
-    fun reorderFavoriteGroups(groupIds: List<String>) {
-        viewModelScope.launch {
-            groupRepository.reorderFavoriteGroups(groupIds)
-        }
-    }
-
-    /**
-     * 临时追踪的路线转存为正式收藏分组（收藏页「临时追踪」卡上的收藏按钮）
-     */
-    fun addPlannedSchemeAsFavorite(
-        group: TransitGroup,
-        customGroupId: String? = null,
-        category: GroupCategory = GroupCategory.CUSTOM,
-        customName: String? = null
-    ) {
-        viewModelScope.launch {
-            groupSaver.saveAsFavorite(group, customGroupId, category, customName)
-        }
-    }
-
-    /**
-     * 删除分组
-     */
-    fun deleteGroup(groupId: String) {
-        viewModelScope.launch {
-            groupRepository.deleteGroup(groupId)
-        }
-    }
-
-    /**
-     * 转存临时分组为正式常用分组
-     */
-    fun saveOrConvertTemporaryGroup(
-        groupId: String,
-        newName: String? = null,
-        newCategory: GroupCategory? = null,
-        customGroupId: String? = null
-    ) {
-        viewModelScope.launch {
-            groupRepository.saveOrConvertTemporaryGroup(groupId, newName, newCategory, customGroupId)
-        }
-    }
-
-    /**
-     * 创建或更新自定义分组
-     */
-    fun saveGroup(group: TransitGroup) {
-        viewModelScope.launch {
-            groupSaver.saveGroup(group)
-        }
-    }
-
-    /**
-     * 为指定路线生成返程路线
-     */
-    fun createReverseGroup(group: TransitGroup) {
-        viewModelScope.launch {
-            val targetGroupId = when (group.customGroupId) {
-                "commute" -> "home"
-                "home" -> "commute"
-                else -> group.customGroupId ?: if (group.category == GroupCategory.COMMUTE) "home" else null
-            }
-            val reversed = alignment.buildReverseTransitGroup(group, targetGroupId)
-            groupRepository.addGroup(reversed)
-        }
     }
 }

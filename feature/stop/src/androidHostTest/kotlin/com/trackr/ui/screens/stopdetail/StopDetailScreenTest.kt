@@ -126,6 +126,15 @@ class StopDetailScreenTest {
         )
     }
 
+    @Test
+    fun transitCodeButton_hiddenWhenSettingOff() {
+        // 「我的」里关掉「显示乘车码按钮」：站点页底栏这个圆钮也不留
+        setContent(base.copy(showTransitCodeButton = false))
+
+        composeTestRule.onNodeWithContentDescription("乘车码").assertDoesNotExist()
+        composeTestRule.onNodeWithText("选几条一起等").assertIsDisplayed()
+    }
+
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Test
     fun longLineName_withoutStationOrder_stillShowsHoursAndOpensLine() {
@@ -202,6 +211,23 @@ class StopDetailScreenTest {
             listOf(StopDetailEvent.AddLine, StopDetailEvent.ConfirmBoarded, StopDetailEvent.StopWatching),
             events
         )
+    }
+
+    @Test
+    fun watchMode_stillShowsLineList_andRowsOpenTheirLine() {
+        val watch = WatchTogetherUi(
+            lineCount = 2,
+            lines = listOf(
+                WatchLineUi("L325", "325", "科技园", arrival("1", "分钟", "还有 1 站", ArrivalTone.Go), "粤B·58921", "还有 1 站 · 粤B·58921")
+            )
+        )
+        setContent(base.copy(watch = watch))
+
+        // 一起等进行中页面还是完整的线路列表：线路行照常点得进线路页
+        composeTestRule.onNodeWithText("→ 科技园").assertIsDisplayed()
+        // 行可能被底栏盖住，直接走点击语义
+        composeTestRule.onNodeWithText("→ 科技园").performSemanticsAction(SemanticsActions.OnClick)
+        assertEquals(StopDetailEvent.OpenLine(row325), events.last())
     }
 
     @Test

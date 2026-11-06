@@ -193,9 +193,10 @@ fun ShowTransitCodeButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** 长辈版线路号：深蓝底白字，比标准版的浅蓝底醒目（设计稿「和标准版的差别」） */
+/** 长辈版线路号：深蓝底白字，比标准版的浅蓝底醒目（设计稿「和标准版的差别」）；名字为空时不画空壳（issue #20） */
 @Composable
 fun ElderLineBadge(name: String, modifier: Modifier = Modifier) {
+    if (name.isBlank()) return
     Surface(
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.primary,

@@ -78,7 +78,12 @@ fun ElderStopDetailScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { ElderTopBar(title = state.stopName, onBack = { onEvent(StopDetailEvent.Back) }) },
-        bottomBar = { ShowTransitCodeButton(onClick = { onEvent(StopDetailEvent.OpenTransitCode) }) }
+        bottomBar = {
+            // 「我的」里关掉「显示乘车码按钮」后，这里和标准版站点页一起不画
+            if (state.showTransitCodeButton) {
+                ShowTransitCodeButton(onClick = { onEvent(StopDetailEvent.OpenTransitCode) })
+            }
+        }
     ) { innerPadding ->
         when {
             state.isLoading && state.stops.isEmpty() -> Column(

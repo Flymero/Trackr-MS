@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 data class MeUiState(
     val engineMode: EngineMode = EngineMode.MYGOLBS,
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
+    val showTransitCodeButton: Boolean = true,
     val alertThresholdStops: Int = 2,
     val reminders: List<ScheduledReminder> = emptyList(),
     val remindersSubtitle: String? = null,
@@ -56,6 +57,7 @@ data class MeUiState(
 sealed interface MeEvent {
     data class SetEngineMode(val mode: EngineMode) : MeEvent
     data class SetTransitCode(val provider: TransitCodeProvider) : MeEvent
+    data class SetShowTransitCodeButton(val enabled: Boolean) : MeEvent
     data class SetAlertThresholdStops(val stops: Int) : MeEvent
     data class ToggleReminder(val id: String, val enabled: Boolean) : MeEvent
     data class SetLiveNotificationEnabled(val enabled: Boolean) : MeEvent
@@ -94,6 +96,7 @@ class MeViewModel(
         settings.isLiveNotificationEnabled,
         settings.showOnLockScreen
     ) { engine, code, stops, live, lock -> SettingsPart(engine, code, stops, live, lock) }
+        .combine(settings.showTransitCodeButton) { part, visible -> part.copy(showTransitCodeButton = visible) }
         .combine(settings.uiMode) { part, mode -> part.copy(elderMode = mode == UiMode.Elder) }
         .combine(settings.railMode) { part, mode -> part.copy(railMode = mode) }
         // 眉山特化：官方数据源选项只在眉山 / 仁寿提供
@@ -125,6 +128,7 @@ class MeViewModel(
                 settings.alertThresholdStops.value,
                 settings.isLiveNotificationEnabled.value,
                 settings.showOnLockScreen.value,
+                settings.showTransitCodeButton.value,
                 settings.uiMode.value == UiMode.Elder,
                 settings.railMode.value
             ),
@@ -142,6 +146,7 @@ class MeViewModel(
             is MeEvent.SetTransitCode -> viewModelScope.launch {
                 settings.setPreferredTransitCodeProvider(event.provider)
             }
+            is MeEvent.SetShowTransitCodeButton -> settings.setShowTransitCodeButton(event.enabled)
             is MeEvent.SetAlertThresholdStops -> settings.setAlertThresholdStops(event.stops)
             is MeEvent.ToggleReminder -> viewModelScope.launch {
                 reminderRepository.toggleReminder(event.id, event.enabled)
@@ -175,6 +180,7 @@ class MeViewModel(
     ) = MeUiState(
         engineMode = part.engineMode,
         preferredTransitCode = part.transitCode,
+        showTransitCodeButton = part.showTransitCodeButton,
         alertThresholdStops = part.alertThresholdStops,
         reminders = reminders,
         remindersSubtitle = remindersRowSubtitle(reminders),
@@ -197,6 +203,7 @@ class MeViewModel(
         val alertThresholdStops: Int,
         val liveNotification: Boolean,
         val showOnLockScreen: Boolean,
+        val showTransitCodeButton: Boolean = true,
         val elderMode: Boolean = false,
         val railMode: RailMode = RailMode.Horizontal,
         val meishanCity: Boolean = false

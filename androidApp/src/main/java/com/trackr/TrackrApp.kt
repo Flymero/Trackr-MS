@@ -43,6 +43,11 @@ class TrackrApp : Application() {
         get<FavoritesShortcutWidgetSync>().start()
     }
 
+    override fun onTerminate() {
+        if (GlobalContext.getOrNull() != null) stopKoin()
+        super.onTerminate()
+    }
+
     private fun startKoinOnce() {
         // 生产环境每个进程只会走一次；Robolectric 每个用例都新建 Application，而 Koin 的全局容器跨用例保留，先停掉旧的
         if (GlobalContext.getOrNull() != null) stopKoin()

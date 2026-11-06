@@ -74,11 +74,96 @@ class TrackingRepositoryTest {
 
     /** 盘里总是读到 [onDisk]（读盘慢于本进程第一次写盘的情形），写入另记 */
     private class StaleReadStore(private val onDisk: TrackingSession?) : TrackingSessionStore {
-        var written: TrackingSession? = onDisk
-        override suspend fun read(): TrackingSession? = onDisk
-        override suspend fun write(session: TrackingSession?) {
-            written = session
+        var written: List<TrackingSession> = listOfNotNull(onDisk)
+        override suspend fun read(): List<TrackingSession> = listOfNotNull(onDisk)
+        override suspend fun write(sessions: List<TrackingSession>) {
+            written = sessions
         }
+    }
+
+    /**
+     * 测试里只追一项：这些便捷写法都作用在「当前那一份会话」上，省得每处都写一遍 sessionId。
+     */
+    private fun TrackingRepository.update(generation: Int, transform: (TrackingSession) -> TrackingSession?): Boolean {
+        val current = session.value ?: return false
+        return update(current.sessionId, generation, transform)
+    }
+
+    private fun TrackingRepository.recordBuses(generation: Int, buses: List<LiveBus>) {
+        val current = session.value ?: return
+        recordBuses(current.sessionId, generation, buses)
+    }
+
+    private fun TrackingRepository.recordLineBuses(generation: Int, lineBuses: Map<String, List<LiveBus>>) {
+        val current = session.value ?: return
+        recordLineBuses(current.sessionId, generation, lineBuses)
+    }
+
+    private fun TrackingRepository.resume(): TrackingSession? {
+        val current = session.value ?: return null
+        return resume(current.sessionId)
+    }
+
+    @Test
+    fun pushOnline_validatesGenerationAndMembership_andKeepsOtherSessions() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val first = assertNotNull(repo.start(single.copy(lineId = "ms:1_1_0")))
+        val second = assertNotNull(repo.start(single.copy(lineId = "ms:1_2_0")))
+        repo.setPushOnline(first.sessionId, first.generation - 1, first.leg.lineId, true)
+        repo.setPushOnline(first.sessionId, first.generation, second.leg.lineId, true)
+        assertTrue(repo.pushOnlineLines.value.isEmpty())
+        repo.setPushOnline(first.sessionId, first.generation, first.leg.lineId, true)
+        repo.setPushOnline(second.sessionId, second.generation, second.leg.lineId, true)
+        repo.setPushOnline(first.sessionId, first.generation, first.leg.lineId, false)
+        assertEquals(mapOf(second.sessionId to setOf(second.leg.lineId)), repo.pushOnlineLines.value)
+        repo.setPushOnline(first.sessionId, first.generation, first.leg.lineId, true)
+        repo.stop(first.sessionId)
+        repo.setPushOnline(first.sessionId, first.generation, first.leg.lineId, true)
+        assertEquals(mapOf(second.sessionId to setOf(second.leg.lineId)), repo.pushOnlineLines.value)
+        repo.stop()
+        assertTrue(repo.pushOnlineLines.value.isEmpty())
+    }
+
+    @Test
+    fun pushOnline_removedWatchLineCannotReturn_andGenerationChangeClearsStatus() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val target = TrackingTarget.WatchTogether(
+            cityId = "ms", stopId = "stop", stopName = "站",
+            lines = listOf(WatchLine("ms:1_1_0", "1路", 3), WatchLine("ms:1_2_0", "2路", 3))
+        )
+        val session = assertNotNull(repo.start(target))
+        target.lines.forEach { repo.setPushOnline(session.sessionId, session.generation, it.lineId, true) }
+        repo.removeWatchLine(session.sessionId, target.lines.first().lineId)
+        repo.setPushOnline(session.sessionId, session.generation, target.lines.first().lineId, true)
+        assertEquals(setOf(target.lines.last().lineId), repo.pushOnlineLines.value[session.sessionId])
+        repo.update(session.sessionId, session.generation) { it.copy(generation = it.generation + 1) }
+        repo.setPushOnline(session.sessionId, session.generation, target.lines.last().lineId, true)
+        assertTrue(repo.pushOnlineLines.value.isEmpty())
+    }
+
+    @Test
+    fun pushOnline_isNotPersisted_andRestoreRequiresFreshOnlineData() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val target = single.copy(lineId = "ms:1_1_0")
+        val first = assertNotNull(repo.start(target))
+        repo.setPushOnline(first.sessionId, first.generation, first.leg.lineId, true)
+        repo.flush()
+        val restoredProcess = newRepo()
+        restoredProcess.awaitLoaded()
+        restoredProcess.setPushOnline(first.sessionId, first.generation, first.leg.lineId, true)
+        assertTrue(restoredProcess.pushOnlineLines.value.isEmpty())
+        val resumed = assertNotNull(restoredProcess.resume(first.sessionId))
+        assertTrue(restoredProcess.pushOnlineLines.value.isEmpty())
+        restoredProcess.setPushOnline(resumed.sessionId, resumed.generation, resumed.leg.lineId, true)
+        assertEquals(setOf(resumed.leg.lineId), restoredProcess.pushOnlineLines.value[resumed.sessionId])
+
+        val failed = assertNotNull(repo.start(target))
+        repo.setPushOnline(failed.sessionId, failed.generation, failed.leg.lineId, true)
+        repo.restore(failed, first)
+        assertTrue(repo.pushOnlineLines.value.isEmpty())
     }
 
     // ---------------- 落盘读回 ----------------
@@ -130,7 +215,7 @@ class TrackingRepositoryTest {
 
         assertNull(second.session.value)
         assertFalse(second.legState.value.isActive)
-        assertNull(store.read())
+        assertTrue(store.read().isEmpty())
     }
 
     @Test
@@ -148,7 +233,7 @@ class TrackingRepositoryTest {
 
         assertEquals(fresh, second.session.value)
         assertFalse(fresh.interrupted)
-        assertEquals(fresh, store.read())
+        assertEquals(listOf(fresh), store.read())
         assertTrue(fresh.sessionId != old.sessionId)
     }
 
@@ -166,7 +251,7 @@ class TrackingRepositoryTest {
 
         assertEquals(fresh, second.session.value)
         assertFalse(assertNotNull(second.session.value).interrupted)
-        assertEquals(fresh, slowStore.written)
+        assertEquals(listOf(fresh), slowStore.written)
         // 读回的旧会话代际号也算“用过的”：之后的会话代际号都比它大
         second.stop()
         val later = assertNotNull(second.start(single))
@@ -189,16 +274,18 @@ class TrackingRepositoryTest {
         assertEquals("新结果", repo.session.value?.state?.statusSummary)
         assertEquals("新结果", repo.legState.value.statusSummary)
 
-        // 开了新会话：老会话的代际号不再生效
+        // 再开一项追踪：老会话不受影响，它自己的代际号照样写得进去
         val next = assertNotNull(repo.start(single))
         assertTrue(next.generation > g)
-        assertFalse(repo.update(g) { it.copy(state = it.state.copy(statusSummary = "老会话")) })
-        assertEquals(next, repo.session.value)
+        assertEquals(listOf(session.sessionId, next.sessionId), repo.sessions.value.map { it.sessionId })
+        assertTrue(repo.update(g) { it.copy(state = it.state.copy(statusSummary = "老会话")) })
+        assertEquals("老会话", repo.sessions.value.first { it.sessionId == session.sessionId }.state.statusSummary)
 
         // 停止后：任何代际号都不生效
         repo.stop()
-        assertFalse(repo.update(next.generation) { it })
+        assertFalse(repo.update(next.sessionId, next.generation) { it })
         assertNull(repo.session.value)
+        assertTrue(repo.sessions.value.isEmpty())
     }
 
     @Test
@@ -213,7 +300,7 @@ class TrackingRepositoryTest {
         assertNull(repo.groupSession.value)
         assertFalse(repo.update(session.generation) { it })
         repo.flush()
-        assertNull(store.read())
+        assertTrue(store.read().isEmpty())
     }
 
     @Test
@@ -321,10 +408,8 @@ class TrackingRepositoryTest {
         val repo = newRepo()
         repo.awaitLoaded()
         repo.updateUserFix(fix())
+        // 再开一项不清定位：同时追着的好几项都要用它判下车站（过期与否按年龄判断）
         assertNotNull(repo.start(route))
-        assertNull(repo.latestUserFix)
-
-        repo.updateUserFix(fix())
         assertNotNull(repo.latestUserFix)
         repo.stop()
         assertNull(repo.latestUserFix)
@@ -344,7 +429,15 @@ class TrackingRepositoryTest {
         assertEquals(session.state, group.trackingSessionState)
         assertEquals(session.state, repo.legState.value)
 
-        assertNotNull(repo.start(single))
+        // 再追一条单线路：多出一份会话，路线那份还在（列表第一份仍是它）
+        val singleSession = assertNotNull(repo.start(single))
+        assertEquals(2, repo.sessions.value.size)
+        assertEquals("g1", repo.groupSession.value?.groupId)
+        assertTrue(repo.legState.value.isActive)
+
+        // 结束路线那一份之后，主会话变成单线路，换乘组视图跟着没了
+        repo.stop(session.sessionId)
+        assertEquals(listOf(singleSession.sessionId), repo.sessions.value.map { it.sessionId })
         assertNull(repo.groupSession.value)
         assertTrue(repo.legState.value.isActive)
     }
@@ -389,12 +482,12 @@ class TrackingRepositoryTest {
         val session = assertNotNull(repo.start(route))
         repo.cycleThreshold()
         repo.flush()
-        assertEquals(repo.session.value, store.read())
-        assertEquals(TrackingEngine.cycleThreshold(session, clock.nowMillis), store.read())
+        assertEquals(listOfNotNull(repo.session.value), store.read())
+        assertEquals(listOf(TrackingEngine.cycleThreshold(session, clock.nowMillis)), store.read())
 
         repo.stop()
         repo.flush()
-        assertNull(store.read())
+        assertTrue(store.read().isEmpty())
     }
 
     // ---------------- 开始失败放回 / 无效目标 / 改系统时间 ----------------
@@ -554,5 +647,164 @@ class TrackingRepositoryTest {
         assertEquals(started.sessionId, resumed.sessionId)
         assertEquals(started.watchedLines, resumed.watchedLines)
         assertEquals(watch, resumed.target)
+    }
+
+    // ---------------- 同时追多项（第 36 步） ----------------
+
+    @Test
+    fun twoTargets_coexist_andStopOnlyEndsThatOne() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val first = assertNotNull(repo.start(single))
+        val second = assertNotNull(repo.start(single.copy(lineId = "L71", lineName = "71路")))
+
+        // 两份都在，按开始先后排；主会话是第一份
+        assertEquals(listOf(first.sessionId, second.sessionId), repo.sessions.value.map { it.sessionId })
+        assertEquals(first.sessionId, repo.session.value?.sessionId)
+        assertEquals(second.sessionId, repo.sessionById(second.sessionId)?.sessionId)
+
+        // 结束其中一份，另一份接着追
+        repo.stop(first.sessionId)
+        assertEquals(listOf(second.sessionId), repo.sessions.value.map { it.sessionId })
+        assertEquals(second.sessionId, repo.session.value?.sessionId)
+        assertTrue(repo.legState.value.isActive)
+
+        repo.stop()
+        assertTrue(repo.sessions.value.isEmpty())
+        assertFalse(repo.legState.value.isActive)
+    }
+
+    @Test
+    fun start_sameTarget_replacesInsteadOfStacking() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val first = assertNotNull(repo.start(single))
+        val again = assertNotNull(repo.start(single))
+
+        val only = assertNotNull(repo.session.value)
+        assertEquals(1, repo.sessions.value.size)
+        assertEquals(again.sessionId, only.sessionId)
+        assertTrue(only.generation > first.generation)
+    }
+
+    @Test
+    fun start_moreThanMaxSessions_dropsOldest() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val started = (1..TrackingRepository.MAX_SESSIONS + 1).map { i ->
+            assertNotNull(repo.start(single.copy(lineId = "L$i", lineName = "${i}路")))
+        }
+
+        assertEquals(TrackingRepository.MAX_SESSIONS, repo.sessions.value.size)
+        // 最早开始的那一份被挤掉
+        assertNull(repo.sessionById(started.first().sessionId))
+        assertEquals(started.last().sessionId, repo.sessions.value.last().sessionId)
+    }
+
+    @Test
+    fun removeWatchLine_dropsOnlyThatLine_andEndsSessionWithTheLastOne() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val lines = listOf(
+            WatchLine(lineId = "L1", lineName = "325", stopOrder = 5),
+            WatchLine(lineId = "L2", lineName = "M194", stopOrder = 8)
+        )
+        val session = assertNotNull(
+            repo.start(
+                TrackingTarget.WatchTogether(cityId = "sz", stopId = "st", stopName = "科技园站", lines = lines)
+            )
+        )
+
+        repo.removeWatchLine(session.sessionId, "L1")
+
+        val after = assertNotNull(repo.session.value)
+        assertEquals(listOf("L2"), after.watchTarget?.lines?.map { it.lineId })
+        assertEquals(listOf("L2"), after.watchedLines.map { it.line.lineId })
+        // 主显示跟着换成剩下那条线
+        assertEquals("L2", after.state.lineId)
+
+        repo.removeWatchLine(after.sessionId, "L2")
+        assertTrue(repo.sessions.value.isEmpty())
+        assertNull(repo.session.value)
+    }
+
+    @Test
+    fun update_onlyAppliesToItsOwnSession() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val first = assertNotNull(repo.start(single))
+        val second = assertNotNull(repo.start(single.copy(lineId = "L71", lineName = "71路")))
+
+        assertTrue(repo.update(first.sessionId, first.generation) { it.copy(state = it.state.copy(statusSummary = "一号")) })
+        assertFalse(repo.update(second.sessionId, first.generation) { it })
+
+        assertEquals("一号", repo.sessionById(first.sessionId)?.state?.statusSummary)
+        assertEquals(second, repo.sessionById(second.sessionId))
+    }
+
+    @Test
+    fun start_singleLineAlreadyWaitingInWatch_doesNotAddASecondSession() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val watch = assertNotNull(
+            repo.start(
+                TrackingTarget.WatchTogether(
+                    cityId = "sz",
+                    stopId = "st",
+                    stopName = "科技园站",
+                    lines = listOf(WatchLine(lineId = "L1", lineName = "325", stopOrder = 5), WatchLine(lineId = "L2", lineName = "M194", stopOrder = 8))
+                )
+            )
+        )
+
+        // 同一站同一批线里点这条线的「追踪」：已经在一起等里了，不叠第二份
+        val again = assertNotNull(
+            repo.start(
+                TrackingTarget.SingleLine(
+                    cityId = "sz",
+                    lineId = "L1",
+                    lineName = "325",
+                    targetStopId = "st",
+                    targetStopName = "科技园站",
+                    targetOrder = 5
+                )
+            )
+        )
+
+        assertEquals(watch.sessionId, again.sessionId)
+        assertEquals(1, repo.sessions.value.size)
+    }
+
+    @Test
+    fun start_watchAbsorbsLineTrackedAloneAtTheSameStop() = runTest {
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val single = assertNotNull(
+            repo.start(
+                TrackingTarget.SingleLine(
+                    cityId = "sz",
+                    lineId = "L1",
+                    lineName = "325",
+                    targetStopId = "st",
+                    targetStopName = "科技园站",
+                    targetOrder = 5
+                )
+            )
+        )
+
+        val watch = assertNotNull(
+            repo.start(
+                TrackingTarget.WatchTogether(
+                    cityId = "sz",
+                    stopId = "st",
+                    stopName = "科技园站",
+                    lines = listOf(WatchLine(lineId = "L1", lineName = "325", stopOrder = 5), WatchLine(lineId = "L2", lineName = "M194", stopOrder = 8))
+                )
+            )
+        )
+
+        // 那条线被一起等收进来，只剩一起等这一份
+        assertEquals(listOf(watch.sessionId), repo.sessions.value.map { it.sessionId })
+        assertNull(repo.sessionById(single.sessionId))
     }
 }

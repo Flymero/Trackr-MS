@@ -57,8 +57,8 @@ object TrackingEngine {
     /** 锁定车辆信号丢失期间的最短轮询间隔 */
     const val SIGNAL_LOST_MIN_INTERVAL_MS = 30_000L
 
-    /** 提醒类型（到站 / 即将到站），上车站和下车站共用 */
-    enum class AlertKind { APPROACHING, ARRIVED }
+    /** 提醒类型：即将到站 / 到站 / 没赶上（车已经开走了） */
+    enum class AlertKind { APPROACHING, ARRIVED, MISSED }
 
     /** 一次 reduce 产出的副作用，调用方按顺序执行 */
     sealed interface Effect {
@@ -66,7 +66,15 @@ object TrackingEngine {
         data class Alert(
             val kind: AlertKind,
             val state: TrackingSessionState,
-            /** 下车结束提醒必须发独立通知，避免实时活动清理常驻通知时一并撤掉。 */
+            /**
+             * 必须发独立通知，不能因为「实时活动 / 焦点通知 / 胶囊已经在展示同一趟车」就省掉。
+             *
+             * 到站（上车站、下车站）一律为 true：这一刻只有一次机会，而「胶囊可用」只说明权限给了，
+             * 不代表那条胶囊真的升起来了（issue #27 就是权限给了但没上岛）。赌它可见，输了就是错过一班车；
+             * 多弹一条通知的代价，比错过车小得多。
+             *
+             * 临近提醒（还有 N 站）仍可为 false：后面还有到站那一次兜底。
+             */
             val forceStandalone: Boolean = false
         ) : Effect
 
@@ -261,6 +269,13 @@ object TrackingEngine {
     fun chooseBoardedBus(session: TrackingSession, busId: String?, nowMillis: Long): TrackingSession? =
         WatchTogetherTracker.chooseBoardedBus(session, busId, nowMillis)
 
+    /**
+     * 一起等里去掉一条线（首页那一张卡点「结束」）：只停这一条，其他线接着等。
+     * @return 新会话；null 表示这份会话该结束（一条不剩，或去掉的是正在追的那条）
+     */
+    fun removeWatchLine(session: TrackingSession, lineId: String, nowMillis: Long): TrackingSession? =
+        if (session.watchTarget == null) null else WatchTogetherTracker.removeLine(session, lineId, nowMillis)
+
     // ---------------------------------------------------------------- 轮询
 
     /**
@@ -298,7 +313,8 @@ object TrackingEngine {
                 val alertState = update.alertState
                 if (alertState != null) {
                     when (update.alert) {
-                        SingleLegTracker.AlertKind.ARRIVED -> add(Effect.Alert(AlertKind.ARRIVED, alertState))
+                        SingleLegTracker.AlertKind.ARRIVED ->
+                            add(Effect.Alert(AlertKind.ARRIVED, alertState, forceStandalone = true))
                         SingleLegTracker.AlertKind.APPROACHING -> add(Effect.Alert(AlertKind.APPROACHING, alertState))
                         null -> Unit
                     }
@@ -316,9 +332,10 @@ object TrackingEngine {
         val alertState = decision.alertState
         if (alertState != null) {
             when (decision.alert) {
-                // 上车站到站只是「车来了」，实时活动已经展示同一趟车时不必再弹一条；走默认判断
+                // 上车站到站：车就在站台上，这是这一趟唯一一次机会。焦点通知 / 胶囊只能证明权限给了，
+                // 证明不了它真的可见，所以照样独立发一条——宁可和胶囊重复，也不要让人错过车
                 GroupLegTracker.AlertKind.BOARD_ARRIVED ->
-                    effects += Effect.Alert(AlertKind.ARRIVED, alertState)
+                    effects += Effect.Alert(AlertKind.ARRIVED, alertState, forceStandalone = true)
                 // 下车站到站是这一程的结束提醒，必须独立发，避免实时活动清理常驻通知时一并撤掉
                 GroupLegTracker.AlertKind.DROP_ARRIVED ->
                     effects += Effect.Alert(AlertKind.ARRIVED, alertState, forceStandalone = true)
@@ -326,6 +343,13 @@ object TrackingEngine {
                 GroupLegTracker.AlertKind.DROP_APPROACHING -> effects += Effect.Alert(AlertKind.APPROACHING, alertState)
                 null -> Unit
             }
+        }
+        // 没赶上：定位判定没上，或者提醒过到站后那班车又开走了。补一条「错过了，下一班 X」，
+        // 不然用户只看到通知换了辆车，不知道自己已经被落下。同一次轮询里已经有到站提醒时不叠发。
+        if (update.missedBoarding && effects.none { it is Effect.Alert && it.kind == AlertKind.ARRIVED }) {
+            // 下一班紧接着就要到站：那句「还有 1 站」和「错过了」说的是同一件事，只留后者
+            effects.removeAll { it is Effect.Alert && it.kind == AlertKind.APPROACHING }
+            effects += Effect.Alert(AlertKind.MISSED, missedAlertState(previous, decision.state), forceStandalone = true)
         }
         val state = decision.state
         val updated = session.copy(state = state)
@@ -426,6 +450,18 @@ object TrackingEngine {
      * 构建定位上车检测上下文。返回 null 表示本轮不用定位（保持“车到上车站即上车”的原行为）：
      * 不能用定位、或拿不到上车站坐标。
      */
+    /**
+     * 「错过了」提醒用的状态：站名写回上车站（等车阶段 [TrackingSessionState.targetStopName] 才是上车站），
+     * 站数 / ETA 保持下一班的值；下一班还没有数据时是 -1，通知里就只说「暂时没车」。
+     */
+    private fun missedAlertState(
+        previous: TrackingSessionState,
+        state: TrackingSessionState
+    ): TrackingSessionState = state.copy(
+        targetStopName = previous.boardStopName.ifBlank { state.boardStopName }.ifBlank { state.targetStopName },
+        isBusArrivedAtStop = false
+    )
+
     private fun boardingInput(
         state: TrackingSessionState,
         detail: BusLineDetail,

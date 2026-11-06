@@ -93,7 +93,7 @@ class TrackrDataStoresTest {
     fun trackingSession_roundTripAndClear() = runBlocking {
         val path = File(dir, TrackrDataStoreFiles.TRACKING_SESSION).absolutePath
         val store = createTrackingSessionDataStore(path, newScope())
-        assertNull(store.data.first())
+        assertTrue(store.data.first().isEmpty())
 
         val group = TransitGroup(
             id = "g1",
@@ -116,13 +116,13 @@ class TrackrDataStoresTest {
             leg = TrackingLegParams(cityId = "c", lineId = "L1", lineName = "59", targetOrder = 7),
             state = TrackingSessionState(isActive = true, lineId = "L1", lineName = "59", targetOrder = 7, updatedAtMillis = 5L)
         )
-        store.updateData { session }
+        store.updateData { listOf(session) }
         closeAll()
 
         val reopened = createTrackingSessionDataStore(path, newScope())
-        assertEquals(session, reopened.data.first())
-        reopened.updateData { null }
-        assertNull(reopened.data.first())
+        assertEquals(listOf(session), reopened.data.first())
+        reopened.updateData { emptyList() }
+        assertTrue(reopened.data.first().isEmpty())
         assertEquals(0L, File(path).length())
     }
 
@@ -138,7 +138,8 @@ class TrackrDataStoresTest {
                 """"interrupted":false}"""
         )
 
-        val session = requireNotNull(createTrackingSessionDataStore(file.absolutePath, newScope()).data.first())
+        // 旧版文件里是单个对象：包成一项读出来
+        val session = createTrackingSessionDataStore(file.absolutePath, newScope()).data.first().single()
         assertEquals("s1", session.sessionId)
         assertTrue(session.target is TrackingTarget.SingleLine)
         assertTrue(session.watchedLines.isEmpty())
@@ -163,10 +164,10 @@ class TrackrDataStoresTest {
             watchedLines = lines.map { WatchedLine(line = it, busId = "b-${it.lineId}", stopsRemaining = 2, hasData = true) },
             boardChoice = BoardChoice(listOf(BoardOption(lineId = "L1", lineName = "325", busId = "b-L1", order = 5)), sinceMillis = 9L)
         )
-        store.updateData { session }
+        store.updateData { listOf(session) }
         closeAll()
 
-        assertEquals(session, createTrackingSessionDataStore(path, newScope()).data.first())
+        assertEquals(listOf(session), createTrackingSessionDataStore(path, newScope()).data.first())
     }
 
     @Test
@@ -174,6 +175,6 @@ class TrackrDataStoresTest {
         val file = File(dir, TrackrDataStoreFiles.TRACKING_SESSION)
         file.writeText("{\"isActive\":tru")
 
-        assertNull(createTrackingSessionDataStore(file.absolutePath, newScope()).data.first())
+        assertTrue(createTrackingSessionDataStore(file.absolutePath, newScope()).data.first().isEmpty())
     }
 }

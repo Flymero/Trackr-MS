@@ -33,7 +33,7 @@ import kotlin.test.assertTrue
 class ArrivalAlertViewModelTest {
 
     private val main = MainDispatcherHolder(UnconfinedTestDispatcher())
-    private val sessionFlow = MutableStateFlow<TrackingSession?>(null)
+    private val sessionFlow = MutableStateFlow<List<TrackingSession>>(emptyList())
     private lateinit var controller: FakeTrackingController
     private lateinit var launcher: FakeTransitCodeLauncher
     private lateinit var settings: FakeSettingsRepository
@@ -74,7 +74,7 @@ class ArrivalAlertViewModelTest {
         main.install()
         val real = DefaultTrackingRepository(InMemoryTrackingSessionStore(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
         val repository = object : TrackingRepository by real {
-            override val session: StateFlow<TrackingSession?> = sessionFlow
+            override val sessions: StateFlow<List<TrackingSession>> = sessionFlow
         }
         controller = FakeTrackingController()
         launcher = FakeTransitCodeLauncher()
@@ -93,7 +93,10 @@ class ArrivalAlertViewModelTest {
 
     @Test
     fun alertOf_singleLineArrived() {
-        assertEquals(ArrivalAlertUi(key = "s1:bus1", lineName = "325", endStop = "科技园", stopName = "科技园"), arrivalAlertOf(session()))
+        assertEquals(
+            ArrivalAlertUi(key = "s1:bus1", sessionId = "s1", lineName = "325", endStop = "科技园", stopName = "科技园"),
+            arrivalAlertOf(session())
+        )
     }
 
     @Test
@@ -119,32 +122,32 @@ class ArrivalAlertViewModelTest {
     @Test
     fun showsWhenArrived_goesWhenBusLeaves() = runTest(main.dispatcher) {
         assertNull(viewModel.alert.value)
-        sessionFlow.value = session(arrivedState(arrived = false))
+        sessionFlow.value = listOf(session(arrivedState(arrived = false)))
         assertNull(viewModel.alert.value)
-        sessionFlow.value = session()
+        sessionFlow.value = listOf(session())
         assertEquals("s1:bus1", viewModel.alert.value?.key)
         // 车开走了，下一辆还没到
-        sessionFlow.value = session(arrivedState(busId = "bus2", arrived = false))
+        sessionFlow.value = listOf(session(arrivedState(busId = "bus2", arrived = false)))
         assertNull(viewModel.alert.value)
     }
 
     @Test
     fun dismiss_sameBusStaysHidden_nextBusShowsAgain() = runTest(main.dispatcher) {
-        sessionFlow.value = session()
+        sessionFlow.value = listOf(session())
         viewModel.onEvent(ArrivalAlertEvent.Dismiss)
         assertNull(viewModel.alert.value)
         // 同一辆车下一轮轮询（状态没变）也不再弹
-        sessionFlow.value = session(arrivedState().copy(etaSeconds = 10))
+        sessionFlow.value = listOf(session(arrivedState().copy(etaSeconds = 10)))
         assertNull(viewModel.alert.value)
         assertEquals(0, controller.stopCount)
 
-        sessionFlow.value = session(arrivedState(busId = "bus2"))
+        sessionFlow.value = listOf(session(arrivedState(busId = "bus2")))
         assertEquals("s1:bus2", viewModel.alert.value?.key)
     }
 
     @Test
     fun boarded_stopsTracking() = runTest(main.dispatcher) {
-        sessionFlow.value = session()
+        sessionFlow.value = listOf(session())
         viewModel.onEvent(ArrivalAlertEvent.Boarded)
         assertEquals(1, controller.stopCount)
         assertNull(viewModel.alert.value)

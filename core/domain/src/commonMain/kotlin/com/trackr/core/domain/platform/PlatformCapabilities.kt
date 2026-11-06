@@ -41,7 +41,10 @@ val ProcessMonotonicClock: MonotonicClock = object : MonotonicClock {
 
 /**
  * 追踪的控制入口（Android：会话写进 `TrackingRepository` 后启动前台服务；iOS：App 在前台时轮询）。
- * 追踪状态本身只从 `TrackingRepository.session` 读，这里只发命令。
+ * 追踪状态本身只从 `TrackingRepository.sessions` 读，这里只发命令。
+ *
+ * 可以同时追多项（第 36 步）：[start] 只加一份，不影响其他项；带 `sessionId` 的命令只作用于那一份，
+ * 不传（null）时作用于主会话（还没拆开的旧调用）。
  */
 interface TrackingController {
 
@@ -55,25 +58,28 @@ interface TrackingController {
     fun resumeInterrupted(): Boolean = false
 
     /**
-     * 开始追踪（替换掉正在进行的追踪）。
-     * @return 是否启动成功；后台不允许启动前台服务时返回 false，会话不保留，由调用方降级（如改发通知）
+     * 开始追踪：往会话列表里加一份，正在追的其他项不受影响（同一个目标会替换掉原来那份）。
+     * @return 是否启动成功；后台不允许启动前台服务时返回 false，这一份会话不保留，由调用方降级（如改发通知）
      */
     fun start(target: TrackingTarget): Boolean
 
-    /** 结束追踪 */
-    fun stopTracking()
+    /** 结束追踪；[sessionId] 为 null 时结束全部 */
+    fun stopTracking(sessionId: String? = null)
 
     /** 手动「我已上车」（只在路线、一起等的等车阶段有效） */
-    fun confirmBoarded()
+    fun confirmBoarded(sessionId: String? = null)
 
     /** 一起等「上了哪辆？」：选了 [busId]，null =「还没上」（第 15 步；弹层在第 21 步） */
-    fun chooseBoardedBus(busId: String?)
+    fun chooseBoardedBus(busId: String?, sessionId: String? = null)
+
+    /** 一起等里去掉一条线（首页那一张卡点「结束」）：只停这一条 */
+    fun removeWatchLine(sessionId: String, lineId: String)
 
     /** 手动切到下一程（只在路线追踪时有效） */
-    fun switchToNextLeg()
+    fun switchToNextLeg(sessionId: String? = null)
 
     /** 切换提前几站提醒（1 -> 2 -> 3 -> 1） */
-    fun cycleThreshold()
+    fun cycleThreshold(sessionId: String? = null)
 
     /** 把带精度和定位时刻的手机定位喂给追踪（下车站辅助判定用） */
     fun updateUserFix(fix: UserFix)

@@ -65,6 +65,9 @@ class FakeSettingsRepository(
     private val _preferredTransitCodeProvider = MutableStateFlow(initialTransitCodeProvider)
     override val preferredTransitCodeProvider: StateFlow<TransitCodeProvider> = _preferredTransitCodeProvider.asStateFlow()
 
+    private val _showTransitCodeButton = MutableStateFlow(true)
+    override val showTransitCodeButton: StateFlow<Boolean> = _showTransitCodeButton.asStateFlow()
+
     private val _nearbyStopsCount = MutableStateFlow(4)
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
 
@@ -112,6 +115,10 @@ class FakeSettingsRepository(
 
     override fun setShowOnLockScreen(enabled: Boolean) {
         _showOnLockScreen.value = enabled
+    }
+
+    override fun setShowTransitCodeButton(enabled: Boolean) {
+        _showTransitCodeButton.value = enabled
     }
 
     override fun setAlertThresholdStops(stops: Int) {
@@ -169,7 +176,9 @@ class FakeFavoritesRepository(
                     is FavoriteStationLine -> FavoriteItem.Stop(value, groupOf[key], index)
                     else -> {
                         val route = value as TransitGroup
-                        FavoriteItem.Route(route.copy(customGroupId = groupOf[key] ?: route.customGroupId), groupOf[key] ?: route.customGroupId, index)
+                        // 显式设成 null（拖到「不分组」）要盖掉路线自己的 customGroupId
+                        val groupId = if (groupOf.containsKey(key)) groupOf[key] else route.customGroupId
+                        FavoriteItem.Route(route.copy(customGroupId = groupId), groupId, index)
                     }
                 }
             }

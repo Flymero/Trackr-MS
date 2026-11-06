@@ -85,7 +85,7 @@ class LiveUpdatePromotionTest {
     }
 
     @Test
-    fun testBuildNotification_marksNotificationColorizedForPromotion() {
+    fun testBuildNotification_isNotColorizedSoPromotionStaysEligible() {
         val state = TrackingSessionState(
             isActive = true,
             lineName = "49路",
@@ -98,8 +98,8 @@ class LiveUpdatePromotionTest {
         )
 
         val notification = liveNotifier.buildNotification(context, state)
-        // Android 16 的 hasPromotableCharacteristics() 要求 colorized，缺了就不会上岛
-        assertTrue(notification.extras.getBoolean(NotificationCompat.EXTRA_COLORIZED))
+        // Android 16 的 hasPromotableCharacteristics() 要求「不能染色」，setColorized(true) 会直接失去上岛资格
+        assertFalse(notification.extras.getBoolean(NotificationCompat.EXTRA_COLORIZED))
     }
 
     @Test

@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- feature/favorites 的页面文案（第 28 步从代码里搬出来）。 -->
+<!-- feature/favorites 的页面文案（第 28 步从代码里搬出来；第 33 步改成车 + 路线合一）。 -->
 <resources>
     <string name="fav_edit_title">编辑收藏</string>
     <string name="fav_edit_section_groups">分组</string>
     <string name="fav_edit_new_group">新建分组</string>
     <string name="fav_edit_section_favorites">收藏</string>
-    <string name="fav_edit_empty">还没有收藏的路线。在路线规划页收藏，或从首页的路线卡进来。</string>
-    <string name="fav_edit_hint">拖动左边的把手排序。删分组时，里面的路线会变成「不分组」；点一条路线可以改分组或删除。</string>
+    <string name="fav_edit_empty">还没有收藏。在线路详情点 ☆ 收藏一条线路，或在路线规划里存一条路线。</string>
+    <string name="fav_edit_hint">拖动左边的把手排序。点一条收藏可以改分组；删分组时，里面的收藏会变成「不分组」。</string>
     <string name="fav_edit_create">创建</string>
     <string name="fav_edit_delete_route_title">删除这条收藏？</string>
-    <string name="fav_edit_delete_route_body">「%1$s」删掉后不影响线路和收藏的车。</string>
-    <string name="fav_edit_no_routes">还没有路线</string>
-    <string name="fav_edit_route_count">%1$s 条路线</string>
+    <string name="fav_edit_delete_route_body">「%1$s」删掉后不影响线路本身，随时可以再收藏。</string>
+    <string name="fav_edit_no_routes">还没有收藏</string>
+    <string name="fav_edit_route_count">%1$s 条收藏</string>
     <string name="fav_edit_group_actions">改名或删除</string>
     <string name="fav_edit_delete_favorite">删除收藏</string>
     <string name="fav_edit_drag">拖动排序</string>
@@ -19,7 +19,9 @@
     <string name="fav_edit_group_name_hint">例如：健身房、常用路线</string>
     <string name="fav_edit_delete_group_title">删除分组「%1$s」？</string>
     <string name="fav_edit_delete_group_empty">这个分组会被删掉。</string>
-    <string name="fav_edit_delete_group_body">分组会被删掉，里面 %1$s 条路线会变成「不分组」。</string>
+    <string name="fav_edit_delete_group_body">分组会被删掉，里面 %1$s 条收藏会变成「不分组」。</string>
     <string name="fav_edit_group_dialog_title">分组</string>
     <string name="fav_edit_delete_this_group">删除这个分组</string>
+    <string name="fav_edit_change_group">改分组</string>
+    <string name="fav_edit_group_picker_title">放到哪个分组</string>
 </resources>

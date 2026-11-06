@@ -96,6 +96,9 @@ class TransitRepository(
     private val _preferredTransitCodeProvider = MutableStateFlow(TransitCodeProvider.fromId(initial.transitCodeProvider ?: TransitCodeProvider.ASK_ALWAYS.id))
     override val preferredTransitCodeProvider: StateFlow<TransitCodeProvider> = _preferredTransitCodeProvider.asStateFlow()
 
+    private val _showTransitCodeButton = MutableStateFlow(initial.showTransitCodeButton ?: true)
+    override val showTransitCodeButton: StateFlow<Boolean> = _showTransitCodeButton.asStateFlow()
+
     private val _nearbyStopsCount = MutableStateFlow((initial.nearbyStopsCount ?: 4).coerceIn(1, 16))
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
 
@@ -166,6 +169,11 @@ class TransitRepository(
     override fun setShowOnLockScreen(enabled: Boolean) {
         _showOnLockScreen.value = enabled
         writer.enqueue { store.saveShowOnLockScreen(enabled) }
+    }
+
+    override fun setShowTransitCodeButton(enabled: Boolean) {
+        _showTransitCodeButton.value = enabled
+        writer.enqueue { store.saveShowTransitCodeButton(enabled) }
     }
 
     override fun setAlertThresholdStops(stops: Int) {

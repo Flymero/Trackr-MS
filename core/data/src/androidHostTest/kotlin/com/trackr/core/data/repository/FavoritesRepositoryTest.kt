@@ -375,6 +375,20 @@ class FavoritesRepositoryTest {
     }
 
     @Test
+    fun legacyImport_emptyGroupsStaysEmpty() = runBlocking {
+        // 旧版本里已经把两个默认分组删光了（存成 "[]"），迁进新库之后不该再补回来
+        LegacyFixtures.prefs(context, LegacyPrefs.ROUTE_GROUPS).edit()
+            .putString(LegacyPrefs.KEY_FAVORITE_GROUPS, "[]")
+            .commit()
+        runLegacyMigration()
+
+        val repo = open()
+
+        assertTrue(repo.favoriteGroups.value.isEmpty())
+        assertTrue(db.favoriteGroups().getAll().isEmpty())
+    }
+
+    @Test
     fun legacyImport_thenCreate_keepsOldOrderAndGroups() = runBlocking {
         val groups = listOf(
             FavoriteGroup("gym", "健身", sortOrder = 0),
@@ -513,6 +527,39 @@ class FavoritesRepositoryTest {
             db.favoriteGroups().getAll().map { it.id }
         )
         assertTrue(db.favorites().getItems().isEmpty())
+    }
+
+    @Test
+    fun deleteAllGroups_staysDeletedAfterReopen() = runBlocking {
+        val repo = open()
+        assertEquals(
+            DefaultFavoritesRepository.DEFAULT_GROUPS.map { it.id },
+            repo.favoriteGroups.value.map { it.id }
+        )
+
+        repo.deleteGroup(FavoriteItemOrder.COMMUTE_GROUP_ID)
+        repo.deleteGroup(FavoriteItemOrder.HOME_GROUP_ID)
+        assertTrue(repo.favoriteGroups.value.isEmpty())
+
+        // 重开：分组表空着，但那是用户删空的，不是从没建过，不再补默认分组（issue #24）
+        val reopened = open()
+        assertTrue(reopened.favoriteGroups.value.isEmpty())
+        assertTrue(db.favoriteGroups().getAll().isEmpty())
+    }
+
+    @Test
+    fun create_keepsEmptyGroups_whenFavoritesStillExist() = runBlocking {
+        val repo = open()
+        repo.toggleFavorite(stop("a"))
+        val gym = repo.createGroup("健身")
+        repo.deleteGroup(FavoriteItemOrder.COMMUTE_GROUP_ID)
+        repo.deleteGroup(FavoriteItemOrder.HOME_GROUP_ID)
+        repo.deleteGroup(gym.id)
+
+        val reopened = open()
+
+        assertTrue(reopened.favoriteGroups.value.isEmpty())
+        assertTrue(reopened.favorites.value.any { it.id == "a" })
     }
 
     private companion object {

@@ -52,7 +52,8 @@ class InMemoryFavoritesStore(initial: FavoritesSnapshot = FavoritesSnapshot()) :
             stops = change.stops ?: snapshot.stops,
             routes = change.routes ?: snapshot.routes,
             groups = change.groups ?: snapshot.groups,
-            items = items
+            items = items,
+            groupsInitialized = snapshot.groupsInitialized || change.markGroupsInitialized
         )
     }
 }

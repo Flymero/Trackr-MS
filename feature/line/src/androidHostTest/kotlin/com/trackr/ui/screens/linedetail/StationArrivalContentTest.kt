@@ -1,10 +1,13 @@
 package com.trackr.ui.screens.linedetail
 
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.text.TextLayoutResult
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
@@ -13,8 +16,10 @@ import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.LineOperatingState
 import com.trackr.core.model.LiveBus
 import com.trackr.ui.screens.linedetail.components.StationArrivalContent
+import com.trackr.ui.screens.linedetail.components.StationArrivalTags
 import kotlinx.datetime.LocalTime
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -89,7 +94,7 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
-        // 车都过了：只给下一班始发发车时间，不估到站
+        // 全车过站后，按当前 ArrivalText 规则显示下一班始发发车时间。
         composeTestRule.onNodeWithText("下一班 21:05").assertIsDisplayed()
         composeTestRule.onNodeWithText("从 延安东路外滩 发车").assertIsDisplayed()
         composeTestRule.onNodeWithText("全线 1 辆车在途 · 查看").assertIsDisplayed()
@@ -270,7 +275,9 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
-        composeTestRule.onNodeWithText("陕西北路站上车").assertIsDisplayed()
+        // 胶囊只写站名，不再带「站上车」
+        composeTestRule.onNodeWithText("陕西北路").assertIsDisplayed()
+        composeTestRule.onNodeWithText("陕西北路站上车").assertDoesNotExist()
         composeTestRule.onNodeWithText("约 4").assertIsDisplayed()
         composeTestRule.onNodeWithText("还有 2 站").assertIsDisplayed()
         composeTestRule.onNodeWithText("沪A·D8866").assertIsDisplayed()
@@ -327,37 +334,49 @@ class StationArrivalContentTest {
         setContent(detail, stops[1], onOpenBusList = { openedList++ }, onPickStop = { picked++ })
 
         composeTestRule.onNodeWithText("全线 1 辆车在途 · 查看").performClick()
-        composeTestRule.onNodeWithContentDescription("换上车站", useUnmergedTree = true).performClick()
+        composeTestRule.onNodeWithTag(StationArrivalTags.PICK_STOP).performClick()
         assertEquals(1, openedList)
         assertTrue(picked >= 1)
     }
 
     @Test
-    fun followingBusText_sparseStopOrders_countsByPositionAndKeepsFallback() {
-        val bus = LiveBus(
-            busId = "sparse",
-            plateOrFleetNo = "川Z1234",
-            order = 3,
-            etaSeconds = 720,
-            stopOrders = listOf(1, 3, 7, 20)
+    fun longStopName_chipShowsJustTheStopName() {
+        // #23：站名很长时主卡胶囊只写站名，末尾不再挂「站上车」
+        val longStop = BusStop(stopId = "s3", name = "人民东路学海路（南汇大学城）", order = 3)
+        val detail = BusLineDetail(
+            line = lineDirection,
+            stops = stops + longStop,
+            buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "沪A·D8866", order = 2, etaSeconds = 300)),
+            operatingState = LineOperatingState.RUNNING
         )
-        assertEquals(
-            "下一辆 约 12 分钟 · 2 站",
-            com.trackr.ui.screens.linedetail.components.followingBusText(20, bus)
-        )
-        assertEquals(
-            "下一辆 约 12 分钟 · 17 站",
-            com.trackr.ui.screens.linedetail.components.followingBusText(20, bus.copy(stopOrders = emptyList()))
-        )
-        assertEquals(
-            "下一辆还有 2 站",
-            com.trackr.ui.screens.linedetail.components.followingBusText(20, bus.copy(etaSeconds = -1))
-        )
+        setContent(detail, longStop)
+
+        composeTestRule.onNodeWithTag(StationArrivalTags.PICK_STOP).assertIsDisplayed()
+        composeTestRule.onNodeWithText("人民东路学海路（南汇大学城）").assertIsDisplayed()
+        composeTestRule.onNodeWithText("人民东路学海路（南汇大学城）站上车").assertDoesNotExist()
     }
 
     @Test
-    fun boardingLabel_doesNotDoubleZhan() {
-        assertEquals("南宁火车站 上车", com.trackr.ui.screens.linedetail.components.boardingLabel("南宁火车站"))
-        assertEquals("科技园站上车", com.trackr.ui.screens.linedetail.components.boardingLabel("科技园"))
+    fun longStopName_scrollsInsideChipInsteadOfEllipsis() {
+        // 装不下的站名交给胶囊里的跑马灯：整段完整排版（一行、没省略号），滚动由 basicMarquee 做
+        val longStop = BusStop(stopId = "s3", name = "人民东路学海路（南汇大学城）", order = 3)
+        val detail = BusLineDetail(
+            line = lineDirection,
+            stops = stops + longStop,
+            buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "沪A·D8866", order = 2, etaSeconds = 300)),
+            operatingState = LineOperatingState.RUNNING
+        )
+        setContent(detail, longStop)
+
+        val results = mutableListOf<TextLayoutResult>()
+        composeTestRule.onNodeWithText("人民东路学海路（南汇大学城）", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .config.getOrNull(SemanticsActions.GetTextLayoutResult)
+            ?.action
+            ?.invoke(results)
+
+        val layout = results.single()
+        assertEquals(1, layout.lineCount)
+        assertFalse("站名被截成省略号", layout.isLineEllipsized(0))
     }
 }

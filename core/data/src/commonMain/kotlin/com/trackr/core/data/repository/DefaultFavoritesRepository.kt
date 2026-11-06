@@ -317,8 +317,9 @@ class DefaultFavoritesRepository private constructor(
     private suspend fun commit(next: State, write: FavoritesWrite) {
         // 存储里还没有索引：这次连同整份索引一起写，之后才能只改几行
         val effective = if (itemsPersisted) write else write.copy(items = next.items, itemUpdates = emptyList())
+        // 每次写都顺手记下「分组建过了」：删光分组后重启才知道那是删空的，而不是从没建过（见 create）
         try {
-            store.write(effective)
+            store.write(effective.copy(markGroupsInitialized = true))
             itemsPersisted = true
         } catch (e: CancellationException) {
             throw e
@@ -350,7 +351,10 @@ class DefaultFavoritesRepository private constructor(
          * 读一次存储，建好仓库。
          *
          * 和旧 RouteGroupRepository 一样：清掉历史测试注入的假路线（`sample_commute_group`、含 `sample_` 线路）；
-         * 没有收藏分组时写入两个默认分组。然后对账索引（[FavoriteItemOrder.reconcile]）：存储里有索引且对不上时写回；
+         * **从没建过分组**时写入两个默认分组。怎么算「从没建过」：存储里的 `groupsInitialized` 为 false，而且
+         * 分组、车、路线、合一索引一样都没有（全新安装）；分组是空列表、或者已经有别的收藏，都算建过了 ——
+         * 用户把两个默认分组删光之后重启不会再补回来（v0.1.5 的 bug，issue #24）。
+         * 然后对账索引（[FavoriteItemOrder.reconcile]）：存储里有索引且对不上时写回；
          * 存储里从没有过索引时只在内存里推出来，不写盘（只打开不改东西，旧存储的文件一字不动），等第一次改动时整份写入。
          *
          * @param ioDispatcher 之后每次改动在哪执行
@@ -371,8 +375,13 @@ class DefaultFavoritesRepository private constructor(
                 route.id == "sample_commute_group" ||
                     route.legs.any { leg -> leg.candidateLines.any { it.lineId.startsWith("sample_") } }
             }
-            val groupsMissing = snapshot.groups.isNullOrEmpty()
-            val groups = if (groupsMissing) DEFAULT_GROUPS else snapshot.groups.orEmpty().sortedBy { it.sortOrder }
+            // 分组表 / 列表空 == 用户删光了；只有「一样数据都没有」才是第一次用
+            val seedDefaultGroups = !snapshot.groupsInitialized &&
+                snapshot.groups == null &&
+                snapshot.items == null &&
+                snapshot.stops.isEmpty() &&
+                snapshot.routes == null
+            val groups = if (seedDefaultGroups) DEFAULT_GROUPS else snapshot.groups.orEmpty().sortedBy { it.sortOrder }
             val items = FavoriteItemOrder.reconcile(snapshot.stops, routes, groups, snapshot.items)
             var state = arrange(snapshot.stops, routes, groups, items)
             // 路线自己的 sortOrder 要和合一列表里路线的先后一致（不减）；对不上时（例如索引是从旧存储导进来的）按先后改成 0、1、2…
@@ -385,13 +394,14 @@ class DefaultFavoritesRepository private constructor(
             val routesChanged = routes.size != loadedRoutes.size || renumbered
             val hadItems = snapshot.items != null
             val itemsChanged = hadItems && items != snapshot.items
-            if (routesChanged || groupsMissing || itemsChanged) {
+            if (routesChanged || seedDefaultGroups || itemsChanged) {
                 store.write(
                     FavoritesWrite(
                         stops = if (itemsChanged) state.stops else null,
                         routes = if (routesChanged || itemsChanged) state.routes else null,
-                        groups = if (groupsMissing) state.groups else null,
-                        items = if (itemsChanged) state.items else null
+                        groups = if (seedDefaultGroups) state.groups else null,
+                        items = if (itemsChanged) state.items else null,
+                        markGroupsInitialized = seedDefaultGroups
                     )
                 )
             }

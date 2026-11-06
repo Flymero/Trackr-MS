@@ -42,6 +42,7 @@
     <string name="line_detail_error">未获取到该线路信息</string>
     <string name="line_detail_reminder">定时提醒</string>
     <string name="line_detail_reverse">换向</string>
+    <string name="line_detail_switching">换向中</string>
     <string name="line_detail_hours">运营 %1$s–%2$s</string>
     <string name="line_detail_fare">票价 %1$s</string>
     <string name="line_detail_stop_count">共 %1$s 站</string>

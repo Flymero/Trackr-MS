@@ -20,14 +20,11 @@ fun EntryProviderScope<NavKey>.favoritesEntries(navigator: TrackrNavigator) {
     }
 }
 
-/** 编辑收藏的 Koin 定义（原 `FavoritesGroupViewModel` 拆出来的分组增删改、筛选部分） */
+/** 编辑收藏的 Koin 定义（分组增删改 + 收藏排序 / 改分组 / 删除） */
 val favoritesModule = module {
     viewModel {
         FavoritesEditViewModel(
-            groupRepository = get(),
-            settings = get(),
-            alignment = get(),
-            groupSaver = get(),
+            favorites = get(),
             selection = get(),
             dataFix = get()
         )

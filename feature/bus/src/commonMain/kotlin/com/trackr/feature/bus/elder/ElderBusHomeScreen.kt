@@ -120,7 +120,8 @@ fun ElderBusHomeScreen(
     val favorites = remember(state.favoriteRows, state.selectedGroupId, state.favoriteItems, state.favoritesRealtime) {
         if (state.selectedGroupId == null) state.favoriteRows else BusHomeMapper.favoriteRows(state.copy(selectedGroupId = null))
     }
-    var confirmStop by rememberSaveable { mutableStateOf(false) }
+    // 要结束哪一张追踪卡（长辈版多一步确认）；存 key，转屏重建后还在
+    var confirmStopKey by rememberSaveable { mutableStateOf<String?>(null) }
 
     Scaffold(
         modifier = modifier,
@@ -152,13 +153,14 @@ fun ElderBusHomeScreen(
                 ElderSearchEntry(onClick = { onEvent(BusHomeEvent.OpenSearch) })
             }
 
-            state.trackingCard?.let { card ->
-                item(key = "tracking", contentType = "tracking") {
+            // 同时追多项时一项一张卡，各自点进自己的线路页
+            state.trackingCards.forEach { card ->
+                item(key = card.key, contentType = "tracking") {
                     ElderTrackingCard(
                         card = card,
                         onOpen = { onEvent(BusHomeEvent.OpenLine(card.open)) },
                         onReadAloud = { onEvent(BusHomeEvent.ReadAloud(card.spoken)) },
-                        onStop = { confirmStop = true }
+                        onStop = { confirmStopKey = card.key }
                     )
                 }
             }
@@ -175,16 +177,17 @@ fun ElderBusHomeScreen(
         }
     }
 
-    if (confirmStop) {
+    val confirmStop = confirmStopKey?.let { key -> state.trackingCards.firstOrNull { it.key == key } }
+    confirmStop?.let { card ->
         ElderConfirmDialog(
             text = stringResource(BusRes.string.bus_elder_stop_tracking_confirm),
             confirmText = stringResource(BusRes.string.bus_elder_stop_tracking),
             dismissText = stringResource(BusRes.string.bus_elder_keep_tracking),
             onConfirm = {
-                confirmStop = false
-                onEvent(BusHomeEvent.StopTracking)
+                confirmStopKey = null
+                onEvent(BusHomeEvent.StopTracking(card.sessionId, card.watchLineId))
             },
-            onDismiss = { confirmStop = false }
+            onDismiss = { confirmStopKey = null }
         )
     }
 
