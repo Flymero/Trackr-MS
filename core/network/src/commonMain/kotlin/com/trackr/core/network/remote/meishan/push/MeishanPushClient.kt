@@ -50,6 +50,8 @@ class MeishanPushClient(
         private const val HEARTBEAT_TICK_MS = 5_000L
         private const val HEARTBEAT_AFTER_MS = 28_000L
         private const val STALE_AFTER_MS = 300_000L
+        /** Push timestamps can lead the device wall clock slightly; reject only clear skew. */
+        internal const val FUTURE_TOLERANCE_MS = 2_000L
         private val BEIJING = TimeZone.of("Asia/Shanghai")
     }
 
@@ -92,12 +94,10 @@ class MeishanPushClient(
             if (next <= 0) tagRefs.remove(tag) else tagRefs[tag] = next
             tagRefs.isEmpty()
         }
-        // 已建立的连接也立即收到新的完整集合；归零主动发送 [] 后关闭，避免依赖服务端的隐式清理。
+        // 已建立的连接也立即收到新的完整集合；归零由在线循环先发送 []，再关闭连接。
         subscriptionWakeup.trySend(Unit)
-        if (becameEmpty) {
-            currentSocket?.let { socket ->
-                scope.launch { runCatching { write(socket, subscribeFrame(emptySet())) } }
-            }
+        if (becameEmpty && state.value != MeishanPushState.ONLINE) {
+            // 握手或连接阶段没有在线循环负责收尾，关闭以中断当前 socket 操作。
             currentSocket?.close()
         }
     }
@@ -179,7 +179,10 @@ class MeishanPushClient(
         }
         try {
             while (true) {
-                if (activeTags().isEmpty()) return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
+                if (activeTags().isEmpty()) {
+                    if (subscribedSnapshot.isNotEmpty()) write(socket, subscribeFrame(emptySet()))
+                    return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
+                }
                 val text = socket.read() ?: return@coroutineScope OnlineExit.DISCONNECTED
                 if (text.isBlank()) continue
                 try {
@@ -191,7 +194,9 @@ class MeishanPushClient(
                 if (want != subscribedSnapshot) write(socket, subscribeFrame(want))
                 if (want.isEmpty()) return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
                 // 消费 acquire/release 发出的唤醒；真正的写入在下一轮读完后完成，避免并发写 socket。
-                while (subscriptionWakeup.tryReceive().isSuccess) Unit
+                while (subscriptionWakeup.tryReceive().isSuccess) {
+                    // Drain coalesced subscription wakeups before the next socket read.
+                }
             }
         } finally {
             heartbeat.cancel()
@@ -271,7 +276,7 @@ class MeishanPushClient(
     private fun isStale(parsedMillis: Long): Boolean {
         val age = wallClock.now().toEpochMilliseconds() - parsedMillis
         // 未来时间和超过 5 分钟的旧帧都隔离；pushTime 不是 GPS 采样时间，只用于新鲜度门槛。
-        return age < 0L || age > STALE_AFTER_MS
+        return age < -FUTURE_TOLERANCE_MS || age > STALE_AFTER_MS
     }
 
     private fun connectFrame(): String = buildJsonObject {

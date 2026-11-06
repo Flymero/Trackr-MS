@@ -7,6 +7,7 @@ import com.trackr.core.data.local.NoLineStopsCache
 import com.trackr.core.data.repository.FavoritesRepository
 import com.trackr.core.data.repository.MeishanPushAvailability
 import com.trackr.core.data.repository.MeishanPushRepository
+import com.trackr.core.data.repository.MeishanPushTarget
 import com.trackr.core.data.repository.RealtimeRepository
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
@@ -38,6 +39,7 @@ import com.trackr.ui.screens.linedetail.components.stationArrivalState
 import com.trackr.ui.util.FixedDelayPollingStrategy
 import com.trackr.ui.util.PollingCoordinator
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,7 +48,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -226,7 +227,8 @@ class LineDetailViewModel(
     private var lastRefreshAtMillis: Long? = null
 
     private var pushJob: Job? = null
-    private var pushKey: Pair<String, Int?>? = null
+    private var pushKey: String? = null
+    private var pushTarget = MutableStateFlow(MeishanPushTarget(null, null))
     private var pushOnline = false
     private var screenResumed = false
     private var pushGeneration = 0L
@@ -487,29 +489,48 @@ class LineDetailViewModel(
     private fun startPush(detail: BusLineDetail, stop: BusStop?) {
         val repository = pushRepository ?: return
         if (!screenResumed || detail.line.source != DataSourceType.MEISHAN || detail.stops.isEmpty()) return
-        val key = detail.line.lineId to stop?.order
-        if (pushKey == key && pushJob?.isActive == true) return
+        val key = detail.line.lineId
+        if (pushKey == key && pushJob?.isActive == true) {
+            pushTarget.value = MeishanPushTarget(stop?.order, stop?.stopId)
+            return
+        }
         stopPush()
         pushKey = key
+        pushTarget = MutableStateFlow(MeishanPushTarget(stop?.order, stop?.stopId))
         val generation = pushGeneration
         pushJob = viewModelScope.launch {
-            repository.stream(detail, stop?.order, stop?.stopId)
-                .catch {
+            var backoffMillis = PUSH_RETRY_MIN_MILLIS
+            while (generation == pushGeneration && screenResumed && currentLineId == key) {
+                try {
+                    repository.stream(detail, pushTarget)
+                        .catch {
+                            if (it is CancellationException) throw it
+                            if (generation == pushGeneration) setPushOnline(false)
+                        }
+                        .collect { update ->
+                            if (generation != pushGeneration || currentLineId != key || !screenResumed) return@collect
+                            val fresh = update.detail
+                            if (fresh != null && fresh.line.lineId == currentLineId) {
+                                pushRevision++
+                                lastRefreshAtMillis = clockMillis()
+                                applyDetail(fresh, _uiState.value.selectedStop)
+                            }
+                            if (update.availability == MeishanPushAvailability.ONLINE) {
+                                backoffMillis = PUSH_RETRY_MIN_MILLIS
+                            }
+                            setPushOnline(update.availability == MeishanPushAvailability.ONLINE && (fresh != null || pushOnline))
+                        }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    if (generation == pushGeneration) setPushOnline(false)
+                } finally {
                     if (generation == pushGeneration) setPushOnline(false)
                 }
-                .onCompletion {
-                    if (generation == pushGeneration) setPushOnline(false)
-                }
-                .collect { update ->
-                    if (generation != pushGeneration || currentLineId != key.first || !screenResumed) return@collect
-                    val fresh = update.detail
-                    if (fresh != null && fresh.line.lineId == currentLineId) {
-                        pushRevision++
-                        lastRefreshAtMillis = clockMillis()
-                        applyDetail(fresh, _uiState.value.selectedStop)
-                    }
-                    setPushOnline(update.availability == MeishanPushAvailability.ONLINE && (fresh != null || pushOnline))
-                }
+                if (generation != pushGeneration || !screenResumed || currentLineId != key) break
+                delay(backoffMillis)
+                backoffMillis = (backoffMillis * 2).coerceAtMost(PUSH_RETRY_MAX_MILLIS)
+            }
         }
     }
 
@@ -977,6 +998,9 @@ class LineDetailViewModel(
 
         /** 追踪时提前几站提醒（原预警 chips 的默认值；全局设置见第 25 步） */
         const val DEFAULT_ALERT_THRESHOLD_STOPS = 2
+
+        const val PUSH_RETRY_MIN_MILLIS = 2_000L
+        const val PUSH_RETRY_MAX_MILLIS = 30_000L
     }
 }
 

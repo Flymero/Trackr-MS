@@ -11,14 +11,14 @@ import com.trackr.core.network.remote.meishan.push.MeishanPushState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -33,6 +33,11 @@ data class MeishanPushUpdate(
     val detail: BusLineDetail? = null
 )
 
+data class MeishanPushTarget(
+    val order: Int?,
+    val stationId: String?
+)
+
 /**
  * 眉山线路详情的实时推送桥接。
  * 原始 TCP 帧和 JSONArray 只停留在 network/provider 层，feature 只收到领域详情。
@@ -43,6 +48,15 @@ interface MeishanPushRepository {
         targetOrder: Int? = null,
         stationId: String? = null
     ): Flow<MeishanPushUpdate>
+
+    fun stream(
+        base: BusLineDetail,
+        target: StateFlow<MeishanPushTarget>
+    ): Flow<MeishanPushUpdate> = stream(
+        base = base,
+        targetOrder = target.value.order,
+        stationId = target.value.stationId
+    )
 }
 
 private sealed interface MeishanPushEvent {
@@ -65,6 +79,14 @@ class DefaultMeishanPushRepository(
         base: BusLineDetail,
         targetOrder: Int?,
         stationId: String?
+    ): Flow<MeishanPushUpdate> = stream(
+        base = base,
+        target = MutableStateFlow(MeishanPushTarget(targetOrder, stationId))
+    )
+
+    override fun stream(
+        base: BusLineDetail,
+        target: StateFlow<MeishanPushTarget>
     ): Flow<MeishanPushUpdate> = channelFlow {
         val tag = try {
             provider.pushTag(base.line.lineId)
@@ -141,8 +163,8 @@ class DefaultMeishanPushRepository(
                             provider.applyPushFrame(
                                 base = base,
                                 frame = event.value,
-                                targetOrder = targetOrder,
-                                stationId = stationId,
+                                targetOrder = target.value.order,
+                                stationId = target.value.stationId,
                                 expectedTag = expectedTag
                             )
                         } catch (cancel: CancellationException) {

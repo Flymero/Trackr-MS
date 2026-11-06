@@ -155,6 +155,52 @@ class MeishanPushClientTest {
     }
 
     @Test
+    fun smallFutureClockSkew_isAccepted() = runTest {
+        val fake = FakePushSocket()
+        val (client, external, _) = newClient(fake)
+        val collected = mutableListOf<MeishanPushFrame>()
+        val collector = CoroutineScope(Job() + StandardTestDispatcher(testScheduler)).launch {
+            client.frames.collect { collected += it }
+        }
+        try {
+            client.acquire("11_0_1")
+            runCurrent()
+            // Beijing 18:00:01 is one second ahead of the test clock at 10:00:00Z.
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:01"))
+            runCurrent()
+            assertEquals(1, collected.size)
+        } finally {
+            collector.cancel()
+            client.cancel()
+            external.cancel()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun clearlyFutureFrame_isDiscarded() = runTest {
+        val fake = FakePushSocket()
+        val (client, external, _) = newClient(fake)
+        val collected = mutableListOf<MeishanPushFrame>()
+        val collector = CoroutineScope(Job() + StandardTestDispatcher(testScheduler)).launch {
+            client.frames.collect { collected += it }
+        }
+        try {
+            client.acquire("11_0_1")
+            runCurrent()
+            // Beijing 18:00:03 is beyond the two-second skew tolerance.
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:03"))
+            runCurrent()
+            assertTrue(collected.isEmpty())
+        } finally {
+            collector.cancel()
+            client.cancel()
+            external.cancel()
+            runCurrent()
+        }
+    }
+
+    @Test
     fun msg5_rebuildsOnSameSocketWithConnectAckAndSubscribe() = runTest {
         val fake = FakePushSocket()
         val (client, external, _) = newClient(fake)
@@ -234,6 +280,7 @@ class MeishanPushClientTest {
             client.release("11_0_1")
             runCurrent()
             assertEquals(MeishanPushState.IDLE, client.state.value)
+            assertTrue(fake.sent.any { it.contains("\"msgType\":2") && it.contains("\"data\":\"[]\"") })
             assertTrue(fake.closed)
         } finally {
             client.cancel()

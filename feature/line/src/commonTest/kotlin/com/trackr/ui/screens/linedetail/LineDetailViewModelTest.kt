@@ -10,6 +10,7 @@ import com.trackr.core.data.repository.DefaultTrackingRepository
 import com.trackr.core.data.repository.InMemoryTrackingSessionStore
 import com.trackr.core.data.repository.MeishanPushAvailability
 import com.trackr.core.data.repository.MeishanPushRepository
+import com.trackr.core.data.repository.MeishanPushTarget
 import com.trackr.core.data.repository.MeishanPushUpdate
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
@@ -39,8 +40,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -98,23 +100,37 @@ private class CountingLineRepository(
 private class FakeMeishanPushRepository : MeishanPushRepository {
     class Session(
         val base: BusLineDetail,
-        val targetOrder: Int?,
-        val stationId: String?
+        val target: StateFlow<MeishanPushTarget>
     ) {
         val updates = MutableSharedFlow<MeishanPushUpdate>(extraBufferCapacity = 8)
+        val targetOrder: Int? get() = target.value.order
+        val stationId: String? get() = target.value.stationId
     }
 
     val subscriptions = mutableListOf<Session>()
     val cancellations = mutableListOf<Session>()
+    var failNext = false
 
     override fun stream(
         base: BusLineDetail,
         targetOrder: Int?,
         stationId: String?
-    ): Flow<MeishanPushUpdate> = flow {
-        val session = Session(base, targetOrder, stationId)
+    ): Flow<MeishanPushUpdate> = stream(
+        base,
+        MutableStateFlow(MeishanPushTarget(targetOrder, stationId))
+    )
+
+    override fun stream(
+        base: BusLineDetail,
+        target: StateFlow<MeishanPushTarget>
+    ): Flow<MeishanPushUpdate> = kotlinx.coroutines.flow.flow {
+        val session = Session(base, target)
         subscriptions += session
         try {
+            if (failNext) {
+                failNext = false
+                throw IllegalStateException("push stream failed")
+            }
             session.updates.collect { emit(it) }
         } finally {
             cancellations += session
@@ -429,46 +445,56 @@ class LineDetailViewModelTest {
     }
 
     @Test
-    fun meishanPush_selectStop_cancelsOldSessionAndRejectsItsQueuedFrames() = runTest(main.dispatcher) {
+    fun meishanPush_selectStop_keepsSubscriptionAndUpdatesTarget() = runTest(main.dispatcher) {
         withPushViewModel { viewModel, realtime, push ->
             viewModel.onScreenResumed()
             testScheduler.runCurrent()
-            val old = push.subscriptions.single()
-            old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, old.base))
+            val session = push.subscriptions.single()
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, session.base))
             testScheduler.runCurrent()
 
-            // 帧已进入旧队列但还没交给收集器，立即选站。
-            val stale = old.base.copy(buses = listOf(buses.single().copy(busId = "old-stop")))
-            assertTrue(old.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, stale)))
             viewModel.selectStop(stops[2])
             testScheduler.runCurrent()
 
-            assertFalse(viewModel.uiState.value.isPushOnline)
-            assertEquals(listOf(old), push.cancellations)
-            assertEquals(0, old.updates.subscriptionCount.value)
-            assertEquals(2, push.subscriptions.size)
-            val selected = push.subscriptions.last()
-            assertEquals(3, selected.targetOrder)
-            assertEquals("s3", selected.stationId)
+            assertTrue(viewModel.uiState.value.isPushOnline)
+            assertTrue(push.cancellations.isEmpty())
+            assertEquals(1, push.subscriptions.size)
+            assertEquals(3, session.targetOrder)
+            assertEquals("s3", session.stationId)
             assertEquals(listOf<Int?>(2, 3), realtime.lineDetailTargetOrders)
             assertEquals(stops[2], viewModel.uiState.value.selectedStop)
-            assertEquals(buses, viewModel.uiState.value.live?.buses)
 
-            val fresh = selected.base.copy(
+            val fresh = session.base.copy(
                 targetOrder = 3,
                 buses = listOf(buses.single().copy(busId = "new-stop", etaSeconds = 85))
             )
-            selected.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
-            testScheduler.runCurrent()
-            val expected = viewModel.uiState.value
-            old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, stale))
-            old.updates.emit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, fresh))
             testScheduler.runCurrent()
 
-            assertEquals(fresh.buses, expected.live?.buses)
-            assertEquals(stops[2], expected.selectedStop)
-            assertEquals(expected, viewModel.uiState.value)
+            assertEquals(fresh.buses, viewModel.uiState.value.live?.buses)
+            assertEquals(stops[2], viewModel.uiState.value.selectedStop)
             assertFalse(viewModel.isPollingActive)
+        }
+    }
+
+    @Test
+    fun meishanPush_streamFailure_retriesWithBackoff() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, _, push ->
+            push.failNext = true
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+
+            assertEquals(1, push.subscriptions.size)
+            assertFalse(viewModel.uiState.value.isPushOnline)
+
+            testScheduler.advanceTimeBy(LineDetailViewModel.PUSH_RETRY_MIN_MILLIS - 1)
+            testScheduler.runCurrent()
+            assertEquals(1, push.subscriptions.size)
+
+            testScheduler.advanceTimeBy(1)
+            testScheduler.runCurrent()
+            assertEquals(2, push.subscriptions.size)
+            assertTrue(push.cancellations.contains(push.subscriptions.first()))
         }
     }
 
