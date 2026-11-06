@@ -298,6 +298,7 @@ fun LineDetailScreen(
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val live = state.live
                     val busesByOrder = remember(live?.buses) { live?.buses.orEmpty().groupBy { it.order } }
+                    val idleBuses = live?.idleBuses.orEmpty()
                     val hasError = state.errorMessage != null
                     // 主卡最多占六成；横排时再给横条和底栏让位，保证横线整个露出来
                     val cardMaxHeight = if (isHorizontalRail) {
@@ -331,6 +332,14 @@ fun LineDetailScreen(
                             )
                         }
                         // 主卡固定在顶部，不跟走向条一起滚：看卡片和看当前站可以同时
+                        if (idleBuses.isNotEmpty()) {
+                            Text(
+                                text = "${idleBuses.size} 辆停场/非运营车辆，仅作状态展示",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                        }
                         HeroCard(
                             state = state,
                             static = static,
@@ -635,6 +644,7 @@ private fun HeroCard(
                 PanelMode.BUS_LIST -> BusListContent(
                     lineDetail = rememberLineDetail(static, state.live),
                     selectedStop = state.selectedStop,
+                    idleBuses = state.live?.idleBuses.orEmpty(),
                     onBack = { onEvent(LineDetailEvent.BackFromPanel) },
                     onSelectBus = { onEvent(LineDetailEvent.FollowBus(it)) }
                 )
@@ -660,6 +670,7 @@ private fun rememberLineDetail(static: LineStatic, live: LineLive?): BusLineDeta
         reverseDirection = static.reverseDirection,
         stops = static.stops,
         buses = live?.buses.orEmpty(),
+        idleBuses = live?.idleBuses.orEmpty(),
         operatingState = live?.operatingState ?: LineOperatingState.RUNNING,
         statusDescription = live?.statusDescription.orEmpty(),
         nextDepartureFromStart = live?.nextDepartureFromStart,

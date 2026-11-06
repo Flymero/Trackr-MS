@@ -65,6 +65,7 @@ import org.jetbrains.compose.resources.vectorResource
 fun BusListContent(
     lineDetail: BusLineDetail,
     selectedStop: BusStop?,
+    idleBuses: List<LiveBus> = emptyList(),
     onBack: () -> Unit,
     onSelectBus: (LiveBus) -> Unit,
     modifier: Modifier = Modifier
@@ -105,7 +106,14 @@ fun BusListContent(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        if (lineDetail.buses.isEmpty()) {
+        if (lineDetail.buses.isEmpty() && idleBuses.isNotEmpty()) {
+            Text(
+                text = "暂无在途车辆 · ${idleBuses.size} 辆停场/非运营车辆",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(vertical = 24.dp)
+            )
+        } else if (lineDetail.buses.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

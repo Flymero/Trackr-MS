@@ -13,6 +13,7 @@ import com.trackr.core.model.NearbyStopLineStatus
 import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitSearchResult
+import com.trackr.core.model.findStop
 import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
 import com.trackr.core.network.remote.common.SingleFlightCache
@@ -336,7 +337,9 @@ class DefaultRealtimeRepository(
                     }.getOrNull()
 
                     if (lineRes != null) {
-                        val approaching = lineRes.buses.filter { it.order <= fav.targetOrder }
+                        // 收藏存的是站序：服务端重排站序后按站 ID 找回同一站，不落到另一站上
+                        val targetOrder = lineRes.stops.findStop(fav.targetOrder, fav.targetStopId)?.order ?: fav.targetOrder
+                        val approaching = lineRes.buses.filter { it.order <= targetOrder }
                         // 车来了的线路详情直接给下一班；掌上公交只有部分城市给 planTime，
                         // 没车又没给时回落时刻表，收藏卡才不会只剩「暂无在途车辆」。
                         val nextDeparture = lineRes.nextDepartureFromStart
@@ -347,7 +350,7 @@ class DefaultRealtimeRepository(
                             }
                         val lineStatus = NearbyStopLineStatus(
                             line = lineRes.line,
-                            targetOrder = fav.targetOrder,
+                            targetOrder = targetOrder,
                             targetStopId = fav.targetStopId,
                             targetStopName = fav.targetStopName,
                             statusText = lineRes.statusDescription,

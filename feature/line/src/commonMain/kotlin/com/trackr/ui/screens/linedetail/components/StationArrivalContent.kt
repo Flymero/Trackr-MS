@@ -94,6 +94,7 @@ fun StationArrivalContent(
 ) {
     val currentOrder = selectedStop?.order ?: 1
     val buses = live?.buses.orEmpty()
+    val idleBuses = live?.idleBuses.orEmpty()
 
     // 最近一辆还没过本站的车
     val upcomingBus = remember(buses, currentOrder) { ArrivalText.nearestBus(currentOrder, buses) }
@@ -242,7 +243,13 @@ fun StationArrivalContent(
             )
             TextButton(onClick = onOpenBusList) {
                 Text(
-                    text = if (buses.isNotEmpty()) stringResource(LineRes.string.line_station_buses_on_line, buses.size) else stringResource(LineRes.string.line_station_no_buses),
+                    text = if (buses.isNotEmpty()) {
+                        stringResource(LineRes.string.line_station_buses_on_line, buses.size)
+                    } else if (idleBuses.isNotEmpty()) {
+                        "暂无在途车辆 · ${idleBuses.size} 辆停场/非运营"
+                    } else {
+                        stringResource(LineRes.string.line_station_no_buses)
+                    },
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )

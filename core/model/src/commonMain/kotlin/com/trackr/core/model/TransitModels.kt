@@ -140,6 +140,21 @@ data class BusStop(
 )
 
 /**
+ * 按「站序 + 站 ID」找回一个站：两者都对上优先；站序变了时按站 ID（只认眉山官方 `ms-st:` 站 ID，
+ * 第三方站 ID 不保证线路内唯一）；都没有时退回只按站序。同一站 ID 出现多次时取首个。
+ */
+fun List<BusStop>.findStop(order: Int, stopId: String?): BusStop? {
+    val id = stopId?.takeIf { it.startsWith(MEISHAN_STOP_ID_PREFIX) }
+    if (id != null) {
+        firstOrNull { it.order == order && it.stopId == id }?.let { return it }
+        firstOrNull { it.stopId == id }?.let { return it }
+    }
+    return firstOrNull { it.order == order }
+}
+
+private const val MEISHAN_STOP_ID_PREFIX = "ms-st:"
+
+/**
  * 实时在途公交车实体
  * @param order 正在接近（或已停靠）的目标站点 1-based 站序
  * @param segmentProgress 车辆在 (order-1) -> order 之间的插值比例 [0.0, 1.0]；已到站时恒为 1.0
@@ -220,7 +235,11 @@ data class BusLineDetail(
     val statusDescription: String = "",
     val nextDepartureFromStart: String? = null,
     val targetOrder: Int = 0,
-    val updatedAtMillis: Long = defaultNowMillis()
+    val updatedAtMillis: Long = defaultNowMillis(),
+    /** 数据源给了位置、但不参与到站计算的车（非运营时段、长时间未移动）；只展示，不进候选 */
+    val idleBuses: List<LiveBus> = emptyList(),
+    /** 线路备注原文（如票价说明）；不是运营状态 */
+    val remark: String = ""
 )
 
 /**
@@ -411,7 +430,9 @@ data class TrackingSessionState(
     /** ON_BOARD：疑似锁错车时，离用户更近的那辆车 */
     val relockCandidateBusId: String? = null,
     /** 连续满足“应改锁 [relockCandidateBusId]”条件的轮询次数 */
-    val relockStreak: Int = 0
+    val relockStreak: Int = 0,
+    /** 数据源明确给出停靠状态：到站只认停靠标志，不按 ETA 推断 */
+    val hasAuthoritativeArrival: Boolean = false
 ) {
     /** 车已到上车站，正在用定位确认用户是否上车 */
     val isAwaitingBoardingConfirmation: Boolean

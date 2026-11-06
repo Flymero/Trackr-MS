@@ -76,11 +76,14 @@ class MeishanPushClient(
     private val writeMutex = Mutex()
     private var lastSendMs: Long = 0L
     private var subscribedSnapshot: Set<String> = emptySet()
+    private val subscriptionWakeup = Channel<Unit>(Channel.CONFLATED)
+    private val latestPushTimeByTag = HashMap<String, Long>()
 
     override suspend fun acquire(tag: String) {
         synchronized(refsLock) { tagRefs[tag] = (tagRefs[tag] ?: 0) + 1 }
         startLoop()
         wakeup.trySend(Unit)
+        subscriptionWakeup.trySend(Unit)
     }
 
     override suspend fun release(tag: String) {
@@ -89,7 +92,14 @@ class MeishanPushClient(
             if (next <= 0) tagRefs.remove(tag) else tagRefs[tag] = next
             tagRefs.isEmpty()
         }
-        if (becameEmpty) currentSocket?.close()
+        // 已建立的连接也立即收到新的完整集合；归零主动发送 [] 后关闭，避免依赖服务端的隐式清理。
+        subscriptionWakeup.trySend(Unit)
+        if (becameEmpty) {
+            currentSocket?.let { socket ->
+                scope.launch { runCatching { write(socket, subscribeFrame(emptySet())) } }
+            }
+            currentSocket?.close()
+        }
     }
 
     private fun startLoop() {
@@ -156,6 +166,17 @@ class MeishanPushClient(
 
     private suspend fun runOnline(socket: MeishanPushSocket): OnlineExit = kotlinx.coroutines.coroutineScope {
         val heartbeat = launch { heartbeatLoop(socket) }
+        val subscriptionWatcher = launch {
+            while (true) {
+                subscriptionWakeup.receive()
+                val want = activeTags()
+                if (want != subscribedSnapshot) write(socket, subscribeFrame(want))
+                if (want.isEmpty()) {
+                    socket.close()
+                    return@launch
+                }
+            }
+        }
         try {
             while (true) {
                 if (activeTags().isEmpty()) return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
@@ -169,9 +190,12 @@ class MeishanPushClient(
                 val want = activeTags()
                 if (want != subscribedSnapshot) write(socket, subscribeFrame(want))
                 if (want.isEmpty()) return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
+                // 消费 acquire/release 发出的唤醒；真正的写入在下一轮读完后完成，避免并发写 socket。
+                while (subscriptionWakeup.tryReceive().isSuccess) Unit
             }
         } finally {
             heartbeat.cancel()
+            subscriptionWatcher.cancel()
         }
         error("online loop exited unexpectedly")
     }
@@ -222,9 +246,16 @@ class MeishanPushClient(
                 val content = runCatching { JSONObject(contentText) }.getOrNull() ?: return
                 val tag = content.optString("tag")
                 if (tag.isBlank()) return
-                val pushTime = content.optString("pushTime")
-                if (isStale(pushTime)) return
-                val busInfos: JSONArray = content.optJSONArray("busInfos") ?: JSONArray()
+                val pushTime = content.optString("pushTime").trim()
+                val parsedTime = parsePushTime(pushTime) ?: return
+                if (isStale(parsedTime)) return
+                // 新文档未确认增量协议，缺少 busInfos 的帧不是“空车全量帧”，直接隔离。
+                val busInfos: JSONArray = content.optJSONArray("busInfos") ?: return
+                synchronized(refsLock) {
+                    val previous = latestPushTimeByTag[tag]
+                    if (previous != null && parsedTime <= previous) return
+                    latestPushTimeByTag[tag] = parsedTime
+                }
                 _frames.tryEmit(MeishanPushFrame(tag, pushTime, busInfos))
             }
             MeishanPushProtocol.MSG_HEARTBEAT,
@@ -233,11 +264,14 @@ class MeishanPushClient(
         }
     }
 
-    private fun isStale(pushTime: String): Boolean {
-        val parsed = runCatching {
-            LocalDateTime.parse(pushTime.trim().replace(' ', 'T')).toInstant(BEIJING)
-        }.getOrNull() ?: return false
-        return abs(wallClock.now().toEpochMilliseconds() - parsed.toEpochMilliseconds()) > STALE_AFTER_MS
+    private fun parsePushTime(pushTime: String): Long? = runCatching {
+        LocalDateTime.parse(pushTime.replace(' ', 'T')).toInstant(BEIJING).toEpochMilliseconds()
+    }.getOrNull()
+
+    private fun isStale(parsedMillis: Long): Boolean {
+        val age = wallClock.now().toEpochMilliseconds() - parsedMillis
+        // 未来时间和超过 5 分钟的旧帧都隔离；pushTime 不是 GPS 采样时间，只用于新鲜度门槛。
+        return age < 0L || age > STALE_AFTER_MS
     }
 
     private fun connectFrame(): String = buildJsonObject {

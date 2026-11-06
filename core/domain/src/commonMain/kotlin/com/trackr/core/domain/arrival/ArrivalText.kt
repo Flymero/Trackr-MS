@@ -132,7 +132,7 @@ object ArrivalText {
      */
     fun stateForBus(targetOrder: Int, bus: LiveBus): ArrivalState {
         if (targetOrder <= 0 || bus.order <= 0) {
-            return if (ArrivalRules.isBusStopped(bus) || ArrivalRules.isEtaImminent(bus.etaSeconds)) {
+            return if (ArrivalRules.isArrivingNow(bus)) {
                 ArrivalState.Arriving()
             } else {
                 ArrivalState.OnTheWay(stopsAway = null, minutes = minutesOf(bus.etaSeconds))

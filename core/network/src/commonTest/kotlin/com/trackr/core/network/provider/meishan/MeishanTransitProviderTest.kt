@@ -258,7 +258,7 @@ class MeishanTransitProviderTest {
         assertEquals(base.stops, detail.stops)
         assertEquals(base.reverseDirection, detail.reverseDirection)
         assertEquals(base.statusDescription, detail.statusDescription)
-        assertEquals(mapOf("byId" to 1, "list" to 1), backend.hits, "套用推送不发 HTTP")
+        assertEquals(mapOf("byId" to 1), backend.hits, "套用推送不发 HTTP；copyId 应复用详情响应")
     }
 
     @Test
@@ -509,7 +509,7 @@ class MeishanTransitProviderTest {
         assertEquals("千禾味业", detail.line.endStop)
         assertEquals(3, detail.stops.size)
         assertEquals("ms-st:2", detail.stops[1].stopId)
-        assertEquals("票价 1 元", detail.statusDescription)
+        assertEquals("", detail.statusDescription)
         assertEquals("ms:1_1_1", detail.reverseDirection?.lineId)
         assertEquals(1, detail.buses.size)
         assertEquals("川Z10091D", detail.buses[0].plateOrFleetNo)

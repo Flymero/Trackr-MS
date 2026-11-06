@@ -207,6 +207,8 @@ class TransitProviderCoordinator(
         val targetProvider = providers[mode.dataSource]
 
         if (targetProvider != null && targetProvider.supportsLocationRadar()) {
+            // 官方源区分「请求失败」和「附近没有站」：失败往上抛，调用方保留上一份结果
+            if (mode == EngineMode.MEISHAN) return targetProvider.getNearbyStops(city, wgsLat, wgsLng, limit)
             return runCatching { targetProvider.getNearbyStops(city, wgsLat, wgsLng, limit) }.getOrDefault(emptyList())
         }
 

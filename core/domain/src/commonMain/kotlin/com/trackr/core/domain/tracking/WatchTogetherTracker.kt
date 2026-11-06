@@ -279,6 +279,7 @@ internal object WatchTogetherTracker {
                 stopsRemaining = -1,
                 etaSeconds = -1,
                 isArrived = false,
+                hasAuthoritativeArrival = false,
                 hasData = false,
                 statusText = ""
             )
@@ -353,6 +354,7 @@ internal object WatchTogetherTracker {
                 stopsRemaining = -1,
                 etaSeconds = -1,
                 isArrived = false,
+                hasAuthoritativeArrival = false,
                 hasData = true,
                 statusText = lp.statusText
             )
@@ -365,6 +367,7 @@ internal object WatchTogetherTracker {
             stopsRemaining = best.stopsTo(a).coerceAtLeast(0),
             etaSeconds = best.etaSeconds,
             isArrived = arrived,
+            hasAuthoritativeArrival = best.hasAuthoritativeArrival,
             hasData = true,
             statusText = lp.statusText
         )
@@ -445,7 +448,8 @@ internal object WatchTogetherTracker {
         currentBusOrder = wl.busOrder,
         stopsRemaining = if (wl.isArrived) 0 else wl.stopsRemaining,
         etaSeconds = wl.etaSeconds,
-        isBusArrivedAtStop = wl.isArrived
+        isBusArrivedAtStop = wl.isArrived,
+        hasAuthoritativeArrival = wl.hasAuthoritativeArrival
     )
 
     /** 等车阶段的会话：排第一的线写进 leg / state */
@@ -466,6 +470,7 @@ internal object WatchTogetherTracker {
             else -> previous.startTrackingOrder
         }
         val state = previous.copy(
+            hasAuthoritativeArrival = primary.hasAuthoritativeArrival,
             lineId = primary.line.lineId,
             lineName = primary.line.lineName,
             endStopName = primary.line.endStopName,

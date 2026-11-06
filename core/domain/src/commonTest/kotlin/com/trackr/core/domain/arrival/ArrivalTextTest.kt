@@ -17,6 +17,7 @@ class ArrivalTextTest {
         order: Int,
         etaSeconds: Int = -1,
         isArrived: Boolean = false,
+        hasAuthoritativeArrival: Boolean = false,
         progress: Float = 0.5f,
         hasCoords: Boolean = true,
         id: String = "b$order"
@@ -26,6 +27,7 @@ class ArrivalTextTest {
         order = order,
         segmentProgress = progress,
         isArrived = isArrived,
+        hasAuthoritativeArrival = hasAuthoritativeArrival,
         wgsLat = if (hasCoords) 22.54 else 0.0,
         wgsLng = if (hasCoords) 113.95 else 0.0,
         etaSeconds = etaSeconds
@@ -114,9 +116,18 @@ class ArrivalTextTest {
     fun arriving_followsArrivalRules() {
         // 上游到站标志
         assertTrue(runningLine(5, listOf(bus(order = 5, isArrived = true))) is ArrivalState.Arriving)
-        // ETA 在 1..45 秒
+        // 未声明权威到站状态时，ETA 在 1..45 秒可以判为进站
         assertTrue(runningLine(5, listOf(bus(order = 5, etaSeconds = 45))) is ArrivalState.Arriving)
         assertFalse(runningLine(5, listOf(bus(order = 5, etaSeconds = 46))) is ArrivalState.Arriving)
+        // 眉山官方有 isArriveSite：ETA 很短也只能显示即将到站，不能冒充已到站
+        assertFalse(
+            runningLine(5, listOf(bus(order = 5, etaSeconds = 10, hasAuthoritativeArrival = true)))
+                is ArrivalState.Arriving
+        )
+        assertTrue(
+            runningLine(5, listOf(bus(order = 5, etaSeconds = 10, isArrived = true, hasAuthoritativeArrival = true)))
+                is ArrivalState.Arriving
+        )
         // ETA <= 0 不算到站
         assertFalse(runningLine(5, listOf(bus(order = 5, etaSeconds = 0))) is ArrivalState.Arriving)
         // 坐标有效时插值 >= 0.98 算停靠

@@ -57,7 +57,9 @@ data class MeishanLine(
     val backwardStartTime: String? = null,
     /** 方向 1 末班 "HH:mm"，可缺失或为 "00:00" */
     val backwardEndTime: String? = null,
-    val area: MeishanArea = MeishanArea.MEISHAN
+    val area: MeishanArea = MeishanArea.MEISHAN,
+    /** 列表记录自带的 `state` 原值；缺失为 null，含义未确认，只用于找推送副本标识 */
+    val state: Int? = null
 ) {
     /** 列表展示用：优先方向 0 起终点，缺失时回退方向 1 */
     val primaryText: String

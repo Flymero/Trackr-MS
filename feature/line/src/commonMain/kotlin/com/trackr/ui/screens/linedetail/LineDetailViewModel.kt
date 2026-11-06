@@ -31,6 +31,7 @@ import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCodeProvider
+import com.trackr.core.model.findStop
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.ui.components.elder.TTS_UNAVAILABLE_MESSAGE
 import com.trackr.ui.screens.linedetail.components.stationArrivalState
@@ -84,6 +85,7 @@ data class LineStatic(
  */
 data class LineLive(
     val buses: List<LiveBus>,
+    val idleBuses: List<LiveBus> = emptyList(),
     val operatingState: LineOperatingState = LineOperatingState.RUNNING,
     val statusDescription: String = "",
     val nextDepartureFromStart: String? = null,
@@ -412,15 +414,16 @@ class LineDetailViewModel(
             }
             result.onSuccess { detail ->
                 val selected = _uiState.value.selectedStop
-                // 初次加载或无选中站时，计算默认选中的候车站（首车前面一站）；用户已经在缓存的站表上点过站就保留
+                // 初次加载或无选中站时，计算默认选中的候车站（首车前面一站）；用户已经在缓存的站表上点过站就保留。
+                // 找回选中站时站序和站 ID 一起核对：服务端重排站序后按站 ID 找，不落到另一站上
                 val targetStop = if (selected == null || (isInitial && !userPickedStop)) {
                     if (initialTargetOrder != null && initialTargetOrder > 0) {
-                        detail.stops.find { it.order == initialTargetOrder } ?: calculateDefaultStop(detail)
+                        detail.stops.findStop(initialTargetOrder, initialStationId) ?: calculateDefaultStop(detail)
                     } else {
                         calculateDefaultStop(detail)
                     }
                 } else {
-                    detail.stops.find { it.order == selected.order } ?: calculateDefaultStop(detail)
+                    detail.stops.findStop(selected.order, selected.stopId) ?: calculateDefaultStop(detail)
                 }
 
                 applyDetail(detail, targetStop)
@@ -460,6 +463,7 @@ class LineDetailViewModel(
             val static = if (it.static == newStatic) it.static else newStatic
             val live = LineLive(
                 buses = detail.buses,
+                idleBuses = detail.idleBuses,
                 operatingState = detail.operatingState,
                 statusDescription = detail.statusDescription,
                 nextDepartureFromStart = detail.nextDepartureFromStart,
@@ -742,14 +746,19 @@ class LineDetailViewModel(
 
             if (switchGeneration != httpGeneration || currentLineId != reverse.lineId) return@launch
             reverseResult.onSuccess { revDetail ->
-                val oppositeStop = RouteProjectionMath.findOppositeStop(
+                val matched = RouteProjectionMath.findOppositeStop(
                     currentStop = currentStop,
                     reverseStops = revDetail.stops
-                ) ?: calculateDefaultStop(revDetail)
+                )
+                val oppositeStop = matched ?: calculateDefaultStop(revDetail)
 
                 applyDetail(revDetail, oppositeStop)
                 startPush(revDetail, oppositeStop)
                 _uiState.update { it.copy(panelMode = PanelMode.STATION_CARD, followedBusId = null) }
+                // 反向没有对应的站：明确告诉用户换了站，不悄悄选一个
+                if (matched == null && oppositeStop != null) {
+                    postMessage("反方向没有「${currentStop.name}」，已改为「${oppositeStop.name}」")
+                }
 
                 // 若找到了对应站，立即拉取到该站的精确 ETA
                 if (oppositeStop != null) {

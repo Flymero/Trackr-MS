@@ -6,9 +6,12 @@ import com.trackr.core.data.repository.MeishanLineRepository
 import com.trackr.core.data.repository.RealtimeRepository
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.domain.math.RouteProjectionMath
+import com.trackr.core.model.DataSourceType
+import com.trackr.core.model.EngineMode
 import com.trackr.core.model.MeishanArea
 import com.trackr.core.model.MeishanLine
 import com.trackr.core.navigation.ScreenKey
+import com.trackr.core.network.remote.meishan.MeishanIds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -127,15 +130,31 @@ class LineListViewModel(
     }
 
     /**
-     * 按名称搜当前数据源，命中把 [ScreenKey.LineDetail] 交给 Route 打开现有详情页
-     * （实时到站、收藏、追踪都复用）；未命中提示，不静默失败。
+     * 打开线路详情（实时到站、收藏、追踪都复用现有详情页）。
+     * - 官方数据源：直接用这条记录的 `l_id` 打开，不按名称猜（线路名不唯一）；
+     * - 第三方数据源：按名称搜当前数据源，只认名称完全相同的线路；未命中提示，不静默失败。
      */
     private fun openLine(line: MeishanLine) {
         val state = _uiState.value
         if (state.openingLineId != null || state.pendingLineDetail != null) return
+        val city = settings.selectedCity.value
+        if (settings.engineMode.value == EngineMode.MEISHAN) {
+            // 有方向 0 文本就开方向 0，否则开方向 1（与线路摘要的方向顺序一致）
+            val direction = if (line.forwardText == null && line.backwardText != null) 1 else 0
+            _uiState.update {
+                it.copy(
+                    pendingLineDetail = ScreenKey.LineDetail(
+                        cityId = city.cityId,
+                        lineId = MeishanIds.encode(line.area.areaId, line.lId, direction),
+                        source = DataSourceType.MEISHAN,
+                        lineName = line.name
+                    )
+                )
+            }
+            return
+        }
         _uiState.update { it.copy(openingLineId = line.lId) }
         viewModelScope.launch {
-            val city = settings.selectedCity.value
             // search 本身返回 Result；这里再兜一层非取消异常，失败按「未覆盖」提示
             val searchResult = try {
                 realtime.search(city, line.name)
@@ -144,8 +163,8 @@ class LineListViewModel(
             } catch (_: Exception) {
                 null
             }
-            val summary = searchResult?.getOrNull()?.lines
-                ?.firstOrNull { it.name == line.name || it.name.contains(line.name) || line.name.contains(it.name) }
+            // 名称包含关系会把「1路」配到「11路」：只认完全相同的名称
+            val summary = searchResult?.getOrNull()?.lines?.firstOrNull { it.name == line.name }
             val direction = summary?.primaryDirection
             if (summary != null && direction != null) {
                 _uiState.update {

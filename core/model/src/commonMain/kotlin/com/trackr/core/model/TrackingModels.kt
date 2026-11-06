@@ -104,6 +104,8 @@ data class WatchedLine(
     val stopsRemaining: Int = -1,
     val etaSeconds: Int = -1,
     val isArrived: Boolean = false,
+    /** 数据源明确给出停靠状态：ETA 不能替代到站标志 */
+    val hasAuthoritativeArrival: Boolean = false,
     val hasData: Boolean = false,
     val statusText: String = "",
     val candidateBusId: String? = null,

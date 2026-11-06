@@ -119,6 +119,7 @@ internal object GroupLegTracker {
             currentBusProgress = picked?.segmentProgress ?: session.currentBusProgress,
             stopsRemaining = picked?.stopsTo(session.targetOrder)?.coerceAtLeast(0) ?: session.stopsRemaining,
             etaSeconds = picked?.etaSeconds ?: session.etaSeconds,
+            hasAuthoritativeArrival = session.hasAuthoritativeArrival || picked?.hasAuthoritativeArrival == true,
             // 乘车区间从上车站算起
             startTrackingOrder = if (boardOrder > 0) boardOrder else session.startTrackingOrder,
             isBusArrivedAtStop = false,
@@ -268,6 +269,7 @@ internal object GroupLegTracker {
                     currentBusId = candidateId,
                     currentBusOrder = candidate?.order ?: result.state.currentBusOrder,
                     currentBusProgress = candidate?.segmentProgress ?: result.state.currentBusProgress,
+                    hasAuthoritativeArrival = candidate?.hasAuthoritativeArrival ?: result.state.hasAuthoritativeArrival,
                     stopsRemaining = 0,
                     etaSeconds = candidate?.etaSeconds ?: -1,
                     isBusArrivedAtStop = true,
@@ -284,6 +286,7 @@ internal object GroupLegTracker {
         val order = bus?.order ?: session.currentBusOrder
         val stopsToDrop = (bus?.stopsTo(session.targetOrder) ?: (session.targetOrder - order)).coerceAtLeast(0)
         val locked = BoardingDetector.clearBoardingFields(session).copy(
+            hasAuthoritativeArrival = session.hasAuthoritativeArrival || bus?.hasAuthoritativeArrival == true,
             legPhase = LegPhase.ON_BOARD,
             lockedBusId = busId,
             currentBusId = busId,

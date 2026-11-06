@@ -281,10 +281,10 @@ class BusHomeViewModel(
             }
             val targetCity = cityOverride ?: _uiState.value.currentCity
             val result = realtime.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
-            val stops = result.getOrNull().orEmpty()
             edit {
                 it.copy(
-                    nearbyStops = stops,
+                    // 同城刷新失败保留上一份结果，不显示成「附近没有站」；换城失败不能留着旧城的站
+                    nearbyStops = result.getOrNull() ?: if (cityOverride == null) it.nearbyStops else emptyList(),
                     isLoadingNearby = false
                 )
             }
@@ -310,6 +310,7 @@ class BusHomeViewModel(
      */
     fun refresh(switchCity: Boolean = false) {
         viewModelScope.launch {
+            val cityBefore = _uiState.value.currentCity
             edit { it.copy(isRefreshing = true, isLocating = true, locationError = null) }
 
             val favJob = launch {
@@ -381,26 +382,27 @@ class BusHomeViewModel(
                 }
 
                 val firstResult = realtime.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
-                var stops = firstResult.getOrNull().orEmpty()
+                var stops = firstResult.getOrNull()
 
                 // 人不在已选城市（如出差在外）时，GPS 坐标查不到该城市的站点：改用已选城市中心点再查一次
-                if (stops.isEmpty() && gpsLocation != null && !targetCity.matchesCity(_uiState.value.locatedCity)) {
+                if (stops?.isEmpty() == true && gpsLocation != null && !targetCity.matchesCity(_uiState.value.locatedCity)) {
                     val center = ProvinceCityCatalog.findCityCenterCoordinates(targetCity.cityName)
                     if (center != null) {
                         stops = realtime.getNearbyStops(targetCity, center.first, center.second, limit = NEARBY_STOPS_LIMIT)
-                            .getOrNull().orEmpty()
+                            .getOrNull()
                         edit { it.copy(currentLat = center.first, currentLng = center.second) }
                     }
                 }
 
                 edit {
                     it.copy(
-                        nearbyStops = stops,
+                        // 同城刷新失败保留上一份结果，不显示成「附近没有站」；换了城市就不留旧城的站
+                        nearbyStops = stops ?: if (targetCity.matchesCity(cityBefore)) it.nearbyStops else emptyList(),
                         isLoadingNearby = false
                     )
                 }
                 // 没连上网时附近站会空着：说一句，不然看着像「附近没站」
-                if (firstResult.isFailure && stops.isEmpty()) {
+                if (firstResult.isFailure && _uiState.value.nearbyStops.isEmpty()) {
                     addMessage(NEARBY_FAILED, elderText = NEARBY_FAILED_ELDER)
                 }
             }

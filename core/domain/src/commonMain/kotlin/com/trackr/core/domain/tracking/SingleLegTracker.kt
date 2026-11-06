@@ -120,6 +120,7 @@ internal object SingleLegTracker {
         }
 
         val baseState = session.copy(
+            hasAuthoritativeArrival = session.hasAuthoritativeArrival || best.hasAuthoritativeArrival,
             startTrackingOrder = startOrder,
             currentBusId = best.busId,
             currentBusOrder = best.order,

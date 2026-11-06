@@ -55,19 +55,27 @@ object RouteProjectionMath {
     }
 
     /**
-     * 在反向线路站表中查找与当前选中站对应的同名候车站：
-     * 1. 优先精确匹配全站名
-     * 2. 次选匹配剥离括号后的核心站名（唯一命中时采用）
-     * 3. 兜底返回按比例对称的站点或首站
+     * 在反向线路站表中查找与当前选中站对应的候车站：
+     * 1. 同一个站 ID（双向共用站点）
+     * 2. 全站名相同；多个同名时取离当前站最近的
+     * 3. 剥离括号后的核心站名唯一命中
+     * 都找不到返回 null，由调用方决定默认站；不兜底首站（换向后选错站比不选更糟）
      */
     fun findOppositeStop(currentStop: BusStop, reverseStops: List<BusStop>): BusStop? {
         if (reverseStops.isEmpty()) return null
-        reverseStops.firstOrNull { it.name == currentStop.name }?.let { return it }
+        reverseStops.firstOrNull { it.stopId.isNotBlank() && it.stopId == currentStop.stopId }?.let { return it }
+        val exact = reverseStops.filter { it.name == currentStop.name }
+        if (exact.isNotEmpty()) return exact.nearestTo(currentStop)
         val core = coreStopName(currentStop.name)
         val coreMatches = reverseStops.filter { coreStopName(it.name) == core }
-        if (coreMatches.size == 1) return coreMatches.first()
-        return coreMatches.firstOrNull() ?: reverseStops.firstOrNull()
+        return coreMatches.singleOrNull()
     }
+
+    /** 多个候选时按与 [stop] 的直线距离取最近；坐标缺失的排后，全缺失时取第一个 */
+    private fun List<BusStop>.nearestTo(stop: BusStop): BusStop =
+        if (size == 1) first() else minBy {
+            calculateDistanceMeters(stop.wgsLat, stop.wgsLng, it.wgsLat, it.wgsLng) ?: Int.MAX_VALUE
+        }
 
     /**
      * 格式化剩余秒数为可读中文文案
