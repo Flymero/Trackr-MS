@@ -655,12 +655,16 @@ private fun HeroCard(
                     onToggleCollapsed = onToggleCollapsed
                 )
 
-                PanelMode.BUS_LIST -> BusListContent(
-                    lineDetail = rememberLineDetail(static, state.live),
-                    selectedStop = state.selectedStop,
-                    onBack = { onEvent(LineDetailEvent.BackFromPanel) },
-                    onSelectBus = { onEvent(LineDetailEvent.FollowBus(it)) }
-                )
+                PanelMode.BUS_LIST -> {
+                    val detail = rememberLineDetail(static, state.live)
+                    BusListContent(
+                        lineDetail = detail,
+                        selectedStop = state.selectedStop,
+                        idleBuses = detail.idleBuses,
+                        onBack = { onEvent(LineDetailEvent.BackFromPanel) },
+                        onSelectBus = { onEvent(LineDetailEvent.FollowBus(it)) }
+                    )
+                }
 
                 PanelMode.BUS_FOLLOW -> {
                     val detail = rememberLineDetail(static, state.live)
@@ -683,6 +687,7 @@ private fun rememberLineDetail(static: LineStatic, live: LineLive?): BusLineDeta
         reverseDirection = static.reverseDirection,
         stops = static.stops,
         buses = live?.buses.orEmpty(),
+        idleBuses = live?.idleBuses.orEmpty(),
         operatingState = live?.operatingState ?: LineOperatingState.RUNNING,
         statusDescription = live?.statusDescription.orEmpty(),
         nextDepartureFromStart = live?.nextDepartureFromStart,

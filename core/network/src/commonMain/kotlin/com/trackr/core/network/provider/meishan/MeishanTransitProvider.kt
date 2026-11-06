@@ -27,6 +27,7 @@ import com.trackr.core.network.remote.common.ServiceHours
 import com.trackr.core.network.remote.common.TimetableRules
 import com.trackr.core.network.remote.meishan.MeishanIds
 import com.trackr.core.network.remote.meishan.MeishanPayloadMissingException
+import com.trackr.core.network.remote.meishan.MeishanResponseFormatException
 import com.trackr.core.network.remote.meishan.MeishanThrottledException
 import com.trackr.core.network.remote.meishan.MeishanTransitClient
 import com.trackr.core.network.remote.meishan.intOrNull
@@ -520,8 +521,12 @@ class MeishanTransitProvider(
 
     private fun JSONObject.toBusLineDetail(ref: MeishanIds.Ref, request: LineDetailRequest): BusLineDetail {
         // 响应与请求不一致（线路或方向）时不能把它套到这个 lineId 上
-        intOrNull("l_id")?.let { if (it != ref.lId) throw IOException("眉山线路详情 l_id=$it 与请求 ${ref.lId} 不一致") }
-        intOrNull("state")?.let { if (it != ref.state) throw IOException("眉山线路详情 state=$it 与请求 ${ref.state} 不一致") }
+        intOrNull("l_id")?.let {
+            if (it != ref.lId) throw MeishanResponseFormatException("眉山线路详情 l_id 与请求不一致")
+        }
+        intOrNull("state")?.let {
+            if (it != ref.state) throw MeishanResponseFormatException("眉山线路详情 state 与请求不一致")
+        }
         val copyId = intOrNull("l_copy_id")?.takeIf { it > 0 }
         copyId?.let { rememberCopyId(ref, it) }
 

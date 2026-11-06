@@ -23,6 +23,8 @@ import com.trackr.core.model.RailMode
 import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
+import com.trackr.core.model.TransitProtocolFailure
+import com.trackr.core.model.TransitServiceFailure
 import com.trackr.core.model.WatchLine
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.testing.FakeAnnouncer
@@ -49,6 +51,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.io.IOException
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -157,6 +160,9 @@ private class FakeLineStopsCache(
         entries[key] = CachedLineStops(line, reverseDirection, stops, fetchedAtMillis = 0L)
     }
 }
+
+private class TestProtocolFailure(message: String) : IOException(message), TransitProtocolFailure
+private class TestServiceFailure(message: String) : IOException(message), TransitServiceFailure
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LineDetailViewModelTest {
@@ -1809,5 +1815,29 @@ class LineDetailViewModelTest {
         testScheduler.runCurrent()
         assertEquals(listOf("line_009"), trackingRepository.session.value?.watchTarget?.lines?.map { it.lineId })
         assertFalse(viewModel.activeTrackingSession.value.isActive)
+    }
+
+    @Test
+    fun lineDetail_failure_usesStableMessagesWithoutLeakingExceptionText() = runTest(main.dispatcher) {
+        val failures = listOf(
+            TestProtocolFailure("https://upstream.example/protocol") to "数据异常，请稍后重试",
+            TestServiceFailure("https://upstream.example/service") to "服务请求失败，请稍后重试",
+            IOException("https://upstream.example/network") to "网络请求失败，请检查网络后重试",
+            IllegalStateException("https://upstream.example/unknown") to "获取实时公交数据失败，请稍后重试"
+        )
+
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+        val original = viewModel.uiState.value
+        failures.forEach { (failure, expected) ->
+            fakeRepository.lineDetailResult = Result.failure(failure)
+            viewModel.refreshNow()
+            testScheduler.runCurrent()
+            val state = viewModel.uiState.value
+            assertEquals(expected, state.errorMessage)
+            assertFalse(state.errorMessage.orEmpty().contains("upstream.example"))
+            assertEquals(original.static, state.static)
+            assertEquals(original.live, state.live)
+        }
     }
 }

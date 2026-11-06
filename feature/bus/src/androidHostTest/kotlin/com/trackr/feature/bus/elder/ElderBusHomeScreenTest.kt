@@ -230,10 +230,19 @@ class ElderBusHomeScreenTest {
 
     @Test
     fun transitCode_visibleAfterScroll_oneTap() {
-        setContent(stateOf())
+        setContent(stateOf().copy(showTransitCodeButton = true))
         composeTestRule.onNodeWithTag(ElderBusHomeTags.LIST).performScrollToNode(hasText("高新园3 站"))
         composeTestRule.onNodeWithTag(SHOW_TRANSIT_CODE_TAG).assertIsDisplayed().performClick()
         assertEquals(BusHomeEvent.TransitCodeClicked, events.last())
+    }
+
+    @Test
+    fun transitCode_hiddenWhenSettingDisabled() {
+        setContent(stateOf().copy(showTransitCodeButton = false))
+
+        composeTestRule.onNodeWithTag(SHOW_TRANSIT_CODE_TAG).assertDoesNotExist()
+        composeTestRule.onNodeWithText("深圳").assertIsDisplayed()
+        composeTestRule.onNodeWithText("科技园站上车").assertIsDisplayed()
     }
 
     // ---- 事件 ----

@@ -1,5 +1,7 @@
 package com.trackr.core.network.remote.common
 
+import com.trackr.core.model.TransitProtocolFailure
+import com.trackr.core.model.TransitServiceFailure
 import com.trackr.core.network.json.JSONObject
 import com.trackr.core.network.testing.MockReply
 import com.trackr.core.network.testing.mockHttpClient
@@ -163,6 +165,32 @@ class BaseTransitApiClientTest {
             assertTrue(msg.contains("https://example.com/v3/direction"))
             assertFalse(msg.contains("SECRET_KEY"))
             assertFalse(msg.contains("key="))
+        }
+    }
+
+    @Test
+    fun testExecuteJson_distinguishesProtocolAndServiceFailures() = runBlocking {
+        val http = mockHttpClient { request ->
+            when (request.encodedPath) {
+                "/empty" -> MockReply("")
+                "/malformed" -> MockReply("<html>not JSON</html>")
+                else -> MockReply("{}", code = 503)
+            }
+        }
+        try {
+            val client = TestTransitApiClient(http)
+            for (path in listOf("empty", "malformed", "service")) {
+                try {
+                    client.testExecuteJson { url("https://example.com/$path?key=SECRET_KEY") }
+                    fail("Expected failure for $path")
+                } catch (error: IOException) {
+                    assertEquals(path != "service", error is TransitProtocolFailure)
+                    assertEquals(path == "service", error is TransitServiceFailure)
+                    assertFalse(error.message.orEmpty().contains("SECRET_KEY"))
+                }
+            }
+        } finally {
+            http.close()
         }
     }
 

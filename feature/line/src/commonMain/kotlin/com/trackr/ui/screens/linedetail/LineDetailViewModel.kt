@@ -33,6 +33,8 @@ import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCodeProvider
+import com.trackr.core.model.TransitProtocolFailure
+import com.trackr.core.model.TransitServiceFailure
 import com.trackr.core.model.findStop
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.ui.components.elder.TTS_UNAVAILABLE_MESSAGE
@@ -51,6 +53,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
+import kotlinx.io.IOException
 import kotlinx.datetime.toLocalDateTime
 import kotlin.concurrent.Volatile
 import kotlin.concurrent.atomics.AtomicInt
@@ -514,7 +517,7 @@ class LineDetailViewModel(
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        errorMessage = "获取实时公交数据失败：${ex.message ?: "网络异常"}"
+                        errorMessage = lineDetailErrorMessage(ex)
                     )
                 }
             }
@@ -527,6 +530,14 @@ class LineDetailViewModel(
             activeLoads.decrementAndFetch()
         }
         return applied
+    }
+
+    /** 线路详情只展示稳定产品文案，不把上游异常消息（可能包含 URL）透传到 UI。 */
+    private fun lineDetailErrorMessage(error: Throwable): String = when {
+        error is TransitProtocolFailure -> "数据异常，请稍后重试"
+        error is TransitServiceFailure -> "服务请求失败，请稍后重试"
+        error is IOException -> "网络请求失败，请检查网络后重试"
+        else -> "获取实时公交数据失败，请稍后重试"
     }
 
     /** 把一份新数据拆成静态 / 实时两半写进状态；静态没变就沿用旧实例 */

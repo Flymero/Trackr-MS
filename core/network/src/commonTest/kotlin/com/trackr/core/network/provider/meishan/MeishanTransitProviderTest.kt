@@ -7,6 +7,7 @@ import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.model.LineOperatingState
 import com.trackr.core.model.TransitCity
+import com.trackr.core.model.TransitProtocolFailure
 import com.trackr.core.network.json.JSONArray
 import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
@@ -713,6 +714,23 @@ class MeishanTransitProviderTest {
         assertEquals("眉山", provider.resolveCityByLocation(30.06, 103.82))
         assertEquals("仁寿", provider.resolveCityByLocation(30.0, 104.14))
         assertEquals(null, provider.resolveCityByLocation(39.9, 116.4)) // 北京：不在服务区
+    }
+
+    @Test
+    fun lineDetail_protocolFailures_areTyped() = runBlocking {
+        val malformedBackend = MockBackend().apply { detailResponse = "not-json" }
+        val malformed = runCatching {
+            newProvider(malformedBackend).getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        }.exceptionOrNull()
+        assertTrue(malformed is TransitProtocolFailure)
+
+        val mismatchBackend = MockBackend().apply {
+            detailResponse = lineDetailJson(hit = 1).replace("\"l_id\":1", "\"l_id\":2")
+        }
+        val mismatch = runCatching {
+            newProvider(mismatchBackend).getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        }.exceptionOrNull()
+        assertTrue(mismatch is TransitProtocolFailure)
     }
 
     @Test

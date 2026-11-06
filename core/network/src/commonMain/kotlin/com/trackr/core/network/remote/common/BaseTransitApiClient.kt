@@ -1,6 +1,8 @@
 package com.trackr.core.network.remote.common
 
 import com.trackr.core.domain.math.RouteProjectionMath
+import com.trackr.core.model.TransitProtocolFailure
+import com.trackr.core.model.TransitServiceFailure
 import com.trackr.core.model.sanitizePlateOrFleetNo
 import com.trackr.core.network.json.JSONObject
 import io.ktor.client.HttpClient
@@ -15,6 +17,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
+
+private class ResponseProtocolException(message: String, cause: Throwable? = null) :
+    IOException(message, cause), TransitProtocolFailure
+
+private class ResponseServiceException(message: String) : IOException(message), TransitServiceFailure
 
 /**
  * 实时公交 API 客户端抽象基类。
@@ -59,13 +66,13 @@ abstract class BaseTransitApiClient(
         return withContext(Dispatchers.IO) {
             val target = response.safeUrl
             if (!response.isSuccessful) {
-                throw IOException("HTTP ${response.code} error for $target")
+                throw ResponseServiceException("HTTP ${response.code} error for $target")
             }
-            val bodyStr = response.body.ifBlank { throw IOException("Empty response body from $target") }
+            val bodyStr = response.body.ifBlank { throw ResponseProtocolException("Empty response body from $target") }
             try {
                 JSONObject(bodyStr)
             } catch (e: Exception) {
-                throw IOException("Malformed JSON response from $target: ${e.message}", e)
+                throw ResponseProtocolException("Malformed JSON response from $target", e)
             }
         }
     }

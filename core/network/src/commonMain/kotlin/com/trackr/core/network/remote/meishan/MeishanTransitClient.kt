@@ -4,6 +4,8 @@ import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.domain.platform.ProcessMonotonicClock
 import com.trackr.core.model.MeishanArea
 import com.trackr.core.model.MeishanLine
+import com.trackr.core.model.TransitProtocolFailure
+import com.trackr.core.model.TransitServiceFailure
 import com.trackr.core.network.json.JSONArray
 import com.trackr.core.network.json.JSONObject
 import com.trackr.core.network.remote.common.BaseTransitApiClient
@@ -23,10 +25,17 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
 
 /** 业务码成功但缺少该接口的有效载荷（如只有 `{"code":101}`）：不是空数据 */
-class MeishanPayloadMissingException(message: String) : IOException(message)
+class MeishanPayloadMissingException(message: String) : IOException(message), TransitProtocolFailure
+
+/** 眉山响应内容不是可解析的 JSON。 */
+class MeishanResponseFormatException(message: String, cause: Throwable? = null) :
+    IOException(message, cause), TransitProtocolFailure
+
+/** 眉山 HTTP / 业务码失败；请求链路可用，但服务没有提供有效业务结果。 */
+class MeishanServiceException(message: String) : IOException(message), TransitServiceFailure
 
 /** 服务端返回 403 / 429：暂停请求一段时间，不换身份重试 */
-class MeishanThrottledException(message: String) : IOException(message)
+class MeishanThrottledException(message: String) : IOException(message), TransitServiceFailure
 
 /**
  * 眉山公交官方后台客户端（doc/勘误后的参考文档 主文 §3）。
@@ -175,16 +184,16 @@ class MeishanTransitClient(
             throw MeishanThrottledException("眉山$what HTTP ${response.code}，暂停请求（${response.safeUrl}）")
         }
         if (!response.isSuccessful) {
-            throw IOException("眉山$what HTTP ${response.code}（${response.safeUrl}，areaId=${area.areaId}）")
+            throw MeishanServiceException("眉山$what HTTP ${response.code}（${response.safeUrl}，areaId=${area.areaId}）")
         }
         val data = try {
             JSONObject(response.body)
         } catch (e: Exception) {
-            throw IOException("眉山$what 响应不是 JSON（${response.safeUrl}）", e)
+            throw MeishanResponseFormatException("眉山$what 响应不是 JSON（${response.safeUrl}）", e)
         }
         val code = data.intOrNull("code")
         if (code != CODE_SUCCESS) {
-            throw IOException("眉山$what 业务失败 code=${code ?: "缺失"}（${response.safeUrl}）")
+            throw MeishanServiceException("眉山$what 业务失败 code=${code ?: "缺失"}（${response.safeUrl}）")
         }
         return data
     }

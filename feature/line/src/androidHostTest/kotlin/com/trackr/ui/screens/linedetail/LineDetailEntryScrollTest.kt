@@ -144,6 +144,18 @@ class LineDetailEntryScrollTest {
     }
 
     @Test
+    fun busListMode_showsIdleBusesThroughHeroCardBridge() {
+        val idleBus = LiveBus(busId = "idle", plateOrFleetNo = "沪B5678", order = 0)
+        val state = stateOf(entryStopOrder = 20).copy(
+            panelMode = PanelMode.BUS_LIST,
+            live = LineLive(buses = emptyList(), idleBuses = listOf(idleBus))
+        )
+        show(state)
+
+        composeTestRule.onNodeWithText("暂无在途车辆 · 1 辆停场/非运营车辆").assertIsDisplayed()
+    }
+
+    @Test
     fun horizontalMode_tallCardScrollsWholePageDownToRail() {
         // 横排整页一起滚、主卡不限高：30 辆车把主卡撑高，走向条被推到首屏之外
         val buses = (1..30).map { index ->

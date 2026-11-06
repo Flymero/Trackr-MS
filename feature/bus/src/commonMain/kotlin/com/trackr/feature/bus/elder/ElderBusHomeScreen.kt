@@ -134,7 +134,11 @@ fun ElderBusHomeScreen(
                 onSettingsClick = { onEvent(BusHomeEvent.OpenSettings) }
             )
         },
-        bottomBar = { ShowTransitCodeButton(onClick = { onEvent(BusHomeEvent.TransitCodeClicked) }) }
+        bottomBar = {
+            if (state.showTransitCodeButton) {
+                ShowTransitCodeButton(onClick = { onEvent(BusHomeEvent.TransitCodeClicked) })
+            }
+        }
     ) { innerPadding ->
         val dimens = TrackrTheme.dimens
         LazyColumn(
