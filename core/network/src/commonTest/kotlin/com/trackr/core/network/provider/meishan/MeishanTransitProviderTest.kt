@@ -263,6 +263,55 @@ class MeishanTransitProviderTest {
     }
 
     @Test
+    fun pushFrame_loneEmptyFramesIgnoredUntilThreshold() = runBlocking {
+        val clock = FakeClock()
+        val provider = newProvider(MockBackend(), clock)
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val expected = "11_0"
+        // 前两帧空（服务端数据抖动）：忽略，调用方保持当前详情不闪断
+        assertNull(provider.applyPushFrame(base, pushFrame(time = "2026-11-04 18:00:00"), expectedTag = expected))
+        clock.advanceBy(3_000)
+        assertNull(provider.applyPushFrame(base, pushFrame(time = "2026-11-04 18:00:03"), expectedTag = expected))
+        // 非空帧清零计数，随后孤立空帧重新从 1 数起
+        clock.advanceBy(3_000)
+        assertNotNull(provider.applyPushFrame(base, pushFrame(pushBus(), time = "2026-11-04 18:00:06"), expectedTag = expected))
+        clock.advanceBy(3_000)
+        assertNull(provider.applyPushFrame(base, pushFrame(time = "2026-11-04 18:00:09"), expectedTag = expected))
+        clock.advanceBy(3_000)
+        assertNull(provider.applyPushFrame(base, pushFrame(time = "2026-11-04 18:00:12"), expectedTag = expected))
+        // 连续空帧达到阈值：按收车/停运正常清空
+        clock.advanceBy(3_000)
+        val cleared = assertNotNull(provider.applyPushFrame(base, pushFrame(time = "2026-11-04 18:00:15"), expectedTag = expected))
+        assertTrue(cleared.buses.isEmpty() && cleared.idleBuses.isEmpty())
+        // 同一帧重放（选站重放/多订阅共用解析）不重复计数：重放仍是清空结果而不是被拒
+        val replay = provider.applyPushFrame(base, pushFrame(time = "2026-11-04 18:00:15"), expectedTag = expected)
+        assertNotNull(replay)
+        assertTrue(replay.buses.isEmpty())
+    }
+
+    @Test
+    fun pushFrame_dropsBusesFromMismatchedArea() = runBlocking {
+        val provider = newProvider(MockBackend())
+        val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val frame = pushFrame(
+            pushBus(plate = "川Z10091D", index = 2),
+            pushBus(plate = "川Z99999", index = 2).replace("}", ",\"areaId\":2}"),
+            time = "2026-11-04 18:00:00"
+        )
+        val detail = assertNotNull(provider.applyPushFrame(base, frame, expectedTag = "11_0"))
+        assertEquals(listOf("川Z10091D"), detail.buses.map { it.plateOrFleetNo }, "异区域车辆逐辆剔除，本区域保留")
+    }
+
+    @Test
+    fun lineDetail_mapsRemarkToPriceAndKeepsRawRemark() = runBlocking {
+        val provider = newProvider(MockBackend())
+        val detail = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        assertEquals("1 元", detail.line.price, "l_remark「票价 1 元」剥掉前缀后进 price，供「票价 %1\$s」展示")
+        assertEquals("1 元", detail.reverseDirection?.price, "票价同行，反方向直接带上")
+        assertEquals("票价 1 元", detail.remark, "remark 保留原始文案")
+    }
+
+    @Test
     fun pushFrame_reportedSpeedWinsAndReplayRecalculatesOnlyTargetEta() = runBlocking {
         val clock = FakeClock()
         val provider = newProvider(MockBackend(), clock)

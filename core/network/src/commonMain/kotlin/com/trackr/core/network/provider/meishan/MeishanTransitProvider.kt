@@ -112,6 +112,13 @@ class MeishanTransitProvider(
         private const val MAX_STILL_BUSES = 256
         private const val MAX_COPY_IDS = 256
 
+        /**
+         * 连续空帧清空阈值：推送帧约 3 秒一帧，单个/少量空 busInfos 是服务端数据抖动
+         * （doc/眉山TCP推送抖动观察-2026-11-07.md）。不足阈值的空帧直接忽略，避免 HTTP
+         * 暂停期间车辆列表闪成「暂无运营车辆」；真正的收车/停运在连续空帧达到阈值后正常清空。
+         */
+        private const val EMPTY_FRAME_CLEAR_THRESHOLD = 3
+
         /** 站点 ID 前缀：官方 s_id 打包进通用 stopId */
         const val STOP_ID_PREFIX = "ms-st:"
 
@@ -377,14 +384,33 @@ class MeishanTransitProvider(
         if (expectedTag.isNullOrBlank() || frame.tag != expectedTag) return null
         val copyId = expectedTag.substringBefore('_').toIntOrNull()
         val key = PushFrameKey(base.line.lineId, frame.tag, frame.pushTime, base.stops)
-        val parsed = synchronized(pushFrameLock) {
+        // Pair 第二个元素：是否缓存未命中的新帧（多订阅/选站重放共用解析，不重复计数）
+        val (parsed, isNewFrame) = synchronized(pushFrameLock) {
             // 多订阅和选站重放共用不带 ETA 的车辆，静止计时每帧只更新一次。
-            parsedPushFrames[key] ?: parseBuses(ref, frame.busInfos, base.stops, copyId).also { parsed ->
+            val cached = parsedPushFrames[key]
+            if (cached == null) {
+                val parsed = parseBuses(ref, frame.busInfos, base.stops, copyId)
                 if (parsedPushFrames.size >= MAX_CACHED_PUSH_FRAMES) {
                     parsedPushFrames.remove(parsedPushFrames.keys.first())
                 }
                 parsedPushFrames[key] = parsed
+                parsed to true
+            } else {
+                cached to false
             }
+        }
+        if (isNewFrame) {
+            synchronized(pushFrameLock) {
+                if (parsed.isEmpty) {
+                    emptyFrameRuns[frame.tag] = (emptyFrameRuns[frame.tag] ?: 0) + 1
+                } else {
+                    emptyFrameRuns.remove(frame.tag)
+                }
+            }
+        }
+        if (parsed.isEmpty && (emptyFrameRuns[frame.tag] ?: 0) < EMPTY_FRAME_CLEAR_THRESHOLD) {
+            // 不足阈值的空帧按服务端抖动忽略：返回 null，调用方保持当前详情不变。
+            return null
         }
         // 首末班可能在 HTTP 快照之后跨过边界，重放同一帧也必须重新判断。
         val scheduled = splitBySchedule(parsed, base.stops, base.line.firstTime, base.line.lastTime)
@@ -403,6 +429,9 @@ class MeishanTransitProvider(
 
     private val pushFrameLock = SynchronizedObject()
     private val parsedPushFrames = linkedMapOf<PushFrameKey, ParsedBuses>()
+
+    /** 每个推送 tag 的连续空帧计数（新帧才累计，非空帧清零）；达到阈值才允许清空车辆列表 */
+    private val emptyFrameRuns = HashMap<String, Int>()
 
     /** 官方后台没有班次接口，返回空表，调用方按首末班展示 */
     override suspend fun getTimetable(
@@ -519,6 +548,9 @@ class MeishanTransitProvider(
 
     // ---- 线路详情解析 ----
 
+    /** [l_remark] 自带「票价」字样（如「票 价 1 元 (另:空调开放1.5元)」），剥掉后 UI 的「票价 %1$s」才不重复 */
+    private fun String.stripFareLabel(): String = replaceFirst(Regex("^票\\s*价\\s*"), "").trim()
+
     private fun JSONObject.toBusLineDetail(ref: MeishanIds.Ref, request: LineDetailRequest): BusLineDetail {
         // 响应与请求不一致（线路或方向）时不能把它套到这个 lineId 上
         intOrNull("l_id")?.let {
@@ -537,6 +569,10 @@ class MeishanTransitProvider(
         val first = if (ref.state == 0) optString("start_time") else optString("xx_start_time")
         val last = if (ref.state == 0) optString("end_time") else optString("xx_end_time")
         val (startStop, endStop) = splitDirectionText(directionText)
+        // l_remark 是票价文案：剥掉自带「票价」字样放进 price 供详情页 meta 行展示；
+        // 反方向没有站表但票价同行，直接带上，方向切换后的详情会再校准。
+        val fare = optString("l_remark").trim()
+        val farePrice = fare.stripFareLabel()
 
         val line = BusLineDirection(
             lineId = MeishanIds.encode(area.areaId, ref.lId, ref.state),
@@ -547,6 +583,7 @@ class MeishanTransitProvider(
             endStop = endStop,
             firstTime = first.trim(),
             lastTime = last.trim(),
+            price = farePrice,
             source = DataSourceType.MEISHAN
         )
         // 反方向只有列表字段（无站表），方向切换时按它的 lineId 重新拉详情
@@ -563,6 +600,7 @@ class MeishanTransitProvider(
                 endStop = reverseEnd,
                 firstTime = reverseFirst.trim(),
                 lastTime = reverseLast.trim(),
+                price = farePrice,
                 source = DataSourceType.MEISHAN
             )
         }
@@ -570,7 +608,6 @@ class MeishanTransitProvider(
         val siteList = optJSONArray("siteList")
             ?: throw MeishanPayloadMissingException("眉山线路详情缺少 siteList（l_id=${ref.lId} state=${ref.state}）")
         val stops = parseStops(siteList)
-        val remark = optString("l_remark").trim()
 
         val busList = optJSONArray("busList")
             ?: return BusLineDetail(
@@ -580,7 +617,7 @@ class MeishanTransitProvider(
                 stops = stops,
                 buses = emptyList(),
                 operatingState = LineOperatingState.NO_REALTIME,
-                remark = remark
+                remark = fare
             )
         val scheduled = splitBySchedule(parseBuses(ref, busList, stops, copyId), stops, first, last)
         val targetPos = resolveTargetPos(stops, request.targetOrder, request.stationId)
@@ -591,7 +628,7 @@ class MeishanTransitProvider(
             buses = withEta(stops, scheduled.active, targetPos),
             operatingState = scheduled.state,
             idleBuses = scheduled.idle,
-            remark = remark
+            remark = fare
         )
     }
 
@@ -708,7 +745,10 @@ class MeishanTransitProvider(
     }
 
     /** 一次车辆快照的解析结果：[still] 是长时间未移动的车 */
-    private class ParsedBuses(val moving: List<LiveBus>, val still: List<LiveBus>)
+    private class ParsedBuses(val moving: List<LiveBus>, val still: List<LiveBus>) {
+        /** 解析后没有任何车辆（空帧，或车辆全部被过滤） */
+        val isEmpty: Boolean get() = moving.isEmpty() && still.isEmpty()
+    }
 
     /**
      * 车辆快照解析。
@@ -731,6 +771,10 @@ class MeishanTransitProvider(
             if (busState != null && busState != ref.state) continue
             val busCopyId = bus.intOrNull("l_copy_id")
             if (copyId != null && busCopyId != null && busCopyId != copyId) continue
+            // 眉山/仁寿 copyId 撞号，服务端错投的异区域车辆在此逐辆剔除；
+            // 仓库层已有整帧 areaId 门禁，这里是直接调用方的纵深防御。
+            val busAreaId = bus.intOrNull("areaId")
+            if (busAreaId != null && busAreaId != ref.areaId) continue
             val index = bus.intOrNull("index") ?: continue
             val position = stops.indexOfFirst { it.order == index }
             if (position < 0) continue
