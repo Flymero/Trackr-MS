@@ -1882,6 +1882,58 @@ class TrackingEngineTest {
     }
 
     @Test
+    fun watch_partialPoll_updatesDataButNeverDecidesBoarding() {
+        // 官方逐线推送场景：计划内 3 条线只来了 L1 的帧，L1 的车已在上车站
+        val atStopOnly = mapOf(
+            "L1" to listOf(stopBus("a", order = 5, arrived = true).copy(hasAuthoritativeArrival = true))
+        )
+        val partial = reduceWatch(
+            watchBegin(l325, lM194, l19),
+            stopPoll(*atStopOnly.map { it.key to it.value }.toTypedArray())
+        ).session
+        // 覆盖不全：不下结论（不自动上车、不写待选），但数据照常更新
+        assertNull(partial.boardChoice, "覆盖不全的轮询不下结论")
+        assertEquals(LegPhase.WAITING_BOARD, partial.state.legPhase)
+        assertEquals("a", partial.watchedLines.first { it.line.lineId == "L1" }.busId)
+
+        // 用户按「我上车了」，此时两条线的车都在站：两车歧义 → 写待选
+        val stopBuses = mapOf(
+            "L1" to listOf(stopBus("a", order = 5, arrived = true).copy(hasAuthoritativeArrival = true)),
+            "L2" to listOf(stopBus("b", order = 5, eta = 20)),
+            "L3" to emptyList()
+        )
+        val choiceRound = requireNotNull(TrackingEngine.confirmBoarded(partial, emptyList(), NOW_MILLIS, stopBuses))
+        val choice = assertNotNull(choiceRound.boardChoice)
+        assertEquals(setOf("a", "b"), choice.options.map { it.busId }.toSet())
+
+        // 之后又只来 L1 的帧：待选保持，不把歧义误判成单车自动上车
+        val afterPartial = reduceWatch(
+            choiceRound,
+            stopPoll(*atStopOnly.map { it.key to it.value }.toTypedArray())
+        ).session
+        assertNotNull(afterPartial.boardChoice, "部分轮询不改变待选")
+        assertEquals(LegPhase.WAITING_BOARD, afterPartial.state.legPhase)
+    }
+
+    @Test
+    fun watch_chooseBoardedBus_carriesAuthoritativeArrival() {
+        val stopBuses = mapOf(
+            "L1" to listOf(stopBus("a", order = 5, arrived = true).copy(hasAuthoritativeArrival = true)),
+            "L2" to listOf(stopBus("b", order = 5, eta = 20)),
+            "L3" to listOf(stopBus("c", order = 2, eta = 600))
+        )
+        val waiting = reduceWatch(
+            watchBegin(l325, lM194, l19),
+            stopPoll(*stopBuses.map { it.key to it.value }.toTypedArray())
+        ).session
+        val noFix = requireNotNull(TrackingEngine.confirmBoarded(waiting, emptyList(), NOW_MILLIS, stopBuses))
+        assertNotNull(noFix.boardChoice)
+        val chosen = requireNotNull(TrackingEngine.chooseBoardedBus(noFix, "a", NOW_MILLIS))
+        assertEquals(LegPhase.ON_BOARD, chosen.state.legPhase)
+        assertTrue(chosen.state.hasAuthoritativeArrival, "上的是权威停靠数据的车，重建会话必须带上权威标志")
+    }
+
+    @Test
     fun watch_multiLine_fastestIsPrimary() {
         val session = watchBegin(l325, lM194, l19)
         val result = reduceWatch(

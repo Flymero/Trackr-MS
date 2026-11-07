@@ -159,7 +159,8 @@ class MeishanPushClient(
         write(socket, connectFrame())
         awaitChannelAck(socket)
         socket.setReadTimeoutMs(45_000L)
-        write(socket, subscribeFrame(activeTags()))
+        // 新通道的服务端订阅状态是空的：即使快照相同也必须重发
+        writeSubscribe(socket, activeTags(), force = true)
     }
 
     private enum class OnlineExit { REBUILD, DISCONNECTED, NO_SUBSCRIPTIONS }
@@ -170,7 +171,7 @@ class MeishanPushClient(
             while (true) {
                 subscriptionWakeup.receive()
                 val want = activeTags()
-                if (want != subscribedSnapshot) write(socket, subscribeFrame(want))
+                writeSubscribe(socket, want)
                 if (want.isEmpty()) {
                     socket.close()
                     return@launch
@@ -180,7 +181,7 @@ class MeishanPushClient(
         try {
             while (true) {
                 if (activeTags().isEmpty()) {
-                    if (subscribedSnapshot.isNotEmpty()) write(socket, subscribeFrame(emptySet()))
+                    writeSubscribe(socket, emptySet())
                     return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
                 }
                 val text = socket.read() ?: return@coroutineScope OnlineExit.DISCONNECTED
@@ -190,9 +191,8 @@ class MeishanPushClient(
                 } catch (_: MeishanPushRebuildSignal) {
                     return@coroutineScope OnlineExit.REBUILD
                 }
-                val want = activeTags()
-                if (want != subscribedSnapshot) write(socket, subscribeFrame(want))
-                if (want.isEmpty()) return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
+                writeSubscribe(socket, activeTags())
+                if (activeTags().isEmpty()) return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
                 // 消费 acquire/release 发出的唤醒；真正的写入在下一轮读完后完成，避免并发写 socket。
                 while (subscriptionWakeup.tryReceive().isSuccess) {
                     // Drain coalesced subscription wakeups before the next socket read.
@@ -291,8 +291,20 @@ class MeishanPushClient(
         put("sourceType", JsonPrimitive(1))
     }.toString() + MeishanPushProtocol.DELIMITER
 
-    private fun subscribeFrame(tags: Set<String>): String {
-        subscribedSnapshot = tags
+    /**
+     * 订阅写入的唯一入口：比对、构造、更新快照、写 socket 收进同一把写锁。
+     * 旧实现先在锁外改快照再落写，watcher 与主读循环交错时会把滞留的旧集合
+     * 覆盖到新集合之后，服务端订阅集合与客户端快照永久背离（直到重连）。
+     */
+    private suspend fun writeSubscribe(socket: MeishanPushSocket, tags: Set<String>, force: Boolean = false) {
+        writeMutex.withLock {
+            if (!force && tags == subscribedSnapshot) return
+            socket.write(buildSubscribeFrame(tags))
+            subscribedSnapshot = tags
+        }
+    }
+
+    private fun buildSubscribeFrame(tags: Set<String>): String {
         val data = buildJsonArray { tags.forEach { add(JsonPrimitive(it)) } }.toString()
         return buildJsonObject {
             put("clientId", JsonPrimitive(clientId))

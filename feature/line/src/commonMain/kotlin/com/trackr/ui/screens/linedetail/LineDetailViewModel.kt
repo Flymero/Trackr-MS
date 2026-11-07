@@ -239,6 +239,9 @@ class LineDetailViewModel(
     private var pushJob: Job? = null
     private var pushKey: String? = null
     private var pushTarget = MutableStateFlow(MeishanPushTarget(null, null))
+
+    /** 当前推送流闭包里的基底快照：站表 / 首末班变了必须换流，否则 TCP 帧会把旧静态写回 */
+    private var pushBase: BusLineDetail? = null
     private var pushOnline = false
     private var screenResumed = false
     private var pushGeneration = 0L
@@ -577,11 +580,19 @@ class LineDetailViewModel(
         if (!screenResumed || detail.line.source != DataSourceType.MEISHAN || detail.stops.isEmpty()) return
         val key = detail.line.lineId
         if (pushKey == key && pushJob?.isActive == true) {
-            pushTarget.value = MeishanPushTarget(stop?.order, stop?.stopId)
-            return
+            val base = pushBase
+            if (base != null && (base.stops != detail.stops || base.line != detail.line)) {
+                // 手动刷新带回新站表 / 首末班：旧基底会在下一帧把旧静态整体写回，
+                // 用户新选的站在旧站表里找不到还会被悄悄换掉，必须换流
+                stopPush()
+            } else {
+                pushTarget.value = MeishanPushTarget(stop?.order, stop?.stopId)
+                return
+            }
         }
         stopPush()
         pushKey = key
+        pushBase = detail
         pushTarget = MutableStateFlow(MeishanPushTarget(stop?.order, stop?.stopId))
         val generation = pushGeneration
         pushJob = viewModelScope.launch {
@@ -636,6 +647,7 @@ class LineDetailViewModel(
         pushJob?.cancel()
         pushJob = null
         pushKey = null
+        pushBase = null
         pushOnline = false
         _uiState.update { it.copy(isPushOnline = false) }
     }

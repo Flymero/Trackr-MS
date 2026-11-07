@@ -466,8 +466,12 @@ class FakeMeishanLineRepository : MeishanLineRepository {
     var result: Result<List<MeishanLine>> = Result.success(emptyList())
     val calls: MutableList<MeishanArea> = mutableListOf()
 
+    /** 测试钩子：按区域自定义返回（可挂起），用于乱序 / 竞态用例；null 时走 [result] */
+    var responder: (suspend (MeishanArea) -> Result<List<MeishanLine>>)? = null
+
     override suspend fun getLines(area: MeishanArea, forceRefresh: Boolean): Result<List<MeishanLine>> {
         calls += area
+        responder?.let { return it(area) }
         return result
     }
 }

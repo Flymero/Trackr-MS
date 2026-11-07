@@ -39,7 +39,7 @@ class DefaultMeishanLineRepository(
             if (!forceRefresh) {
                 synchronized(lock) { cache[area] }?.let { return@withContext Result.success(it) }
             }
-            val result = suspendRunCatching { client.getLineList(area) }
+            val result = suspendRunCatching { client.getLineList(area, forceRefresh) }
             result.onSuccess { lines ->
                 synchronized(lock) { cache[area] = lines }
             }

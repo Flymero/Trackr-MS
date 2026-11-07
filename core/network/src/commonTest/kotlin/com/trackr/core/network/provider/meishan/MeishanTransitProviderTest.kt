@@ -290,6 +290,26 @@ class MeishanTransitProviderTest {
     }
 
     @Test
+    fun pushFrame_emptyRunCountingDedupesAcrossSameTagSubscriptions() = runBlocking {
+        val provider = newProvider(MockBackend())
+        val base1 = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        // copyId 撞号场景：另一条线共用 copyId=11、同推送 tag，缓存键不同（lineId 不同）
+        val base2 = base1.copy(line = base1.line.copy(lineId = "ms:2_1_0"))
+        val expected = "11_0"
+        // 同一物理帧（同 tag 同 pushTime）被两份订阅各撞一次解析缓存：只能计 1 次，
+        // 否则阈值 3 被两个订阅在 2 个时间戳里凑满，孤立空帧防抖被削弱
+        assertNull(provider.applyPushFrame(base1, pushFrame(time = "2026-11-04 18:00:00"), expectedTag = expected))
+        assertNull(provider.applyPushFrame(base2, pushFrame(time = "2026-11-04 18:00:00"), expectedTag = expected))
+        assertNull(provider.applyPushFrame(base1, pushFrame(time = "2026-11-04 18:00:03"), expectedTag = expected))
+        assertNull(provider.applyPushFrame(base2, pushFrame(time = "2026-11-04 18:00:03"), expectedTag = expected))
+        // 第 3 个不同时间戳：两份订阅一致清空
+        val cleared1 = assertNotNull(provider.applyPushFrame(base1, pushFrame(time = "2026-11-04 18:00:06"), expectedTag = expected))
+        val cleared2 = assertNotNull(provider.applyPushFrame(base2, pushFrame(time = "2026-11-04 18:00:06"), expectedTag = expected))
+        assertTrue(cleared1.buses.isEmpty() && cleared1.idleBuses.isEmpty())
+        assertTrue(cleared2.buses.isEmpty() && cleared2.idleBuses.isEmpty())
+    }
+
+    @Test
     fun pushFrame_dropsBusesFromMismatchedArea() = runBlocking {
         val provider = newProvider(MockBackend())
         val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))

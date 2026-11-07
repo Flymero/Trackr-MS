@@ -90,6 +90,16 @@ class BusTrackingService : LifecycleService() {
         var job: Job? = null
         val pushBindings: MutableMap<String, PushBinding> = mutableMapOf()
 
+        /**
+         * 一起等官方逐线推送的聚合缓冲：每条线最后一次 LinePoll（HTTP 补漏也算数据，
+         * 但只有收到过**推送帧**的线才计入 [pushFresh]）。凑齐计划内全部线路的推送级
+         * 数据后才补一轮完整 reduce 做上车判定——单线帧直接判定会把「两车都在站」的
+         * 歧义误判成单车自动上车（另一条线在本轮缺席）。
+         */
+        val watchBuffer: MutableMap<String, LinePoll> = mutableMapOf()
+        val pushFresh: MutableSet<String> = mutableSetOf()
+        var watchRequested: Set<String>? = null
+
         /** 正在轮询的代际号 */
         var generation: Int = NO_GENERATION
 
@@ -615,7 +625,7 @@ class BusTrackingService : LifecycleService() {
                         val currentBinding = worker.pushBindings[line.lineId]
                         if (currentBinding !== binding || (currentBinding?.revision ?: 0L) != revision) return@withPermit
                         result.onSuccess { detail ->
-                            applyPushDetail(worker, detail, watch = true)
+                            applyPushDetail(worker, detail, watch = true, fromPush = false)
                             if (isCurrent(worker) && worker.generation == generation) {
                                 startPush(worker, detail, line.stopOrder, line.stopIdOnLine.ifBlank { target.stopId }, watch = true)
                             }
@@ -718,7 +728,7 @@ class BusTrackingService : LifecycleService() {
                             trackingRepository.setPushOnline(worker.sessionId, binding.generation, line.lineId, true)
                             backoff = PUSH_RETRY_MIN_MILLIS
                             worker.refreshWakeup.trySend(Unit)
-                            applyPushDetail(worker, fresh, binding.watch)
+                            applyPushDetail(worker, fresh, binding.watch, fromPush = true)
                         } else if (binding.online) {
                             binding.online = false
                             trackingRepository.setPushOnline(worker.sessionId, binding.generation, line.lineId, false)
@@ -741,7 +751,12 @@ class BusTrackingService : LifecycleService() {
         }
     }
 
-    private fun applyPushDetail(worker: PollWorker, detail: BusLineDetail, watch: Boolean) {
+    private fun applyPushDetail(
+        worker: PollWorker,
+        detail: BusLineDetail,
+        watch: Boolean,
+        fromPush: Boolean
+    ) {
         val locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission()
         val dropFix = trackingRepository.latestUserFix
         val nowMillis = clock.now().toEpochMilliseconds()
@@ -754,6 +769,8 @@ class BusTrackingService : LifecycleService() {
                 mapOf(detail.line.lineId to detail.buses)
             )
             trackingRepository.update(worker.sessionId, worker.generation) { current ->
+                // 阶段一：单线帧照常逐线 reduce（数据 / 提醒更新）。
+                // 引擎侧守卫保证覆盖不全的轮询不做上车判定（见 WatchTogetherTracker）。
                 val reduced = TrackingEngine.reduceWatchPoll(
                     session = current,
                     poll = WatchPoll(
@@ -763,10 +780,43 @@ class BusTrackingService : LifecycleService() {
                     locationEnabled = locationEnabled,
                     serviceFix = serviceFix,
                     nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed
+                    nowElapsedMillis = nowElapsed,
+                    stopAfterBoarding = stopAfterBoarding
                 )
                 effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
+                var next: TrackingSession? =
+                    if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
+
+                // 阶段二：计划内全部线路都有推送级数据时，用聚合缓冲补一轮完整判定。
+                // 一起等的两车歧义 / 自动上车只信完整轮询（与上游 watchPoller 的整轮语义对齐）。
+                if (next != null) {
+                    val requested = next.watchTarget?.lines?.map { it.lineId }?.toSet().orEmpty()
+                    if (requested.isNotEmpty()) {
+                        if (worker.watchRequested != requested) {
+                            worker.watchRequested = requested
+                            worker.watchBuffer.clear()
+                            worker.pushFresh.clear()
+                        }
+                        worker.watchBuffer[detail.line.lineId] =
+                            LinePoll(detail.buses, fromLineDetail = true, stops = detail.stops)
+                        if (fromPush) worker.pushFresh.add(detail.line.lineId)
+                        if (worker.pushFresh.containsAll(requested)) {
+                            val lines = requested.associateWith { worker.watchBuffer.getValue(it) }
+                            val full = TrackingEngine.reduceWatchPoll(
+                                session = next,
+                                poll = WatchPoll(requested = requested, lines = lines),
+                                locationEnabled = locationEnabled,
+                                serviceFix = serviceFix,
+                                nowMillis = nowMillis,
+                                nowElapsedMillis = nowElapsed,
+                                stopAfterBoarding = stopAfterBoarding
+                            )
+                            effects = effects + full.effects
+                            next = if (full.effects.any { it is TrackingEngine.Effect.Finished }) null else full.session
+                        }
+                    }
+                }
+                next
             }
         } else {
             trackingRepository.recordBuses(worker.sessionId, worker.generation, detail.buses)
@@ -778,7 +828,8 @@ class BusTrackingService : LifecycleService() {
                     serviceFix = serviceFix,
                     dropFix = dropFix,
                     nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed
+                    nowElapsedMillis = nowElapsed,
+                    stopAfterBoarding = stopAfterBoarding
                 )
                 effects = reduced.effects
                 if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session

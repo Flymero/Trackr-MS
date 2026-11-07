@@ -502,6 +502,28 @@ class LineDetailViewModelTest {
     }
 
     @Test
+    fun meishanPush_sameLineRefreshWithChangedStops_restartsStreamWithNewBase() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, _, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            assertEquals(1, push.subscriptions.size)
+
+            // 服务端调整站表（追加一站），手动刷新带回新静态：活跃推送必须换流换基底——
+            // 否则下一帧把旧站表整体写回，用户新选的站在旧站表里找不到还会被悄悄换掉
+            val changed = officialDetail().let { d ->
+                d.copy(stops = d.stops + stops.last().copy(order = 11, stopId = "s11", name = "新站"))
+            }
+            fakeRepository.lineDetailResult = Result.success(changed)
+            viewModel.refreshNow()
+            testScheduler.runCurrent()
+
+            assertEquals(2, push.subscriptions.size)
+            assertEquals(changed.stops, push.subscriptions.last().base.stops)
+            assertTrue(push.cancellations.isNotEmpty())
+        }
+    }
+
+    @Test
     fun meishanPush_streamFailure_retriesWithBackoff() = runTest(main.dispatcher) {
         withPushViewModel { viewModel, _, push ->
             push.failNext = true

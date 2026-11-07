@@ -12,6 +12,7 @@ import com.trackr.core.testing.FakeMeishanLineRepository
 import com.trackr.core.testing.FakeRealtimeRepository
 import com.trackr.core.testing.FakeSettingsRepository
 import com.trackr.core.testing.MainDispatcherHolder
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -19,6 +20,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -97,6 +99,36 @@ class LineListViewModelTest {
         settings.selectCity(TransitCity(cityId = "034", cityName = "上海", province = "直辖市"))
         advanceUntilIdle()
         assertEquals(MeishanArea.RENSHOU, viewModel.uiState.value.area)
+    }
+
+    @Test
+    fun `切城后旧城市的慢结果不覆盖新城市`() = runTest(dispatcherHolder.dispatcher) {
+        // 初始眉山加载挂起（慢）→ 切仁寿 → 仁寿先回 → 眉山的慢结果后回
+        val gate = CompletableDeferred<Unit>()
+        val renshouLines = listOf(MeishanLine(lId = 10000, name = "仁寿1路", area = MeishanArea.RENSHOU))
+        meishanLines.responder = { area ->
+            if (area == MeishanArea.MEISHAN) {
+                gate.await()
+                Result.success(sampleLines())
+            } else {
+                Result.success(renshouLines)
+            }
+        }
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+        assertEquals(MeishanArea.MEISHAN, viewModel.uiState.value.area)
+
+        settings.selectCity(TransitCity(cityId = "", cityName = "仁寿", province = "四川"))
+        advanceUntilIdle()
+        assertEquals(MeishanArea.RENSHOU, viewModel.uiState.value.area)
+        assertEquals(listOf("仁寿1路"), viewModel.uiState.value.lines.map { it.name })
+
+        // 眉山的旧结果此刻才回来：不得覆盖仁寿（列表既不能变成眉山线，也不能被清成错误态）
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(MeishanArea.RENSHOU, viewModel.uiState.value.area)
+        assertEquals(listOf("仁寿1路"), viewModel.uiState.value.lines.map { it.name })
+        assertFalse(viewModel.uiState.value.loadFailed)
     }
 
     @Test

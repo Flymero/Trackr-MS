@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.onEach
 
 /*
  * :core:domain 平台能力接口的 Fake：只记下调用，结果由测试设定。
@@ -165,9 +166,14 @@ class FakeLocationSource(
     private val live = MutableSharedFlow<UserFix>(extraBufferCapacity = 64)
     val requestedTiers: MutableList<LocationCadence.Tier> = mutableListOf()
 
+    /** 收集侧实际收到的定位数（区分「没人订阅丢 emit」和「下游拒收」） */
+    var receivedCount: Int = 0
+        private set
+
     override fun fixes(tier: LocationCadence.Tier): Flow<UserFix> {
         requestedTiers += tier
-        return if (tier == LocationCadence.Tier.OFF) emptyFlow() else live
+        if (tier == LocationCadence.Tier.OFF) return emptyFlow()
+        return live.onEach { receivedCount++ }
     }
 
     /** 正在收集 [fixes] 的数量（断言定位已关掉时看它是不是 0） */

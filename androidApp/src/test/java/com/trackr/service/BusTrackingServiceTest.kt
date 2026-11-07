@@ -14,6 +14,7 @@ import com.trackr.core.data.repository.MeishanPushUpdate
 import com.trackr.core.data.repository.MeishanPushAvailability
 import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.domain.platform.LocationSource
+import com.trackr.core.domain.platform.ProcessMonotonicClock
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.BusLineDetail
@@ -25,6 +26,7 @@ import com.trackr.core.model.LiveBus
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.NearbyStopLineStatus
 import com.trackr.core.model.TrackingTarget
+import com.trackr.core.model.UserFix
 import com.trackr.core.model.WatchLine
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitLeg
@@ -195,6 +197,76 @@ class BusTrackingServiceTest {
             waitUntil("部分线路更新") { trackingRepository.session.value?.watchedLines?.any { it.busOrder == 5 } == true }
             assertTrue(requireNotNull(trackingRepository.session.value).watchedLines.all { it.hasData })
             assertEquals(0, transit.realtime.stopDetailCallCount)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun officialWatchTogether_boardChoiceSurvivesSingleLinePushFrames() {
+        val lines = listOf(WatchLine("ms:1_1_0", "1路", 7, source = DataSourceType.MEISHAN), WatchLine("ms:1_2_0", "2路", 7, source = DataSourceType.MEISHAN))
+        for (line in lines) transit.realtime.lineDetailsMap[line.lineId] = officialDetail().let { it.copy(line = it.line.copy(lineId = line.lineId)) }
+        val target = watchTarget().copy(lines = lines)
+        val session = requireNotNull(trackingRepository.start(target))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("两线订阅建立") { push.subscriptions.size == 2 }
+            val sub1 = push.subscriptions.first { it.base.line.lineId == "ms:1_1_0" }
+            val sub2 = push.subscriptions.first { it.base.line.lineId == "ms:1_2_0" }
+            // 两线的车都进缓存（真实路径：逐线帧 recordLineBuses）
+            sub1.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, sub1.base.copy(buses = listOf(LiveBus("a", "a", 7, segmentProgress = 1f, isArrived = true)))))
+            sub2.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, sub2.base.copy(buses = listOf(LiveBus("b", "b", 7, segmentProgress = 1f, isArrived = true)))))
+            waitUntil("两线在站数据入缓存") {
+                trackingRepository.session.value?.watchedLines?.all { it.busOrder == 7 } == true
+            }
+            // 用户按「我上车了」，此刻两条线的车都在站：两车歧义 → 待选
+            trackingRepository.confirmBoarded()
+            waitUntil("两车歧义待选") { trackingRepository.session.value?.boardChoice != null }
+            assertEquals(setOf("a", "b"), requireNotNull(trackingRepository.session.value).boardChoice?.options?.map { it.busId }?.toSet())
+            // 之后 L1 的单线帧继续到达（L2 在本轮缺席）：不得把歧义误判成单车自动上车
+            sub1.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, sub1.base.copy(buses = listOf(LiveBus("a", "a", 7, segmentProgress = 1f, isArrived = true)))))
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(4))
+            val sessionNow = requireNotNull(trackingRepository.session.value)
+            assertNotNull(sessionNow.boardChoice)
+            assertEquals(LegPhase.WAITING_BOARD, sessionNow.state.legPhase)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun officialPush_autoStopAfterBoarding_endsTrackingWhenUserRidesAway() {
+        // 初始 HTTP 快照就用 b1：推送帧全程跟同一辆车（否则换车判定会把帧当信号丢失）
+        transit.realtime.lineDetailResult = Result.success(officialDetail(id = "b1", order = 3))
+        val session = requireNotNull(trackingRepository.start(officialTarget()))
+        val controller = startService(session.sessionId)
+        val service = controller.get()
+        try {
+            waitUntil("订阅建立") { push.subscriptions.size == 1 }
+            val sub = push.subscriptions.single()
+            val stopLat = 25.0 + 7 * 0.001 // s7：上车站（targetOrder 7）
+            fun fixAt(metersNorth: Double, ageMillis: Long) = UserFix(
+                lat = stopLat + metersNorth / 111_000.0,
+                lng = 119.0,
+                accuracyMeters = 10f,
+                // 服务用 AndroidMonotonicClock（SystemClock.elapsedRealtime）判定位新鲜度，测试对齐同一时基
+                elapsedMillis = android.os.SystemClock.elapsedRealtime() - ageMillis
+            )
+            fun atStopBus() = sub.base.copy(buses = listOf(LiveBus("b1", "b1", 7, segmentProgress = 1f, isArrived = true, wgsLat = stopLat, wgsLng = 119.0)))
+            fun approachingBus() = sub.base.copy(buses = listOf(LiveBus("b1", "b1", 7, segmentProgress = 0.6f, isArrived = false, wgsLat = stopLat - 30.0 / 111_000.0, wgsLng = 119.0)))
+            // 车临近上车站（第一帧后引擎开定位、定位收集器开始收）
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, approachingBus()))
+            waitUntil("推送帧写入状态") { trackingRepository.legState.value.currentBusId == "b1" }
+            waitUntil("定位收集启动") { location.activeCollectors > 0 }
+            // 车到站（带着定位发生到站转变）、人在站台 20 米：进入待确认（「上车后自动结束追踪」默认开）
+            location.emit(fixAt(20.0, 0))
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, atStopBus()))
+            waitUntil("进入待确认") { trackingRepository.legState.value.boardingCandidateBusId == "b1" }
+            // 人跟着车走两次 → 引擎自动判上车并结束追踪（参数链 P1-1：推送入口必须透传开关）
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(4))
+            location.emit(fixAt(150.0, 4_000))
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, sub.base.copy(buses = listOf(LiveBus("b1", "b1", 8, segmentProgress = 0.2f, wgsLat = stopLat + 150.0 / 111_000.0, wgsLng = 119.0)))))
+            waitUntil("跟车确认") { trackingRepository.legState.value.boardingConfirmStreak >= 1 }
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(4))
+            location.emit(fixAt(320.0, 4_000))
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, sub.base.copy(buses = listOf(LiveBus("b1", "b1", 8, segmentProgress = 0.4f, wgsLat = stopLat + 320.0 / 111_000.0, wgsLng = 119.0)))))
+            waitUntil("自动结束追踪") { trackingRepository.session.value == null }
         } finally { controller.destroy() }
     }
 

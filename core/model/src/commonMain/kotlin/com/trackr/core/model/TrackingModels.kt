@@ -135,7 +135,9 @@ data class BoardOption(
     val lineName: String,
     val busId: String,
     val plate: String = "",
-    val order: Int = 0
+    val order: Int = 0,
+    /** 选项创建时那辆车是否带权威停靠标志：上车重建会话时传下去，保持到站判定口径一致 */
+    val authoritativeArrival: Boolean = false
 )
 
 /**

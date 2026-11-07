@@ -64,8 +64,10 @@ internal object BoardingRule {
 
     private const val NEAR_BUS_MIN_METERS = 80
 
-    /** 一个候选：哪条线的哪辆车（[bus] 可能是 null：只知道 id，这一轮数据里没有它） */
-    data class Option(val line: WatchLine, val busId: String, val bus: LiveBus?)
+    /** 一个候选：哪条线的哪辆车（[bus] 可能是 null：只知道 id，这一轮数据里没有它）。
+     *  [authoritativeArrival] 随车携带的权威停靠标志：上车重建会话时要传下去，
+     *  否则到站判定与通知各用一套口径（TCP 车的待选经 id 重建后标志会丢）。 */
+    data class Option(val line: WatchLine, val busId: String, val bus: LiveBus?, val authoritativeArrival: Boolean = false)
 
     /** 定位分得清时返回那一个，否则 null（没有定位、车没有坐标、离人近的不止一辆或一辆都没有） */
     fun distinguish(options: List<Option>, fix: UserFix?): Option? {
@@ -201,7 +203,13 @@ internal object WatchTogetherTracker {
 
         val boarded = mutableListOf<BoardingRule.Option>()
         // 「上了哪辆？」等用户选的时候不再开始新的待确认（否则同一批车会再判一次、待选被重写）
-        val allowNewCandidates = session.boardChoice == null
+        // 计划内线路没被本轮覆盖（官方逐线推送 / 部分补漏）时也不做上车判定：
+        // 另一条线在本轮缺席，会把「两车都在站」的歧义误判成单车自动上车。
+        val watchTarget = session.watchTarget
+        val pollCoversPlan = watchTarget == null ||
+            watchTarget.lines.isEmpty() ||
+            poll.requested.containsAll(watchTarget.lines.map { it.lineId })
+        val allowNewCandidates = session.boardChoice == null && pollCoversPlan
         var lines = session.watchedLines.map { wl ->
             val lineId = wl.line.lineId
             if (lineId !in poll.requested) return@map wl // 待确认期间没请求它：保持上次
@@ -218,9 +226,11 @@ internal object WatchTogetherTracker {
                 val lp = poll.lines[option.lineId]
                 val bus = lp?.buses?.firstOrNull { it.busId == option.busId }
                 if (option.lineId in poll.requested && lp != null && bus == null) return@mapNotNull null
-                BoardingRule.Option(line, option.busId, bus)
+                BoardingRule.Option(line, option.busId, bus, bus?.hasAuthoritativeArrival == true || option.authoritativeArrival)
             }
-            choicePick = BoardingRule.distinguish(options, fix)
+            // 部分轮询里缺席的线在 options 中 bus=null，distinguish 会把它们过滤掉，
+            // 造成"只剩一辆"的假象——覆盖不全时本轮不下结论，等下一轮凑齐再判。
+            choicePick = if (pollCoversPlan) BoardingRule.distinguish(options, fix) else null
             if (nowMillis - choice.sinceMillis >= BOARD_CHOICE_TIMEOUT_MILLIS || options.isEmpty()) choice = null
         }
 
@@ -331,7 +341,7 @@ internal object WatchTogetherTracker {
                 val result = BoardingDetector.evaluateCandidate(probe, candidate, input)
                 when (result.verdict) {
                     BoardingDetector.Verdict.BOARDED -> {
-                        boarded += BoardingRule.Option(wl.line, candidateId, candidate)
+                        boarded += BoardingRule.Option(wl.line, candidateId, candidate, candidate?.hasAuthoritativeArrival == true)
                         return atStop(wl, candidate, candidateId, lp).copy(
                             confirmStreak = result.state.boardingConfirmStreak,
                             missStreak = result.state.boardingMissStreak,
@@ -538,7 +548,8 @@ internal object WatchTogetherTracker {
         lineName = line.lineName,
         busId = busId,
         plate = bus?.friendlyPlate.orEmpty(),
-        order = bus?.order ?: 0
+        order = bus?.order ?: 0,
+        authoritativeArrival = bus?.hasAuthoritativeArrival == true || authoritativeArrival
     )
 
     // ---------------------------------------------------------------- 上车
@@ -582,6 +593,8 @@ internal object WatchTogetherTracker {
             currentBusId = busId,
             currentBusOrder = order,
             currentBusProgress = pick?.bus?.segmentProgress ?: 0f,
+            // 上车重建会话时带上所选车的权威停靠标志，下车站提醒与通知沿用同一套到站口径
+            hasAuthoritativeArrival = pick?.bus?.hasAuthoritativeArrival == true || pick?.authoritativeArrival == true,
             stopsRemaining = if (targetOrder > 0 && order > 0) {
                 (pick?.bus?.stopsTo(targetOrder) ?: (targetOrder - order)).coerceAtLeast(0)
             } else -1,
@@ -627,13 +640,14 @@ internal object WatchTogetherTracker {
 
         val pending = session.watchedLines.filter { it.candidateBusId != null }.map { wl ->
             val id = requireNotNull(wl.candidateBusId)
-            BoardingRule.Option(wl.line, id, lineBuses[wl.line.lineId]?.firstOrNull { it.busId == id })
+            val candidateBus = lineBuses[wl.line.lineId]?.firstOrNull { it.busId == id }
+            BoardingRule.Option(wl.line, id, candidateBus, candidateBus?.hasAuthoritativeArrival == true)
         }
         val options = pending.ifEmpty {
             val nearest = session.watchedLines.mapNotNull { wl ->
                 val a = wl.line.stopOrder
                 GroupLegTracker.pickBoardedBus(a, lineBuses[wl.line.lineId].orEmpty())
-                    ?.let { BoardingRule.Option(wl.line, it.busId, it) }
+                    ?.let { BoardingRule.Option(wl.line, it.busId, it, it.hasAuthoritativeArrival) }
             }
             val atStop = nearest.filter { option ->
                 val bus = requireNotNull(option.bus)
@@ -717,7 +731,7 @@ internal object WatchTogetherTracker {
         return board(
             session,
             target,
-            BoardingRule.Option(line, option.busId, null),
+            BoardingRule.Option(line, option.busId, null, option.authoritativeArrival),
             emptyList(),
             nowMillis,
             byLocation = false,

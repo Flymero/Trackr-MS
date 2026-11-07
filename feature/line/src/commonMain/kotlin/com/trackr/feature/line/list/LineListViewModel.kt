@@ -84,6 +84,9 @@ class LineListViewModel(
 
     private var nextMessageId = 0L
 
+    /** 请求代际：切城后旧请求的回调作废，防止眉山慢结果覆盖仁寿（或旧失败把新列表清成错误态） */
+    private var loadGeneration = 0L
+
     init {
         // 默认区域跟着当前城市走：选仁寿就默认仁寿，否则默认眉山
         val initialArea = MeishanArea.forCityName(settings.selectedCity.value.cityName) ?: MeishanArea.MEISHAN
@@ -114,8 +117,11 @@ class LineListViewModel(
 
     private fun loadLines(area: MeishanArea, forceRefresh: Boolean = false) {
         _uiState.update { it.copy(area = area, isLoading = true, loadFailed = false) }
+        val generation = ++loadGeneration
         viewModelScope.launch {
             val result = meishanLines.getLines(area, forceRefresh)
+            // 已切城 / 已重试：本请求作废，任何结果都不再写入
+            if (generation != loadGeneration) return@launch
             result.fold(
                 onSuccess = { lines ->
                     val sorted = lines.sortedWith { a, b -> RouteProjectionMath.compareLineNames(a.name, b.name) }

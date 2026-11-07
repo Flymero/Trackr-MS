@@ -407,6 +407,9 @@ internal object GroupLegTracker {
                 currentBusId = best.busId,
                 currentBusOrder = best.order,
                 currentBusProgress = best.segmentProgress,
+                // 换车后权威性跟新车走：否则 TCP 车丢了 HTTP 车接上（或反之）时，
+                // 到站判定与通知各用一套口径，通知会提前报「到站了」
+                hasAuthoritativeArrival = best.hasAuthoritativeArrival,
                 stopsRemaining = stopsRemaining,
                 etaSeconds = best.etaSeconds,
                 isBusArrivedAtStop = false,

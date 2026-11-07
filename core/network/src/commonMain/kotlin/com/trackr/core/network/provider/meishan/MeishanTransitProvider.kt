@@ -384,31 +384,37 @@ class MeishanTransitProvider(
         if (expectedTag.isNullOrBlank() || frame.tag != expectedTag) return null
         val copyId = expectedTag.substringBefore('_').toIntOrNull()
         val key = PushFrameKey(base.line.lineId, frame.tag, frame.pushTime, base.stops)
-        // Pair 第二个元素：是否缓存未命中的新帧（多订阅/选站重放共用解析，不重复计数）
-        val (parsed, isNewFrame) = synchronized(pushFrameLock) {
-            // 多订阅和选站重放共用不带 ETA 的车辆，静止计时每帧只更新一次。
+        // 单锁段内完成「解析缓存读写 + 空帧计数」，多订阅并发时口径一致；
+        // 计数按 (tag, pushTime) 去重：copyId 撞号时同 tag 的两份订阅（缓存键不同）收到的是
+        // 同一个物理帧，只能计 1 次，否则阈值 3 会被两个订阅在 2 个时间戳里凑满。
+        val (parsed, emptyRun) = synchronized(pushFrameLock) {
             val cached = parsedPushFrames[key]
-            if (cached == null) {
+            if (cached != null) {
+                cached to (emptyFrameRuns[frame.tag] ?: 0)
+            } else {
                 val parsed = parseBuses(ref, frame.busInfos, base.stops, copyId)
                 if (parsedPushFrames.size >= MAX_CACHED_PUSH_FRAMES) {
                     parsedPushFrames.remove(parsedPushFrames.keys.first())
                 }
                 parsedPushFrames[key] = parsed
-                parsed to true
-            } else {
-                cached to false
-            }
-        }
-        if (isNewFrame) {
-            synchronized(pushFrameLock) {
-                if (parsed.isEmpty) {
-                    emptyFrameRuns[frame.tag] = (emptyFrameRuns[frame.tag] ?: 0) + 1
-                } else {
-                    emptyFrameRuns.remove(frame.tag)
+                val isNewPhysicalFrame = countedPushTimes[frame.tag] != frame.pushTime
+                countedPushTimes[frame.tag] = frame.pushTime
+                val run = when {
+                    !parsed.isEmpty -> {
+                        emptyFrameRuns.remove(frame.tag)
+                        0
+                    }
+                    isNewPhysicalFrame -> {
+                        val next = (emptyFrameRuns[frame.tag] ?: 0) + 1
+                        emptyFrameRuns[frame.tag] = next
+                        next
+                    }
+                    else -> emptyFrameRuns[frame.tag] ?: 0
                 }
+                parsed to run
             }
         }
-        if (parsed.isEmpty && (emptyFrameRuns[frame.tag] ?: 0) < EMPTY_FRAME_CLEAR_THRESHOLD) {
+        if (parsed.isEmpty && emptyRun < EMPTY_FRAME_CLEAR_THRESHOLD) {
             // 不足阈值的空帧按服务端抖动忽略：返回 null，调用方保持当前详情不变。
             return null
         }
@@ -430,8 +436,11 @@ class MeishanTransitProvider(
     private val pushFrameLock = SynchronizedObject()
     private val parsedPushFrames = linkedMapOf<PushFrameKey, ParsedBuses>()
 
-    /** 每个推送 tag 的连续空帧计数（新帧才累计，非空帧清零）；达到阈值才允许清空车辆列表 */
+    /** 每个推送 tag 的连续空帧计数（按 tag+pushTime 去重，非空帧清零）；达到阈值才允许清空车辆列表 */
     private val emptyFrameRuns = HashMap<String, Int>()
+
+    /** 每个 tag 最近一次参与计数/判重的帧时间戳：同 tag 多订阅共享同一物理帧，不重复计数 */
+    private val countedPushTimes = HashMap<String, String>()
 
     /** 官方后台没有班次接口，返回空表，调用方按首末班展示 */
     override suspend fun getTimetable(
