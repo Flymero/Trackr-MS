@@ -207,7 +207,7 @@ class TransitRepository(
     }
 
     private fun loadInitialEngineMode(): EngineMode {
-        // 兜底默认掌上公交；眉山 / 仁寿由首页按城市联动默认官方源（BusHomeViewModel）
+        // 眉山特化：默认掌上公交（小城市覆盖比车来了好）
         val modeStr = initial.engineMode ?: EngineMode.MYGOLBS.name
         return runCatching { EngineMode.valueOf(modeStr) }.getOrDefault(EngineMode.MYGOLBS)
     }

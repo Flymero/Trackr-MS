@@ -252,46 +252,6 @@ class BusHomeViewModelTest {
     }
 
     @Test
-    fun testSelectCity_meishanOnlyCityDefaultsToOfficialEngine() = runTest(main.dispatcher) {
-        val viewModel = createViewModel()
-        testScheduler.runCurrent()
-        assertEquals(EngineMode.CHELAILE, viewModel.uiState.value.engineMode)
-
-        // 眉山 / 仁寿是官方源独有城市（无车来了 id 也无掌上公交码）：选城即默认官方引擎
-        val meishan = TransitCity(cityId = "", cityName = "眉山", province = "四川")
-        viewModel.selectCity(meishan)
-        testScheduler.runCurrent()
-        assertEquals(EngineMode.MEISHAN, viewModel.uiState.value.engineMode)
-        assertEquals("眉山", viewModel.uiState.value.currentCity.cityName)
-    }
-
-    @Test
-    fun testSelectCity_leavingMeishanModeForDualSourceCityResetsToMygolbs() = runTest(main.dispatcher) {
-        val viewModel = createViewModel()
-        testScheduler.runCurrent()
-        viewModel.setEngineMode(EngineMode.MEISHAN)
-        testScheduler.runCurrent()
-
-        // 双源城市没有官方数据：从官方模式离开眉山 / 仁寿时回到默认引擎
-        val dualSource = TransitCity(cityId = "034", cityName = "上海", mygolbsCityCode = "02100", province = "直辖市")
-        viewModel.selectCity(dualSource)
-        testScheduler.runCurrent()
-        assertEquals(EngineMode.MYGOLBS, viewModel.uiState.value.engineMode)
-    }
-
-    @Test
-    fun testRestore_meishanSavedCityDefaultsToOfficialEngine() = runTest(main.dispatcher) {
-        fakeRepository.settings.setEngineMode(EngineMode.MYGOLBS)
-        fakeRepository.settings.selectCity(TransitCity(cityId = "", cityName = "仁寿", province = "四川"))
-
-        // 上次退出时停留在掌上公交：重启恢复到眉山 / 仁寿城市时默认官方引擎
-        val viewModel = createViewModel()
-        testScheduler.runCurrent()
-        assertEquals("仁寿", viewModel.uiState.value.currentCity.cityName)
-        assertEquals(EngineMode.MEISHAN, viewModel.uiState.value.engineMode)
-    }
-
-    @Test
     fun testEngineModeSwitching_immediatelyRefreshesNearbyStops() = runTest(main.dispatcher) {
         val stopA = NearbyStop(stopId = "stop_a", name = "站点A")
         val stopB = NearbyStop(stopId = "stop_b", name = "站点B")

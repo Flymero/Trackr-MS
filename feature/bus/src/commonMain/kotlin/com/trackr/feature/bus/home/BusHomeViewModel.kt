@@ -9,7 +9,6 @@ import com.trackr.core.data.repository.RealtimeRepository
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.UserLocationStore
-import com.trackr.core.data.provider.isMeishanOnlyCity
 import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.NoAnnouncer
 import com.trackr.core.domain.platform.NoSystemSettingsLauncher
@@ -137,10 +136,6 @@ class BusHomeViewModel(
                     return@collect
                 }
                 val isSameAsLocated = city.matchesCity(state.locatedCity)
-                // 官方源独有城市（眉山 / 仁寿）启动恢复时默认官方引擎（两条恢复分支都生效）
-                if (city.isMeishanOnlyCity && state.engineMode != EngineMode.MEISHAN) {
-                    setEngineMode(EngineMode.MEISHAN)
-                }
                 if (isSameAsLocated) {
                     edit {
                         it.copy(
@@ -387,10 +382,6 @@ class BusHomeViewModel(
                     val shouldSwitchCity = switchCity || !settings.hasSavedCity.value
                     if (resolvedCity != null && shouldSwitchCity) {
                         settings.selectCity(resolvedCity)
-                        // 官方源独有城市（眉山 / 仁寿）定位命中时默认官方引擎
-                        if (resolvedCity.isMeishanOnlyCity && _uiState.value.engineMode != EngineMode.MEISHAN) {
-                            setEngineMode(EngineMode.MEISHAN)
-                        }
                         edit {
                             it.copy(
                                 currentCity = resolvedCity,
@@ -532,15 +523,8 @@ class BusHomeViewModel(
                 ProvinceCityCatalog.getCityCenterCoordinates(city.cityName)
             }
 
-            // 若所选城市仅某单一数据源支持，自动联动切换至支持的引擎；
-            // 官方源独有城市（眉山 / 仁寿）默认官方引擎，双源城市从官方模式离开时回到默认引擎
-            if (city.isMeishanOnlyCity) {
-                if (state.engineMode != EngineMode.MEISHAN) {
-                    setEngineMode(EngineMode.MEISHAN)
-                }
-            } else if (state.engineMode == EngineMode.MEISHAN && city.cityId.isNotBlank() && !city.mygolbsCityCode.isNullOrBlank()) {
-                setEngineMode(EngineMode.MYGOLBS)
-            } else if (city.cityId.isBlank() && !city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.MYGOLBS) {
+            // 若所选城市仅某单一数据源支持，自动联动切换至支持的引擎
+            if (city.cityId.isBlank() && !city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.MYGOLBS) {
                 setEngineMode(EngineMode.MYGOLBS)
             } else if (city.cityId.isNotBlank() && city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.CHELAILE) {
                 setEngineMode(EngineMode.CHELAILE)
@@ -570,7 +554,7 @@ class BusHomeViewModel(
         val nextMode = when (_uiState.value.engineMode) {
             EngineMode.MYGOLBS -> EngineMode.CHELAILE
             EngineMode.CHELAILE -> EngineMode.MYGOLBS
-            // 官方源可从设置页选、或由眉山 / 仁寿城市联动进入；快捷切换按「掌上公交」理解
+            // 官方源只在设置页选，快捷切换按「掌上公交」理解
             EngineMode.MEISHAN -> EngineMode.MYGOLBS
         }
         setEngineMode(nextMode)
