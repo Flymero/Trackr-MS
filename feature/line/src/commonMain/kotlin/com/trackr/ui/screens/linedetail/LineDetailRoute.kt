@@ -51,6 +51,8 @@ fun LineDetailRoute(
                 is LineDetailEvent.Refresh -> viewModel.refreshNow(fromPull = event.fromPull)
                 is LineDetailEvent.SelectStop -> viewModel.selectStop(event.stop)
                 is LineDetailEvent.FollowBus -> viewModel.selectBusToFollow(event.bus)
+                is LineDetailEvent.ShowIdleBusInfo -> viewModel.showIdleBusInfo(event.bus)
+                LineDetailEvent.DismissIdleBusInfo -> viewModel.dismissIdleBusInfo()
                 LineDetailEvent.OpenBusList -> viewModel.openBusList()
                 LineDetailEvent.BackFromPanel -> viewModel.backFromPanel()
                 LineDetailEvent.SwitchDirection -> viewModel.switchOppositeDirection()

@@ -47,7 +47,8 @@ class BusListContentTest {
                     lineDetail = detail,
                     selectedStop = stops[4],
                     onBack = {},
-                    onSelectBus = {}
+                    onSelectBus = {},
+                    onIdleBusClick = {}
                 )
             }
         }

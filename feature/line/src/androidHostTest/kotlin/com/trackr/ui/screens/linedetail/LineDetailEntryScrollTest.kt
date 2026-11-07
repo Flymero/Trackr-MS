@@ -152,7 +152,10 @@ class LineDetailEntryScrollTest {
         )
         show(state)
 
-        composeTestRule.onNodeWithText("暂无在途车辆 · 1 辆停场/非运营车辆").assertIsDisplayed()
+        // 停场/非运营车辆逐辆展示：红色「停场」标注 + 车牌，不再是聚合计数文案
+        composeTestRule.onNodeWithText("停场").assertIsDisplayed()
+        composeTestRule.onNodeWithText("沪B5678").assertIsDisplayed()
+        composeTestRule.onNodeWithText("暂无在途车辆 · 1 辆停场/非运营车辆").assertDoesNotExist()
     }
 
     @Test

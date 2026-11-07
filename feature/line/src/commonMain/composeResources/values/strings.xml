@@ -115,4 +115,18 @@
     <string name="line_tab_error">线路列表加载失败，请检查网络后重试</string>
     <string name="line_tab_error_retry">重试</string>
     <string name="line_tab_not_covered">当前数据源未覆盖「%1$s」，试试切换数据源</string>
+    <!-- 停场/非运营车辆（眉山特化） -->
+    <string name="line_list_kind_idle">停场车辆</string>
+    <string name="line_bus_idle_badge">停场</string>
+    <string name="line_bus_idle_position">位于 %1$s</string>
+    <string name="line_idle_info_title">车辆信息</string>
+    <string name="line_idle_info_plate">车牌</string>
+    <string name="line_idle_info_line">线路</string>
+    <string name="line_idle_info_direction">方向</string>
+    <string name="line_idle_info_direction_value">开往 %1$s</string>
+    <string name="line_idle_info_position">位置</string>
+    <string name="line_idle_info_position_unknown">未知</string>
+    <string name="line_idle_info_speed">速度</string>
+    <string name="line_idle_info_note">停场/非运营车辆：长时间未移动或非运营时段，不参与等车计算。</string>
+    <string name="line_idle_info_close">知道了</string>
 </resources>

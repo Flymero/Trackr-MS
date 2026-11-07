@@ -147,6 +147,8 @@ data class LineDetailUiState(
     val favoriteGroupId: String? = null,
     val isGroupPickerOpen: Boolean = false,
     val isReminderDialogOpen: Boolean = false,
+    /** 正在查看信息的停场/非运营车辆；null = 未在查看 */
+    val idleBusInfo: LiveBus? = null,
     val preferredTransitCodeProvider: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val isTransitCodeSheetOpen: Boolean = false,
     /** 底栏「乘车码」圆钮显不显示（「我的」里的开关，和首页悬浮按钮同一个） */
@@ -808,6 +810,15 @@ class LineDetailViewModel(
                 followBackTo = if (it.panelMode == PanelMode.BUS_LIST) PanelMode.BUS_LIST else PanelMode.STATION_CARD
             )
         }
+    }
+
+    /** 查看停场/非运营车辆信息（只读，不发起追踪） */
+    fun showIdleBusInfo(bus: LiveBus) {
+        _uiState.update { it.copy(idleBusInfo = bus) }
+    }
+
+    fun dismissIdleBusInfo() {
+        _uiState.update { it.copy(idleBusInfo = null) }
     }
 
     /** 展开全线车辆列表 */

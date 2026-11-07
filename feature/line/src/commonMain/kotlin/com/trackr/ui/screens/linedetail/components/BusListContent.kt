@@ -30,6 +30,7 @@ import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.ic_back
 import com.trackr.core.designsystem.resources.ic_bus
 import com.trackr.core.designsystem.resources.ic_chevron_right
+import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.designsystem.theme.busColors
 import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.model.BusLineDetail
@@ -38,6 +39,8 @@ import com.trackr.core.model.LiveBus
 import com.trackr.core.model.sanitizePlateOrFleetNo
 import com.trackr.feature.line.resources.Res as LineRes
 import com.trackr.feature.line.resources.line_arrived
+import com.trackr.feature.line.resources.line_bus_idle_badge
+import com.trackr.feature.line.resources.line_bus_idle_position
 import com.trackr.feature.line.resources.line_distance_to_station
 import com.trackr.feature.line.resources.line_list_approaching
 import com.trackr.feature.line.resources.line_list_arrive_at
@@ -47,6 +50,7 @@ import com.trackr.feature.line.resources.line_list_current_stop
 import com.trackr.feature.line.resources.line_list_empty
 import com.trackr.feature.line.resources.line_list_entering
 import com.trackr.feature.line.resources.line_list_follow
+import com.trackr.feature.line.resources.line_list_kind_idle
 import com.trackr.feature.line.resources.line_list_kind_at_stop
 import com.trackr.feature.line.resources.line_list_kind_moving
 import com.trackr.feature.line.resources.line_list_kind_passed
@@ -68,6 +72,7 @@ fun BusListContent(
     idleBuses: List<LiveBus> = emptyList(),
     onBack: () -> Unit,
     onSelectBus: (LiveBus) -> Unit,
+    onIdleBusClick: (LiveBus) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val busColors = MaterialTheme.busColors
@@ -106,14 +111,7 @@ fun BusListContent(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        if (lineDetail.buses.isEmpty() && idleBuses.isNotEmpty()) {
-            Text(
-                text = "暂无在途车辆 · ${idleBuses.size} 辆停场/非运营车辆",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(vertical = 24.dp)
-            )
-        } else if (lineDetail.buses.isEmpty()) {
+        if (lineDetail.buses.isEmpty() && idleBuses.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -254,6 +252,102 @@ fun BusListContent(
                             )
                         }
                     }
+                }
+            }
+
+            // 停场/非运营车辆：红色标注逐辆展示（跟排在途车后），不参与等车计算，点击查看只读信息
+            if (idleBuses.isNotEmpty()) {
+                if (lineDetail.buses.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+                val sortedIdleBuses = remember(idleBuses) {
+                    idleBuses.sortedWith(compareBy<LiveBus> { it.order }.thenBy { it.plateOrFleetNo })
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    sortedIdleBuses.forEach { bus ->
+                        IdleBusCard(
+                            bus = bus,
+                            positionName = lineDetail.stops.firstOrNull { it.order == bus.order }?.name,
+                            onClick = { onIdleBusClick(bus) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 停场/非运营车辆卡片：红色（主题警示色）区分在途（绿）与已过站（灰）。
+ * 不显示 ETA/到站状态（停场车不参与计算），点击弹只读信息卡。
+ */
+@Composable
+private fun IdleBusCard(
+    bus: LiveBus,
+    positionName: String?,
+    onClick: () -> Unit
+) {
+    val warn = TrackrTheme.colors.warn
+    val cleanPlate = sanitizePlateOrFleetNo(bus.plateOrFleetNo)
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, warn.copy(alpha = 0.45f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = warn.copy(alpha = 0.15f),
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = vectorResource(Res.drawable.ic_bus),
+                        contentDescription = null,
+                        tint = warn,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = warn.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = stringResource(LineRes.string.line_bus_idle_badge),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = warn,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = cleanPlate.ifBlank { stringResource(LineRes.string.line_list_kind_idle) },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                if (positionName != null) {
+                    Text(
+                        text = stringResource(LineRes.string.line_bus_idle_position, positionName),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

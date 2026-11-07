@@ -125,6 +125,7 @@ import com.trackr.ui.components.timetable.TimetableBottomSheet
 import com.trackr.ui.screens.linedetail.components.BusFollowContent
 import com.trackr.ui.screens.linedetail.components.BusListContent
 import com.trackr.ui.screens.linedetail.components.FavoriteGroupPickerSheet
+import com.trackr.ui.screens.linedetail.components.IdleBusInfoDialog
 import com.trackr.ui.screens.linedetail.components.StationArrivalContent
 import com.trackr.ui.screens.linedetail.components.overflowMarquee
 import kotlin.math.roundToInt
@@ -151,6 +152,9 @@ sealed interface LineDetailEvent {
     data object DismissTimetable : LineDetailEvent
     data object OpenReminder : LineDetailEvent
     data object DismissReminder : LineDetailEvent
+    /** 查看停场/非运营车辆信息（只读，不发起追踪） */
+    data class ShowIdleBusInfo(val bus: LiveBus) : LineDetailEvent
+    data object DismissIdleBusInfo : LineDetailEvent
     data class SaveReminder(
         val hour: Int,
         val minute: Int,
@@ -478,6 +482,19 @@ fun LineDetailScreen(
             onDismiss = { onEvent(LineDetailEvent.DismissGroupPicker) }
         )
     }
+
+    // 停场/非运营车辆信息（只读）
+    val idleBus = state.idleBusInfo
+    if (idleBus != null && static != null) {
+        val detail = rememberLineDetail(static, state.live)
+        IdleBusInfoDialog(
+            bus = idleBus,
+            lineName = static.line.name,
+            towards = static.line.endStop,
+            positionName = detail.stops.firstOrNull { it.order == idleBus.order }?.name,
+            onDismiss = { onEvent(LineDetailEvent.DismissIdleBusInfo) }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -662,7 +679,8 @@ private fun HeroCard(
                         selectedStop = state.selectedStop,
                         idleBuses = detail.idleBuses,
                         onBack = { onEvent(LineDetailEvent.BackFromPanel) },
-                        onSelectBus = { onEvent(LineDetailEvent.FollowBus(it)) }
+                        onSelectBus = { onEvent(LineDetailEvent.FollowBus(it)) },
+                        onIdleBusClick = { onEvent(LineDetailEvent.ShowIdleBusInfo(it)) }
                     )
                 }
 

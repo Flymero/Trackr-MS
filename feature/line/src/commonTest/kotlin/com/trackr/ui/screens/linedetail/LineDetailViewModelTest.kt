@@ -223,6 +223,18 @@ class LineDetailViewModelTest {
         )
     }
 
+    @Test
+    fun idleBusInfo_showAndDismiss() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        val bus = LiveBus(busId = "msb:1:1:0:idle", plateOrFleetNo = "川Z10269D", order = 2)
+
+        viewModel.showIdleBusInfo(bus)
+        assertEquals(bus, viewModel.uiState.value.idleBusInfo)
+
+        viewModel.dismissIdleBusInfo()
+        assertNull(viewModel.uiState.value.idleBusInfo)
+    }
+
     private fun createViewModel(
         targetOrder: Int? = null,
         stationId: String? = null,
