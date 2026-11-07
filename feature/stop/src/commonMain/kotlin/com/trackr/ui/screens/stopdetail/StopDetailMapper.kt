@@ -136,7 +136,7 @@ internal fun watchLineUiOf(wl: WatchedLine, stopName: String): WatchLineUi {
             minutes = ArrivalText.minutesOf(wl.etaSeconds)
         )
     }
-    val stopsText = if (wl.busId != null && !wl.isArrived && wl.stopsRemaining >= 0) "还有 ${wl.stopsRemaining} 站" else ""
+    val stopsText = if (wl.busId != null && !wl.isArrived && wl.stopsRemaining > 0) "还有 ${wl.stopsRemaining} 站" else ""
     return WatchLineUi(
         lineId = wl.line.lineId,
         lineName = wl.line.lineName,

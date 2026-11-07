@@ -89,6 +89,32 @@ class BusHomeMapperArrivalDisplayTest {
     }
 
     @Test
+    fun onTheWay_zeroStops_usesUpstreamNextStopText() {
+        val display = BusHomeMapper.arrivalDisplayFor(
+            status(targetOrder = 5, bus = LiveBus(busId = "bus", plateOrFleetNo = "", order = 5, etaSeconds = -1)),
+            nextDepartureIsFromStart = false
+        )
+
+        assertEquals("下一站", display.value)
+        assertEquals("下一站", display.headline)
+        assertEquals("下一站就到", display.short)
+        assertFalse(display.spoken.contains("分钟"))
+    }
+
+    @Test
+    fun onTheWay_oneStop_keepsRemainingCount() {
+        val display = BusHomeMapper.arrivalDisplayFor(
+            status(targetOrder = 5, bus = LiveBus(busId = "bus", plateOrFleetNo = "", order = 4, etaSeconds = -1)),
+            nextDepartureIsFromStart = false
+        )
+
+        assertEquals("还有 1", display.value)
+        assertEquals("站", display.unit)
+        assertEquals("还有 1 站", display.headline)
+        assertEquals("", display.detail)
+    }
+
+    @Test
     fun authoritativeStatus_isKept() {
         val display = BusHomeMapper.arrivalDisplayFor(
             status(bus = null, statusText = "暂停运营"),

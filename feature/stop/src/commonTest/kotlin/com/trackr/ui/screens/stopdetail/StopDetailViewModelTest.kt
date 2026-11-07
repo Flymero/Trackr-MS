@@ -614,6 +614,28 @@ class StopDetailViewModelTest {
     }
 
     @Test
+    fun testWatchInProgress_zeroStops_usesUpstreamNextStopTextWithoutStopCount() = runTest(main.dispatcher) {
+        val repo = useRealTracking()
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        val session = assertNotNull(repo.start(watchHere(w49)))
+        repo.update(session.sessionId, session.generation) {
+            it.copy(
+                watchedLines = listOf(
+                    WatchedLine(line = w49, busId = "b49", plate = "沪A·71001", stopsRemaining = 0, etaSeconds = -1, hasData = true)
+                )
+            )
+        }
+        testScheduler.runCurrent()
+
+        val watch = assertNotNull(viewModel.uiState.value.watch)
+        val first = watch.lines.first()
+        assertEquals("下一站", first.arrival.value)
+        assertFalse(first.detail.contains("还有 0 站"))
+        assertEquals("沪A·71001", first.detail)
+    }
+
+    @Test
     fun testWatchInProgress_onBoardView_andStop() = runTest(main.dispatcher) {
         val repo = useRealTracking()
         val viewModel = createViewModel()

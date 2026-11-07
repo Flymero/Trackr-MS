@@ -340,17 +340,16 @@ internal object BusHomeMapper {
                         detail = "",
                         short = "在路上"
                     )
-                    else -> {
-                        val stops = stopsAway.coerceAtLeast(0)
-                        val stopsText = "还有 $stops 站"
-                        val stopsDisplay = format(ArrivalState.OnTheWay(stopsAway = stops, minutes = null))
+                    else -> if (stopsAway > 0) {
                         display.copy(
-                            value = "还有 $stops",
+                            value = "还有 $stopsAway",
                             unit = "站",
                             detail = "",
-                            short = stopsText,
-                            spoken = stopsDisplay.spoken.replace("下一站就", "$stopsText")
+                            short = "还有 $stopsAway 站"
                         )
+                    } else {
+                        // 剩 0 站（未到站）：不再改写，直接用 ArrivalText 的「即将到站」
+                        display
                     }
                 }
                 else -> display
