@@ -34,6 +34,8 @@ data class TransitLocalSnapshot(
     val transitCodeProvider: String? = null,
     /** 首页「乘车码」悬浮按钮显不显示；没存过为 null，按显示 */
     val showTransitCodeButton: Boolean? = null,
+    /** 上车后自动结束追踪（issue #32）；没存过为 null，按开 */
+    val autoStopAfterBoarding: Boolean? = null,
     val nearbyStopsCount: Int? = null,
     val liveNotificationEnabled: Boolean? = null,
     val showOnLockScreen: Boolean? = null,
@@ -54,6 +56,7 @@ interface TransitLocalStore {
     suspend fun saveEngineMode(name: String)
     suspend fun saveTransitCodeProvider(id: String)
     suspend fun saveShowTransitCodeButton(enabled: Boolean)
+    suspend fun saveAutoStopAfterBoarding(enabled: Boolean)
     suspend fun saveNearbyStopsCount(count: Int)
     suspend fun saveLiveNotificationEnabled(enabled: Boolean)
     suspend fun saveShowOnLockScreen(enabled: Boolean)

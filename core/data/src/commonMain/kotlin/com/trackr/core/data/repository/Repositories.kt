@@ -53,6 +53,15 @@ interface SettingsRepository {
      * 用 NFC 刷卡的人用不到它，开着反而挡住列表最后几条，所以可以在「我的」里关掉。
      */
     val showTransitCodeButton: StateFlow<Boolean>
+
+    /**
+     * 上车后自动结束追踪（issue #32），默认开：定位判断用户已经坐上这班车，就直接结束本次追踪。
+     *
+     * 只对**没有下车站**的追踪生效——单线路（线路页「追踪」、定时提醒）和站点页的一起等。
+     * 路线（有明确下车站）不受影响：上车后正是它该干活的时候，结束了就收不到下车站提醒。
+     * 需要精确定位；没有权限时这项开关不生效（判不出上车，追踪照旧）。
+     */
+    val autoStopAfterBoarding: StateFlow<Boolean>
     val nearbyStopsCount: StateFlow<Int>
     val isLiveNotificationEnabled: StateFlow<Boolean>
 
@@ -87,6 +96,7 @@ interface SettingsRepository {
     suspend fun selectCity(city: TransitCity)
     suspend fun setPreferredTransitCodeProvider(provider: TransitCodeProvider)
     fun setShowTransitCodeButton(enabled: Boolean)
+    fun setAutoStopAfterBoarding(enabled: Boolean)
 }
 
 /**
@@ -231,6 +241,17 @@ interface LocationRepository {
 
     /** 按档位持续定位（追踪用），收到的每个定位都会更新 [latest] */
     fun fixes(tier: LocationCadence.Tier): Flow<UserFix>
+
+    /** 有没有任一定位权限（精确或模糊）。[bestFix] 取不到定位时用它区分「没授权」和「没定位」 */
+    fun hasPermission(): Boolean
+
+    /**
+     * 系统「位置信息」总开关是否打开。
+     *
+     * 权限给了但总开关关着时，系统里所有定位来源都不出数据，[bestFix] 必然返回 null——
+     * 提示要能说清是哪一层没开（`BusHomeViewModel` 的 `LocationIssue`）。
+     */
+    fun isSystemLocationEnabled(): Boolean
 }
 
 /**

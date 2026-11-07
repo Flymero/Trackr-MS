@@ -7,6 +7,7 @@ import com.trackr.core.domain.platform.AppUpdateInstaller
 import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.domain.platform.ReminderAlarms
 import com.trackr.core.domain.platform.SpeechInput
+import com.trackr.core.domain.platform.SystemSettingsLauncher
 import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.domain.platform.UpdateChecker
@@ -134,6 +135,25 @@ class FakeTransitCodeLauncher(
     override fun isInstalled(provider: TransitCodeProvider): Boolean = provider in installed
 }
 
+/** 跳系统设置页的 Fake：记下点了哪个（位置信息页 / 应用详情页），不真跳 */
+class FakeSystemSettingsLauncher(
+    /** 打不开时置 false，模拟 ROM 裁掉了那个设置页 */
+    var canOpen: Boolean = true
+) : SystemSettingsLauncher {
+    /** 依次记下的跳转目标：`location` / `app` */
+    val opened: MutableList<String> = mutableListOf()
+
+    override fun openLocationSettings(): Boolean = record("location")
+
+    override fun openAppSettings(): Boolean = record("app")
+
+    private fun record(target: String): Boolean {
+        if (!canOpen) return false
+        opened += target
+        return true
+    }
+}
+
 /**
  * 定位 Fake：[emit] 发一个定位给正在收集的 [fixes]；档位为 OFF 时丢掉（和接口约定一致）。
  * 收集时记下请求的档位，方便断言定位频率。
@@ -168,6 +188,11 @@ class FakeLocationSource(
     var anyPermission: Boolean? = null
 
     override fun hasAnyPermission(): Boolean = anyPermission ?: precisePermission
+
+    /** 系统「位置信息」总开关 */
+    var systemLocationEnabled: Boolean = true
+
+    override fun isLocationEnabled(): Boolean = systemLocationEnabled
 
     /** 各来源缓存的定位；为 null 时退回 [lastKnownFix] */
     var lastKnownFixList: List<UserFix>? = null

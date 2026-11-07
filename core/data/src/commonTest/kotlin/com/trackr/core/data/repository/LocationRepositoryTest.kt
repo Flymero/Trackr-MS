@@ -48,6 +48,19 @@ class LocationRepositoryTest {
         assertEquals(cached, repository.bestFix(forceFresh = true))
     }
 
+    /** 首页分「没授权」和「系统定位没开」两句话，仓库如实把这两层透出来（issue #34） */
+    @Test
+    fun permissionAndSystemSwitch_arePassedThrough() = runTest {
+        assertEquals(true, repository.hasPermission())
+        assertEquals(true, repository.isSystemLocationEnabled())
+
+        source.anyPermission = false
+        source.systemLocationEnabled = false
+
+        assertEquals(false, repository.hasPermission())
+        assertEquals(false, repository.isSystemLocationEnabled())
+    }
+
     @Test
     fun freshAndAccurateLastKnown_isUsedDirectly() = runTest {
         val cached = fix(30.0, 80f, 9_000)

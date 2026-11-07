@@ -171,13 +171,16 @@ internal object WatchTogetherTracker {
      *
      * @param locationEnabled 这次会话能用定位判上车
      * @param fix 判上车用的定位，已按 ≤30 秒、≤50 m 过滤（[TrackingEngine.usableBoardingFix]），没有为 null
+     * @param stopAfterBoarding 「上车后自动结束追踪」（issue #32）：定位判出上了哪辆之后直接结束这次追踪，
+     *   不再跟着那辆车坐到终点。手动「我上车了」不受它影响（那是用户明确要看这趟车）
      */
     fun reduce(
         session: TrackingSession,
         poll: WatchPoll,
         locationEnabled: Boolean,
         fix: UserFix?,
-        nowMillis: Long
+        nowMillis: Long,
+        stopAfterBoarding: Boolean = false
     ): TrackingEngine.Result {
         val target = session.watchTarget ?: return TrackingEngine.Result(session)
         if (session.state.legPhase != LegPhase.WAITING_BOARD) return TrackingEngine.Result(session)
@@ -253,7 +256,13 @@ internal object WatchTogetherTracker {
         if (pick != null) {
             val lp = poll.lines[pick.line.lineId]
             val boardedSession = board(session, target, pick, lp?.stops.orEmpty(), nowMillis, byLocation = true)
-            return TrackingEngine.Result(boardedSession, effects)
+            // 上了哪一辆就只坐哪一辆，其他的不用再等：开关开着时这一趟到此为止（issue #32）
+            val finalEffects = if (stopAfterBoarding) {
+                effects + TrackingEngine.Effect.Finished.Boarded(boardedSession.state)
+            } else {
+                effects
+            }
+            return TrackingEngine.Result(boardedSession, finalEffects)
         }
         if (boarded.size >= 2) {
             // 不同线的车同时判成上车、定位又分不清：等用户选

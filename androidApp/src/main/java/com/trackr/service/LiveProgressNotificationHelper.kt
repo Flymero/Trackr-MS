@@ -228,6 +228,9 @@ class LiveProgressNotifier(
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_LIVE_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_trackr)
+            // 给系统一个明确的强调色，别让它自己挑（issue #31：不指定时锁屏卡片会出现浅底浅字，
+            // 几乎看不见）。染色通知拿它当背景、非染色通知拿它当图标/强调色，深蓝都是安全选择。
+            .setColor(COLOR_ACCENT)
             .setContentTitle(texts.title)
             .setContentText(texts.content)
             .setSubText(texts.subText)
@@ -282,6 +285,9 @@ class LiveProgressNotifier(
      * 谁对由设备说了算：先按文档不染色，设备仍判定不可上岛再染一次，用设备认可的那个；
      * 两次都不认就保持不染色。系统低于 Android 16 没有这套判定，直接不染色。
      * 只能在真机验证，Robolectric 4.14 还没有 SDK 36 运行时。
+     *
+     * 染色版必须带 [COLOR_ACCENT]：染色通知的前景/背景由系统按 `notification.color` 推算，
+     * 不给颜色它就得自己挑一对，锁屏卡片会挑出浅底浅字（issue #31）。
      */
     private fun buildPromotable(builder: NotificationCompat.Builder): Notification {
         if (!LiveUpdatePromotion.isPromotionSupported()) return builder.build()
@@ -710,6 +716,7 @@ class LiveProgressNotifier(
     /** 取消一条常驻通知（默认那条：没有会话时进前台用的占位通知） */
     fun cancelNotification(context: Context, notificationId: Int = NOTIFICATION_ID_LIVE_PROGRESS) {
         try {
+            XiaomiFocusAdapter.cancelFocusNotification(context, notificationId)
             NotificationManagerCompat.from(context).cancel(notificationId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to cancel live progress notification", e)
@@ -752,7 +759,9 @@ class LiveProgressNotifier(
          */
         fun cancelSessionNotification(context: Context, sessionId: String) {
             runCatching {
-                NotificationManagerCompat.from(context).cancel(notificationIdOfSession(sessionId))
+                val notificationId = notificationIdOfSession(sessionId)
+                XiaomiFocusAdapter.cancelFocusNotification(context, notificationId)
+                NotificationManagerCompat.from(context).cancel(notificationId)
             }
         }
 
@@ -765,7 +774,9 @@ class LiveProgressNotifier(
         /** 撤掉一起等里某条线的通知（那条线被去掉 / 结束后） */
         fun cancelWatchLineNotification(context: Context, sessionId: String, lineId: String) {
             runCatching {
-                NotificationManagerCompat.from(context).cancel(notificationIdOfSession(watchLineKey(sessionId, lineId)))
+                val notificationId = notificationIdOfSession(watchLineKey(sessionId, lineId))
+                XiaomiFocusAdapter.cancelFocusNotification(context, notificationId)
+                NotificationManagerCompat.from(context).cancel(notificationId)
             }
         }
 
@@ -777,6 +788,12 @@ class LiveProgressNotifier(
 
         private val COLOR_COMPLETED = Color.parseColor("#FF1B8755") // 已行驶绿色段
         private val COLOR_REMAINING = Color.parseColor("#FF3B608C") // 剩余蓝色段
+
+        /**
+         * 通知强调色：设计系统 v3 品牌蓝。系统拿它当染色通知的背景 / 非染色通知的图标强调色，
+         * 深色底保证系统配出的前景色是可读的白色（issue #31 浅底浅字）。
+         */
+        internal val COLOR_ACCENT = Color.parseColor("#FF1F5FD6")
 
         /** 读取失败时的兜底值，与设置项默认值（开启）一致；常驻通知和强提醒共用 */
         internal const val LIVE_NOTIFICATION_ENABLED_FALLBACK = true

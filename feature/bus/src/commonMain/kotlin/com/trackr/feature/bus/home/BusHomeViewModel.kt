@@ -11,7 +11,9 @@ import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.UserLocationStore
 import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.NoAnnouncer
+import com.trackr.core.domain.platform.NoSystemSettingsLauncher
 import com.trackr.core.domain.platform.ProcessMonotonicClock
+import com.trackr.core.domain.platform.SystemSettingsLauncher
 import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.model.EngineMode
@@ -54,6 +56,8 @@ class BusHomeViewModel(
     private val trackingRepository: TrackingRepository,
     /** 打开支付宝 / 云闪付乘车码 */
     private val transitCodeLauncher: TransitCodeLauncher,
+    /** 定位提示里的「去授权 / 去开启」跳系统设置页；不传（测试、还没做的平台）就什么都不打开 */
+    private val systemSettings: SystemSettingsLauncher = NoSystemSettingsLauncher,
     private val enableAutoPolling: Boolean = true,
     /** 单调时钟（毫秒），用于判断恢复轮询时距上次刷新是否已超过一个周期；测试可替换 */
     private val elapsedRealtimeMillis: () -> Long = { ProcessMonotonicClock.elapsedMillis() },
@@ -240,6 +244,8 @@ class BusHomeViewModel(
             is BusHomeEvent.ProvinceSelected -> selectProvince(event.province)
             is BusHomeEvent.CitySelected -> selectCity(event.city)
             BusHomeEvent.RelocateCity -> refreshLocationAndNearby(switchCity = true)
+            BusHomeEvent.OpenLocationSettings -> systemSettings.openLocationSettings()
+            BusHomeEvent.OpenAppSettings -> systemSettings.openAppSettings()
             BusHomeEvent.OpenSearch,
             is BusHomeEvent.OpenLine,
             is BusHomeEvent.OpenStop,
@@ -279,6 +285,32 @@ class BusHomeViewModel(
      */
     fun refreshLocationAndNearby(switchCity: Boolean = false) {
         refresh(switchCity)
+    }
+
+    /**
+     * 回到前台时调用：上次定位失败、且失败的原因已经变了，就静默再定位一次（issue #34）。
+     *
+     * 「原因变了」= 用户去系统设置里把那一层补上了（没授权→授权了、总开关关着→开了）。
+     * 原因没变就不重试：每次从搜索页返回都空转 4.5 秒定位窗口、再打一次附近站，纯属白烧电。
+     */
+    fun retryLocationIfFailed() {
+        val state = _uiState.value
+        val issue = state.locationIssue ?: return
+        if (state.isLocating || state.isRefreshing) return
+        if (diagnoseLocationIssue() == issue) return
+        refresh()
+    }
+
+    /**
+     * [locationRepository.bestFix] 没给定位时，分清是哪一层的锅（提示文案和按钮都为它服务）。
+     *
+     * 顺序不能反：没授权时说「手机定位服务未开启」是误导（用户第一件事该是授权）；
+     * 两层都正常时才是「这一轮没取到」。
+     */
+    private fun diagnoseLocationIssue(): LocationIssue = when {
+        !locationRepository.hasPermission() -> LocationIssue.PermissionMissing
+        !locationRepository.isSystemLocationEnabled() -> LocationIssue.ServiceDisabled
+        else -> LocationIssue.Unavailable
     }
 
     private fun loadNearbyStops(
@@ -323,7 +355,7 @@ class BusHomeViewModel(
     fun refresh(switchCity: Boolean = false) {
         viewModelScope.launch {
             val cityBefore = _uiState.value.currentCity
-            edit { it.copy(isRefreshing = true, isLocating = true, locationError = null) }
+            edit { it.copy(isRefreshing = true, isLocating = true, locationIssue = null) }
 
             val favJob = launch {
                 val favResult = realtime.refreshFavoritesRealtime()
@@ -360,7 +392,7 @@ class BusHomeViewModel(
                                 currentLat = lat,
                                 currentLng = lng,
                                 isLocating = false,
-                                locationError = null
+                                locationIssue = null
                             )
                         }
                         Triple(lat, lng, resolvedCity)
@@ -372,7 +404,7 @@ class BusHomeViewModel(
                                 currentLat = lat,
                                 currentLng = lng,
                                 isLocating = false,
-                                locationError = null
+                                locationIssue = null
                             )
                         }
                         Triple(lat, lng, settings.selectedCity.value)
@@ -387,7 +419,7 @@ class BusHomeViewModel(
                             currentLat = lat,
                             currentLng = lng,
                             isLocating = false,
-                            locationError = LOCATION_UNAVAILABLE
+                            locationIssue = diagnoseLocationIssue()
                         )
                     }
                     Triple(lat, lng, currentCity)
@@ -597,7 +629,6 @@ class BusHomeViewModel(
         const val NEARBY_STOPS_LIMIT = 6
         const val POLLING_INTERVAL_MS = 15_000L
 
-        const val LOCATION_UNAVAILABLE = "定位不可用，已保留当前位置"
         const val NEARBY_FAILED = "附近站没刷出来，下拉再试一次"
 
         /** 长辈首页没有下拉刷新：附近站空着时下面有「重新定位」按钮（第 32 步遗留） */

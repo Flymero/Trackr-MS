@@ -42,13 +42,17 @@ class ArrivalAlertNotifier(
      * 关着用 PRIVATE。**不能不管**：`Notification.visibility` 默认就是 PRIVATE，用户把系统锁屏设成
      * 「隐藏敏感内容」时，这五条提醒在锁屏上会被抹成「内容已隐藏」——震动照响，但人掏出手机看到一条空通知，
      * 而那一刻正是「车到站了，快上车」。
+     *
+     * @param timeoutMillis 这条提醒在通知栏里留多久就自己消失（见 [TIMEOUT_ARRIVED_MILLIS] 那一组）：
+     *   `autoCancel` 只在用户点的时候生效，不点会一直挂着，#28 就是被这个坑到的
      */
     private fun alertNotification(
         context: Context,
         title: String,
         content: String,
         category: String,
-        requestCode: Int
+        requestCode: Int,
+        timeoutMillis: Long
     ): Notification {
         val lockScreenOn = runCatching { showOnLockScreenSetting() }.getOrDefault(true)
         return NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
@@ -59,6 +63,10 @@ class ArrivalAlertNotifier(
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(category)
             .setAutoCancel(true)
+            // 提醒自己过期（#28）：autoCancel 只在用户点一下时生效，不点就一直挂在通知栏和锁屏上。
+            // 到站只有一次机会，该弹出来的时候要弹；但弹过之后不该变成一条要手动清理的常驻消息，
+            // 因为同一趟车的进度常驻通知本来就写着「到站了」。
+            .setTimeoutAfter(timeoutMillis)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setVisibility(
                 if (lockScreenOn) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE
@@ -74,7 +82,8 @@ class ArrivalAlertNotifier(
             title = "追踪已停止",
             content = "${state.lineName} 追踪已超过 ${maxTrackingDurationText()}，已停止追踪。",
             category = NotificationCompat.CATEGORY_STATUS,
-            requestCode = NOTIFICATION_ID_EXPIRED
+            requestCode = NOTIFICATION_ID_EXPIRED,
+            timeoutMillis = TIMEOUT_STATUS_MILLIS
         )
         runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_EXPIRED, notification) }
     }
@@ -86,9 +95,31 @@ class ArrivalAlertNotifier(
             title = "追踪已中断",
             content = "${state.lineName} 追踪未能自动接续，请打开应用重试。",
             category = NotificationCompat.CATEGORY_STATUS,
-            requestCode = NOTIFICATION_ID_INTERRUPTED
+            requestCode = NOTIFICATION_ID_INTERRUPTED,
+            timeoutMillis = TIMEOUT_STATUS_MILLIS
         )
         runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_INTERRUPTED, notification) }
+    }
+
+    /**
+     * 定位判断用户已经上车，这次追踪自动结束（issue #32，「上车后自动结束追踪」开关）。
+     *
+     * 必须说一句：常驻通知和「追踪中」会一起消失，不说的话用户会以为 App 挂了。
+     * 顺手撤掉「车已到站」那条——上了车再看它没有意义。
+     */
+    fun triggerEndedAfterBoarding(context: Context, state: TrackingSessionState, sessionId: String = "") {
+        ensureNotificationChannel(context)
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId))
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId))
+        val notification = alertNotification(
+            context = context,
+            title = "已上车，追踪结束",
+            content = "定位判断你已坐上 ${state.lineName}，本次追踪已自动结束。还想看车的话重新追踪一次就好。",
+            category = NotificationCompat.CATEGORY_STATUS,
+            requestCode = NOTIFICATION_ID_BOARDED,
+            timeoutMillis = TIMEOUT_STATUS_MILLIS
+        )
+        runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_BOARDED, notification) }
     }
 
     /** 最长追踪时长写成文案（「3 小时」），常量改了文案自动跟着变 */
@@ -127,7 +158,7 @@ class ArrivalAlertNotifier(
     fun triggerApproachingAlert(context: Context, state: TrackingSessionState, sessionId: String = "") {
         ensureNotificationChannel(context)
         val notificationId = alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId)
-        cancelCounterpart(context, alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId))
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId))
 
         var posted = false
         if (shouldPostStandaloneNotification(context, state)) {
@@ -144,7 +175,8 @@ class ArrivalAlertNotifier(
                 title = title,
                 content = content,
                 category = NotificationCompat.CATEGORY_REMINDER,
-                requestCode = notificationId
+                requestCode = notificationId,
+                timeoutMillis = TIMEOUT_APPROACHING_MILLIS
             )
 
             try {
@@ -173,7 +205,7 @@ class ArrivalAlertNotifier(
     ) {
         ensureNotificationChannel(context)
         val notificationId = alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId)
-        cancelCounterpart(context, alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId))
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId))
 
         var posted = false
         if (forceStandalone || shouldPostStandaloneNotification(context, state)) {
@@ -185,7 +217,8 @@ class ArrivalAlertNotifier(
                 title = title,
                 content = content,
                 category = NotificationCompat.CATEGORY_REMINDER,
-                requestCode = notificationId
+                requestCode = notificationId,
+                timeoutMillis = TIMEOUT_ARRIVED_MILLIS
             )
 
             try {
@@ -215,8 +248,8 @@ class ArrivalAlertNotifier(
         ensureNotificationChannel(context)
         val notificationId = alertNotificationId(NOTIFICATION_ID_TRANSFER, sessionId)
         // 换乘站即本程下车站：只保留换乘提醒，清掉同一站的到站 / 临近通知，避免连发两条
-        cancelCounterpart(context, alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId))
-        cancelCounterpart(context, alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId))
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId))
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId))
 
         val title = "【换乘提醒】到达 $transferStationName"
         val content = "已到达换乘站 $transferStationName，已自动切换追踪下一程：$nextLineName"
@@ -226,7 +259,8 @@ class ArrivalAlertNotifier(
             title = title,
             content = content,
             category = NotificationCompat.CATEGORY_REMINDER,
-            requestCode = notificationId
+            requestCode = notificationId,
+            timeoutMillis = TIMEOUT_TRANSFER_MILLIS
         )
 
         var posted = false
@@ -253,8 +287,8 @@ class ArrivalAlertNotifier(
     fun triggerMissedBusAlert(context: Context, state: TrackingSessionState, sessionId: String = "") {
         ensureNotificationChannel(context)
         val notificationId = alertNotificationId(NOTIFICATION_ID_MISSED, sessionId)
-        cancelCounterpart(context, alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId))
-        cancelCounterpart(context, alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId))
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId))
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId))
 
         val stop = state.targetStopName.ifBlank { "上车站" }
         val next = when {
@@ -269,7 +303,8 @@ class ArrivalAlertNotifier(
             title = "错过 ${state.lineName} 了",
             content = "$next，仍在追踪 $stop",
             category = NotificationCompat.CATEGORY_REMINDER,
-            requestCode = notificationId
+            requestCode = notificationId,
+            timeoutMillis = TIMEOUT_MISSED_MILLIS
         )
 
         var posted = false
@@ -331,21 +366,6 @@ class ArrivalAlertNotifier(
 
     private fun areNotificationsEnabled(context: Context): Boolean =
         runCatching { NotificationManagerCompat.from(context).areNotificationsEnabled() }.getOrDefault(true)
-
-    /**
-     * 同时追多项时每项的到站 / 临近提醒各用一组 id：不同项的提醒不互相顶掉、也不互相取消。
-     * [sessionId] 为空时还是原来的固定 id（旧调用 / 没有会话的场景）。
-     */
-    private fun alertNotificationId(base: Int, sessionId: String): Int =
-        if (sessionId.isEmpty()) base else base * 4096 + (sessionId.hashCode() and 0xFFF)
-
-    private fun cancelCounterpart(context: Context, notificationId: Int) {
-        try {
-            NotificationManagerCompat.from(context).cancel(notificationId)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to cancel notification $notificationId", e)
-        }
-    }
 
     private fun createMainActivityPendingIntent(context: Context, requestCode: Int): PendingIntent {
         val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -414,9 +434,59 @@ class ArrivalAlertNotifier(
         const val NOTIFICATION_ID_INTERRUPTED = 10006
         const val NOTIFICATION_ID_MISSED = 10007
 
+        /** 定位判断已上车、追踪自动结束（issue #32） */
+        const val NOTIFICATION_ID_BOARDED = 10008
+
         private val APPROACHING_VIBRATION_PATTERN = longArrayOf(0, 280, 120, 280, 120, 400)
         private val TRANSFER_VIBRATION_PATTERN = longArrayOf(0, 300, 100, 300, 100, 300)
         private val MISSED_VIBRATION_PATTERN = longArrayOf(0, 350, 150, 350)
         private const val ARRIVED_VIBRATION_DURATION_MS = 800L
+
+        /**
+         * 提醒在通知栏里留多久就自己消失（#28）。
+         *
+         * `setAutoCancel(true)` 只是「点一下才消失」，用户不点就一直在——追踪结束后尤其明显：
+         * 常驻进度通知已经撤了，这条「车辆已到站」还挂在锁屏上，得手动点掉。
+         * 时间按「人还来不来得及看」定：临近 3 分钟（马上会被到站那条顶掉）、到站 5 分钟、
+         * 换乘 5 分钟、错过 10 分钟（要看完下一班还有几分钟）、已停止 / 已中断 15 分钟。
+         */
+        private const val TIMEOUT_APPROACHING_MILLIS = 3 * 60_000L
+        private const val TIMEOUT_ARRIVED_MILLIS = 5 * 60_000L
+        private const val TIMEOUT_TRANSFER_MILLIS = 5 * 60_000L
+        private const val TIMEOUT_MISSED_MILLIS = 10 * 60_000L
+        private const val TIMEOUT_STATUS_MILLIS = 15 * 60_000L
+
+        /**
+         * 同时追多项时每项的到站 / 临近提醒各用一组 id：不同项的提醒不互相顶掉、也不互相取消。
+         * [sessionId] 为空时还是原来的固定 id（旧调用 / 没有会话的场景）。
+         */
+        fun alertNotificationId(base: Int, sessionId: String): Int =
+            if (sessionId.isEmpty()) base else base * 4096 + (sessionId.hashCode() and 0xFFF)
+
+        /** 撤掉一条提醒（不关心它到底在不在） */
+        fun cancelNotification(context: Context, notificationId: Int) {
+            try {
+                NotificationManagerCompat.from(context).cancel(notificationId)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to cancel notification $notificationId", e)
+            }
+        }
+
+        /**
+         * 撤掉一份追踪留下的全部提醒：到站 / 即将到站 / 换乘 / 错过。
+         *
+         * 追踪结束了这些提醒就没有主人了，不该继续挂在通知栏和锁屏上等用户手动点掉（#28）。
+         * 「已停止」「已中断」是解释性的状态消息，不挂在会话上，只能靠 [TIMEOUT_STATUS_MILLIS] 自己过期；
+         * 旧版本发出去的通知没带 sessionId，算不出 id，也只能等它自己过期。
+         */
+        fun cancelSessionAlerts(context: Context, sessionId: String) {
+            if (sessionId.isEmpty()) return
+            listOf(
+                NOTIFICATION_ID_APPROACHING,
+                NOTIFICATION_ID_ARRIVED,
+                NOTIFICATION_ID_TRANSFER,
+                NOTIFICATION_ID_MISSED
+            ).forEach { cancelNotification(context, alertNotificationId(it, sessionId)) }
+        }
     }
 }

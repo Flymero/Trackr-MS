@@ -324,7 +324,11 @@ internal object BusHomeMapper {
         towards: String = ""
     ): ArrivalDisplay {
         fun format(state: ArrivalState) = ArrivalText.format(state, lineName = lineName, stopName = stopName, towards = towards)
-        val bus = status.approachingBuses.firstOrNull()
+        // 不能直接拿列表第一条：收藏走的是线路详情接口，车是按出场顺序给的，第一辆可能是刚出场的头班车
+        // （还有几十站，算出「89 分钟」），和线路页「最近那辆」的 7 分钟对不上（issue #33）。
+        // 这里和线路页 / 小组件用同一个口径：开到本站之前的车里「站序 + 站间进度」最大的那辆。
+        val bus = ArrivalText.nearestBus(status.targetOrder, status.approachingBuses)
+            ?: status.approachingBuses.firstOrNull()
         if (bus != null) {
             val state = ArrivalText.stateForBus(status.targetOrder, bus)
             // 首页不展示静态轮询 ETA；到站状态保留，后车若只有站序也保留其站数。

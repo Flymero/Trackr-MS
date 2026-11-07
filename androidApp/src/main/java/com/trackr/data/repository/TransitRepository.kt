@@ -99,6 +99,9 @@ class TransitRepository(
     private val _showTransitCodeButton = MutableStateFlow(initial.showTransitCodeButton ?: true)
     override val showTransitCodeButton: StateFlow<Boolean> = _showTransitCodeButton.asStateFlow()
 
+    private val _autoStopAfterBoarding = MutableStateFlow(initial.autoStopAfterBoarding ?: true)
+    override val autoStopAfterBoarding: StateFlow<Boolean> = _autoStopAfterBoarding.asStateFlow()
+
     private val _nearbyStopsCount = MutableStateFlow((initial.nearbyStopsCount ?: 4).coerceIn(1, 16))
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
 
@@ -174,6 +177,11 @@ class TransitRepository(
     override fun setShowTransitCodeButton(enabled: Boolean) {
         _showTransitCodeButton.value = enabled
         writer.enqueue { store.saveShowTransitCodeButton(enabled) }
+    }
+
+    override fun setAutoStopAfterBoarding(enabled: Boolean) {
+        _autoStopAfterBoarding.value = enabled
+        writer.enqueue { store.saveAutoStopAfterBoarding(enabled) }
     }
 
     override fun setAlertThresholdStops(stops: Int) {

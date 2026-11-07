@@ -14,6 +14,20 @@ import com.trackr.core.model.isMeishanLocal
 import com.trackr.ui.components.arrival.ArrivalUi
 
 /**
+ * 定位失败的原因（issue #34：小米 14 上权限给了还是提示「定位不可用」，用户不知道该去哪开）。
+ *
+ * 三个原因对应三句文案、两个去处：
+ * - [PermissionMissing]：应用没有定位权限 → 去应用详情页授权
+ * - [ServiceDisabled]：权限有，但系统「位置信息」总开关关着 → 去系统位置信息页开
+ * - [Unavailable]：权限和开关都正常，这一轮没取到（室内、冷启动、GPS 没星） → 再试一次
+ */
+enum class LocationIssue {
+    PermissionMissing,
+    ServiceDisabled,
+    Unavailable
+}
+
+/**
  * 公交首页的状态（v3「公交」页）。
  *
  * 上半部分是数据（ViewModel 自己用、测试断言用），下半部分 [trackingCards]、[favoriteRows]、[nearbyCards]
@@ -29,7 +43,8 @@ data class BusHomeUiState(
     val currentLat: Double = 31.2304,
     val currentLng: Double = 121.4737,
     val isLocating: Boolean = false,
-    val locationError: String? = null,
+    /** 定位失败的原因；null = 正常或还没定位过。文案和按钮由页面按它决定（[LocationIssue]） */
+    val locationIssue: LocationIssue? = null,
     val nearbyStops: List<NearbyStop> = emptyList(),
     val isLoadingNearby: Boolean = false,
     /** 收藏的车（站 + 线），小组件 / 快捷方式也用这份 */

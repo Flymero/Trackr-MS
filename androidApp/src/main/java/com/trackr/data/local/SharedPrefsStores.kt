@@ -58,6 +58,7 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
         ),
         transitCodeProvider = prefs.getString(KEY_TRANSIT_CODE_PROVIDER, null),
         showTransitCodeButton = if (prefs.contains(KEY_SHOW_TRANSIT_CODE_BUTTON)) prefs.getBoolean(KEY_SHOW_TRANSIT_CODE_BUTTON, true) else null,
+        autoStopAfterBoarding = if (prefs.contains(KEY_AUTO_STOP_AFTER_BOARDING)) prefs.getBoolean(KEY_AUTO_STOP_AFTER_BOARDING, true) else null,
         nearbyStopsCount = if (prefs.contains(KEY_NEARBY_STOPS_COUNT)) prefs.getInt(KEY_NEARBY_STOPS_COUNT, 4) else null,
         liveNotificationEnabled = if (prefs.contains(KEY_LIVE_NOTIFICATION)) prefs.getBoolean(KEY_LIVE_NOTIFICATION, true) else null,
         showOnLockScreen = if (prefs.contains(KEY_SHOW_ON_LOCK_SCREEN)) prefs.getBoolean(KEY_SHOW_ON_LOCK_SCREEN, true) else null,
@@ -86,6 +87,10 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
 
     override suspend fun saveShowTransitCodeButton(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SHOW_TRANSIT_CODE_BUTTON, enabled).apply()
+    }
+
+    override suspend fun saveAutoStopAfterBoarding(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_STOP_AFTER_BOARDING, enabled).apply()
     }
 
     override suspend fun saveLiveNotificationEnabled(enabled: Boolean) {
@@ -133,6 +138,7 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
         private const val KEY_AGGREGATED_PRIORITY = "aggregated_source_priority"
         private const val KEY_TRANSIT_CODE_PROVIDER = "preferred_transit_code_provider"
         private const val KEY_SHOW_TRANSIT_CODE_BUTTON = "show_transit_code_button"
+        private const val KEY_AUTO_STOP_AFTER_BOARDING = "auto_stop_after_boarding"
         private const val KEY_NEARBY_STOPS_COUNT = "nearby_stops_count"
         private const val KEY_LIVE_NOTIFICATION = "is_live_notification_enabled"
         private const val KEY_SHOW_ON_LOCK_SCREEN = "show_on_lock_screen"

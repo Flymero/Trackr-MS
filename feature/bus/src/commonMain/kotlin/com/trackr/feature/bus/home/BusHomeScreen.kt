@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import com.trackr.ui.components.message.HostMessage
 import com.trackr.ui.components.message.UserMessageHost
 import com.trackr.core.designsystem.resources.Res
-import com.trackr.core.designsystem.resources.action_relocate
 import com.trackr.core.designsystem.resources.ic_arrow_drop_down
 import com.trackr.core.designsystem.resources.ic_my_location
 import com.trackr.core.designsystem.resources.ic_search
@@ -172,9 +171,9 @@ fun BusHomeScreen(
                     SearchEntry(onClick = { onEvent(BusHomeEvent.OpenSearch) })
                 }
 
-                state.locationError?.let { error ->
+                state.locationIssue?.let { issue ->
                     item(key = "location_hint", contentType = "location_hint") {
-                        LocationHint(message = error, onRetry = { onEvent(BusHomeEvent.RetryLocation) })
+                        LocationHint(issue = issue, onEvent = onEvent)
                     }
                 }
 
@@ -278,9 +277,9 @@ private fun SearchEntry(onClick: () -> Unit) {
     }
 }
 
-/** 定位不可用时的常驻提示（是状态，不是一次性消息） */
+/** 定位拿不到时的常驻提示（是状态，不是一次性消息）：文案和按钮跟着原因变，见 [LocationIssue] */
 @Composable
-private fun LocationHint(message: String, onRetry: () -> Unit) {
+private fun LocationHint(issue: LocationIssue, onEvent: (BusHomeEvent) -> Unit) {
     val dimens = TrackrTheme.dimens
     Row(
         modifier = Modifier
@@ -296,14 +295,14 @@ private fun LocationHint(message: String, onRetry: () -> Unit) {
         )
         Spacer(modifier = Modifier.width(dimens.spaceS))
         Text(
-            text = message,
+            text = stringResource(issue.messageRes),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        TextButton(onClick = onRetry) { Text(stringResource(Res.string.action_relocate)) }
+        TextButton(onClick = { onEvent(issue.actionEvent) }) { Text(stringResource(issue.actionRes)) }
     }
 }
 

@@ -86,10 +86,10 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 | `di` | `KoinGraphVerifyTest` | Koin 依赖图：`appModule`、`platformBridgeModule`、`routeDataModule`、各 feature 的 `xxxModule` 和 `routeAndroidModule` 各自 `verify()`，静态检查构造参数都有绑定；`appModules` 就是这些模块按顺序拼起来；Robolectric 里把每个定义实际取一次（带参数的 ViewModel 用样例 key；`SearchViewModel` 给一个 `SavedStateHandle`） | Robolectric (JVM) |
 | `receiver` | `ScheduledReminderReceiverTest` | 定时提醒触发、自动跟车需精确闹钟、传给 `TrackingController` 的单线路目标；降级：非精确闹钟或启动被拒时改发通知并追加「系统限制未能自动开启跟车」提示，点「开启实时追踪」仍失败时保留通知、成功才关掉；点通知发 `trackr://line` 链接、解析出同一条线路详情（第 18 步） | Robolectric (JVM) |
 |  | `BootCompletedReceiverTest` | 开机禁用已错过的一次性提醒、时间变化重新调度、无关广播忽略 | Robolectric (JVM) |
-| `service` | `ArrivalAlertManagerTest` | 到站/临近提醒与实时通知并存时的去重 | Robolectric (JVM) |
+| `service` | `ArrivalAlertManagerTest` | 到站/临近提醒与实时通知并存时的去重、提醒自己过期（setTimeoutAfter）与结束追踪后按会话清场（#28） | Robolectric (JVM) |
 |  | `AndroidTrackingControllerTest` | 开始追踪时把「我的」里的到站前提醒写进目标、每次重读设置、后台不让启动前台服务时不留会话 | Robolectric (JVM) |
 |  | `LiveProgressNotificationHelperTest` | 实时进度通知进度计算与文案；一起等通知：标题写最先到的、正文只带第 2 条线、「我上车了 / 乘车码 / 结束」（乘车码发 `trackr://transit-code` 打开 App）、「上了哪辆？」和乘车中文字；有「上了哪辆？」待选时点通知发 `trackr://tracking/board?session=`、显式指向 `MainActivity`，没有待选照旧只拉起 App | Robolectric (JVM) |
-|  | `BusTrackingServiceTest` | 追踪服务：路线且有精确定位时前台服务带 `location` 类型、等车近站开定位；没有精确定位退回 `specialUse` 且不开定位；单线路不要 `location`；结束追踪时关定位并停服务；过时的启动请求先进前台再停；服务销毁时结束会话；一起等：3 条线每轮只 1 次站点请求、最先到的写进会话、带 `location` 类型，上车后只请求那一条线并以终点为目标 | Robolectric (JVM) |
+|  | `BusTrackingServiceTest` | 追踪服务：路线且有精确定位时前台服务带 `location` 类型、等车近站开定位；没有精确定位退回 `specialUse` 且不开定位；单线路不要 `location`；结束追踪时关定位、停服务并撤掉这一项的到站提醒（#28）；过时的启动请求先进前台再停；服务销毁时结束会话；一起等：3 条线每轮只 1 次站点请求、最先到的写进会话、带 `location` 类型，上车后只请求那一条线并以终点为目标 | Robolectric (JVM) |
 | `service/vendor` | `LiveUpdatePromotionTest` | Android 16 Live Update 推广通知构建与厂商识别 | Robolectric (JVM) |
 |  | `XiaomiFocusAdapterTest` | 小米焦点通知 JSON 负载构建 | Robolectric (JVM) |
 | `ui` | `ScreenshotGeneratorTest` | 主要页面明暗主题截图生成 | Robolectric Compose UI |

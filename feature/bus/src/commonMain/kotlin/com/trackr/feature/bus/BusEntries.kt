@@ -52,6 +52,7 @@ val busModule = module {
             trackingController = get(),
             trackingRepository = get(),
             transitCodeLauncher = get(),
+            systemSettings = get(),
             elapsedRealtimeMillis = { clock.elapsedMillis() },
             homeCoordinates = get(),
             announcer = get()

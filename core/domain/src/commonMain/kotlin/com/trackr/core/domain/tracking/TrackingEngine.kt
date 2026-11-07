@@ -81,8 +81,17 @@ object TrackingEngine {
         /** 到换乘站：发换乘提醒（会话已切到下一程，代际号已 +1） */
         data class TransferAlert(val stationName: String, val nextLineName: String) : Effect
 
-        /** 整条路线走完：结束追踪 */
-        data object Finished : Effect
+        /** 追踪结束：调用方随后把会话清掉。两种原因的区别只在于收尾怎么跟用户交代 */
+        sealed interface Finished : Effect {
+            /** 整条路线走完 / 到了终点站 */
+            data object Completed : Finished
+
+            /**
+             * 定位判断用户已经上车，这次追踪自动结束（issue #32，「上车后自动结束追踪」开关）。
+             * @param state 结束前的状态：通知里要说清是哪条线
+             */
+            data class Boarded(val state: TrackingSessionState) : Finished
+        }
     }
 
     /**
@@ -231,9 +240,10 @@ object TrackingEngine {
         return resolveLineForLeg(nextLeg, nextIndex, target.selectedLineIds)?.lineName
     }
 
-    /** 这次追踪要不要用定位（判上车、下车站辅助）：路线和一起等要（Q17），单线路不要 */
-    fun wantsLocation(target: TrackingTarget): Boolean =
-        target is TrackingTarget.Route || target is TrackingTarget.WatchTogether
+    /** 这次追踪要不要用定位（判上车、下车站辅助）：路线和一起等要（Q17），单线路只在开着「上车后自动结束追踪」时要 */
+    fun wantsLocation(target: TrackingTarget, stopAfterBoarding: Boolean = false): Boolean =
+        target is TrackingTarget.Route || target is TrackingTarget.WatchTogether ||
+            (stopAfterBoarding && target is TrackingTarget.SingleLine)
 
     // ---------------------------------------------------------------- 一起等（第 15 步）
 
@@ -253,13 +263,15 @@ object TrackingEngine {
         locationEnabled: Boolean,
         serviceFix: UserFix?,
         nowMillis: Long,
-        nowElapsedMillis: Long
+        nowElapsedMillis: Long,
+        stopAfterBoarding: Boolean = false
     ): Result = WatchTogetherTracker.reduce(
         session = session,
         poll = poll,
         locationEnabled = locationEnabled,
         fix = usableBoardingFix(serviceFix, nowElapsedMillis),
-        nowMillis = nowMillis
+        nowMillis = nowMillis,
+        stopAfterBoarding = stopAfterBoarding
     )
 
     /**
@@ -287,6 +299,8 @@ object TrackingEngine {
      * @param dropFix 下车站辅助判定用的最近定位（服务定位和 App 前台定位里最后来的那个）
      * @param nowMillis 墙钟毫秒
      * @param nowElapsedMillis 单调毫秒（和 [UserFix.elapsedMillis] 同一时基）
+     * @param stopAfterBoarding 「上车后自动结束追踪」（`SettingsRepository.autoStopAfterBoarding`）：
+     *   单线路判出已上车就结束这次追踪（issue #32）。路线的判上车不受它影响——路线要跟到下车站
      */
     fun reducePoll(
         session: TrackingSession,
@@ -295,19 +309,23 @@ object TrackingEngine {
         serviceFix: UserFix?,
         dropFix: UserFix?,
         nowMillis: Long,
-        nowElapsedMillis: Long
+        nowElapsedMillis: Long,
+        stopAfterBoarding: Boolean = false
     ): Result {
         val previous = session.state
         if (session.watchTarget != null) {
             return reduceWatchOnBoard(session, detail, locationEnabled, serviceFix, nowMillis, nowElapsedMillis)
         }
         if (previous.legPhase == LegPhase.SINGLE) {
+            // 单线路本来不用定位；开着「上车后自动结束追踪」时只在车临近 / 车上有人时取定位，判人有没有跟着车走
+            val boarding = singleBoardingInput(previous, detail, stopAfterBoarding, locationEnabled, serviceFix, nowMillis, nowElapsedMillis)
             val update = SingleLegTracker.processPoll(
                 session = previous,
                 buses = detail.buses,
                 operatingState = detail.operatingState,
                 statusDescription = detail.statusDescription,
-                nowMillis = nowMillis
+                nowMillis = nowMillis,
+                boarding = boarding
             )
             val effects = buildList {
                 val alertState = update.alertState
@@ -320,6 +338,8 @@ object TrackingEngine {
                     }
                 }
             }
+            // 判出上车就结束了，同一轮里不需要再发到站 / 临近提醒
+            if (update.boarded) return Result(session.copy(state = update.state), listOf(Effect.Finished.Boarded(update.state)))
             return Result(session.copy(state = update.state), effects)
         }
 
@@ -379,12 +399,12 @@ object TrackingEngine {
             val finished = updated.copy(
                 state = state.copy(statusSummary = "已顺利到达终点站 ${currentLeg?.toStopName.orEmpty()}！")
             )
-            return Result(finished, effects + Effect.Finished)
+            return Result(finished, effects + Effect.Finished.Completed)
         }
         // 非最后一程只发换乘提醒（提醒内部会先取消到站 / 临近通知），然后直接切到下一程
         effects += Effect.TransferAlert(currentLeg?.toStopName.orEmpty(), nextLine.lineName)
         val next = routeLegSession(session.sessionId, session.generation + 1, target, nextIndex, nowMillis)
-            ?: return Result(updated, effects + Effect.Finished)
+            ?: return Result(updated, effects + Effect.Finished.Completed)
         return Result(next, effects)
     }
 
@@ -435,7 +455,7 @@ object TrackingEngine {
         val finished = updated.copy(
             state = decision.state.copy(statusSummary = "已到终点站 ${decision.state.targetStopName}")
         )
-        return Result(finished, effects + Effect.Finished)
+        return Result(finished, effects + Effect.Finished.Completed)
     }
 
     /** 轮询失败：保持状态，只改文案 */
@@ -480,6 +500,33 @@ object TrackingEngine {
             },
             boardStopLat = boardStop.wgsLat,
             boardStopLng = boardStop.wgsLng,
+            nowMillis = nowMillis
+        )
+    }
+
+    /**
+     * 单线路判上车的定位上下文（issue #32）：候车站就是 [TrackingSessionState.targetOrder] 那站。
+     * 开关关着或不能用定位时返回 null——单线路保持原来的「车到我所在的站」语义，不取定位。
+     */
+    private fun singleBoardingInput(
+        state: TrackingSessionState,
+        detail: BusLineDetail,
+        stopAfterBoarding: Boolean,
+        locationEnabled: Boolean,
+        serviceFix: UserFix?,
+        nowMillis: Long,
+        nowElapsedMillis: Long
+    ): BoardingDetector.Input? {
+        if (!stopAfterBoarding || !locationEnabled) return null
+        val waitStop = detail.stops.firstOrNull { it.order == state.targetOrder } ?: return null
+        if (waitStop.wgsLat <= 0.0 || waitStop.wgsLng <= 0.0) return null
+        val fix = usableBoardingFix(serviceFix, nowElapsedMillis)
+        return BoardingDetector.Input(
+            user = fix?.let {
+                BoardingDetector.UserPosition(it.lat, it.lng, requireNotNull(it.accuracyMeters), it.elapsedMillis)
+            },
+            boardStopLat = waitStop.wgsLat,
+            boardStopLng = waitStop.wgsLng,
             nowMillis = nowMillis
         )
     }
@@ -578,9 +625,19 @@ object TrackingEngine {
         return elapsed < 0 || elapsed >= MAX_TRACKING_DURATION_MILLIS
     }
 
-    /** 本阶段的定位档位；不能用定位时恒为 OFF */
-    fun locationTier(state: TrackingSessionState, locationEnabled: Boolean): LocationCadence.Tier =
-        if (locationEnabled) LocationCadence.tierFor(state) else LocationCadence.Tier.OFF
+    /**
+     * 本阶段的定位档位；不能用定位时恒为 OFF。
+     * 单线路只有开着「上车后自动结束追踪」才取定位（[stopAfterBoarding]），否则一直是 OFF。
+     */
+    fun locationTier(
+        state: TrackingSessionState,
+        locationEnabled: Boolean,
+        stopAfterBoarding: Boolean = false
+    ): LocationCadence.Tier = when {
+        !locationEnabled -> LocationCadence.Tier.OFF
+        state.legPhase == LegPhase.SINGLE && !stopAfterBoarding -> LocationCadence.Tier.OFF
+        else -> LocationCadence.tierFor(state)
+    }
 
     /** 定位是否足够新且足够准，可用于下车站辅助判定（≤60 秒、≤50 m） */
     fun isUserFixUsable(fix: UserFix?, nowElapsedMillis: Long): Boolean {

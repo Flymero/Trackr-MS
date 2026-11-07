@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.trackr.core.data.repository.MeishanPushAvailability
 import com.trackr.core.data.repository.MeishanPushRepository
 import com.trackr.core.data.repository.MeishanPushTarget
+import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.WatchTogetherPoller
 import com.trackr.core.domain.platform.LocationSource
@@ -75,6 +76,7 @@ class BusTrackingService : LifecycleService() {
     private val pushRepository: MeishanPushRepository by inject()
     private val trackingRepository: TrackingRepository by inject()
     private val repository: ITransitRepository by inject()
+    private val settings: SettingsRepository by inject()
     private val liveProgressNotifier: LiveProgressNotifier by inject()
     private val arrivalAlerts: ArrivalAlertNotifier by inject()
     private val locationSource: LocationSource by inject()
@@ -134,6 +136,15 @@ class BusTrackingService : LifecycleService() {
 
     /** 一起等的取数（同一个实时仓库，条数不影响请求数） */
     private val watchPoller by lazy { WatchTogetherPoller(repository) }
+
+    /**
+     * 「我的 → 上车后自动结束追踪」（issue #32）现在开着没。
+     *
+     * 三处要看它：前台服务要不要带 location 类型、定位档位（单线路平时不取定位）、轮询里判不判上车。
+     * 每次现读：用户在「我的」里关掉后，下一次刷新就按关着办。
+     */
+    private val stopAfterBoarding: Boolean
+        get() = runCatching { settings.autoStopAfterBoarding.value }.getOrDefault(true)
 
     /** sessionId -> 这一路的轮询状态 */
     private val workers = mutableMapOf<String, PollWorker>()
@@ -195,7 +206,7 @@ class BusTrackingService : LifecycleService() {
         // 已经在追别的会话时（启动请求过时了），前台通知仍显示最新开始的那一项
         val shown = session ?: sessions.lastOrNull()
         val notification = notificationOf(shown)
-        val wantLocation = sessions.any { TrackingEngine.wantsLocation(it.target) } &&
+        val wantLocation = sessions.any { TrackingEngine.wantsLocation(it.target, stopAfterBoarding) } &&
             locationSource.hasPrecisePermission()
         locationTrackingAllowed = try {
             enterForeground(notification, wantLocation, notifyIdOf(shown))
@@ -269,7 +280,7 @@ class BusTrackingService : LifecycleService() {
                 return@launch
             }
             val focus = stored.last()
-            val wantLocation = stored.any { TrackingEngine.wantsLocation(it.target) } &&
+            val wantLocation = stored.any { TrackingEngine.wantsLocation(it.target, stopAfterBoarding) } &&
                 locationSource.hasPrecisePermission()
             val notification = notificationOf(focus)
             locationTrackingAllowed = try {
@@ -339,6 +350,9 @@ class BusTrackingService : LifecycleService() {
                 stopPush(worker)
                 endedWorkers += worker
             }
+            // 这一项没了，它留下的到站提醒也没有主人了：一起撤掉，别让「车辆已到站」在通知栏
+            // 和锁屏上等用户手动点掉（#28）。常驻通知等前台换人之后再撤，提醒不用等。
+            ArrivalAlertNotifier.cancelSessionAlerts(this, sessionId)
             if (foregroundSessionId == sessionId) foregroundSessionId = null
         }
         // 新增 / 换代：接上或重开这一路（通知 id 跟会话绑定，不用挪）
@@ -374,7 +388,7 @@ class BusTrackingService : LifecycleService() {
             foregroundSessionId = null
             return
         }
-        val wantLocation = live.any { TrackingEngine.wantsLocation(it.target) } &&
+        val wantLocation = live.any { TrackingEngine.wantsLocation(it.target, stopAfterBoarding) } &&
             locationSource.hasPrecisePermission()
         foregroundSessionId = focusId
         locationTrackingAllowed = try {
@@ -520,7 +534,8 @@ class BusTrackingService : LifecycleService() {
                     serviceFix = serviceFix,
                     dropFix = dropFix,
                     nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed
+                    nowElapsedMillis = nowElapsed,
+                    stopAfterBoarding = stopAfterBoarding
                 )
                 effects = reduced.effects
                 if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
@@ -645,7 +660,8 @@ class BusTrackingService : LifecycleService() {
                     locationEnabled = locationEnabled,
                     serviceFix = serviceFix,
                     nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed
+                    nowElapsedMillis = nowElapsed,
+                    stopAfterBoarding = stopAfterBoarding
                 )
                 effects = reduced.effects
                 if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
@@ -796,7 +812,12 @@ class BusTrackingService : LifecycleService() {
                 Log.d(TAG, "到换乘站 ${effect.stationName}，自动切换到下一程: ${effect.nextLineName}")
                 arrivalAlerts.triggerTransferAlert(this, effect.stationName, effect.nextLineName, sessionId)
             }
-            TrackingEngine.Effect.Finished -> Log.d(TAG, "全部换乘程段已完成到达终点！")
+            TrackingEngine.Effect.Finished.Completed -> Log.d(TAG, "全部换乘程段已完成到达终点！")
+            // 定位判出已上车：会话马上就被清掉，先跟用户交代一句，免得「追踪中」自己消失了（issue #32）
+            is TrackingEngine.Effect.Finished.Boarded -> {
+                Log.d(TAG, "定位判断已上车，结束追踪: ${effect.state.lineName}")
+                arrivalAlerts.triggerEndedAfterBoarding(this, effect.state, sessionId)
+            }
         }
     }
 
@@ -847,7 +868,7 @@ class BusTrackingService : LifecycleService() {
         if (session.sessionId == foregroundSessionId && specs.isNotEmpty()) {
             val firstId = liveProgressNotifier.notificationIdOf(specs.first().key)
             if (firstId != foregroundNotifyId) {
-                val wantLocation = TrackingEngine.wantsLocation(session.target) &&
+                val wantLocation = TrackingEngine.wantsLocation(session.target, stopAfterBoarding) &&
                     locationSource.hasPrecisePermission()
                 runCatching { enterForeground(notificationOf(session), wantLocation, firstId) }
                     .onFailure { Log.w(TAG, "Cannot move foreground notification to the new one", it) }
@@ -992,7 +1013,7 @@ class BusTrackingService : LifecycleService() {
         } else {
             trackingRepository.sessions.value
                 .filter { !it.interrupted && it.state.isActive }
-                .map { TrackingEngine.locationTier(it.state, locationEnabled = true) }
+                .map { TrackingEngine.locationTier(it.state, locationEnabled = true, stopAfterBoarding = stopAfterBoarding) }
                 .filter { it != LocationCadence.Tier.OFF }
                 .minByOrNull { it.intervalMillis }
                 ?: LocationCadence.Tier.OFF
@@ -1088,6 +1109,8 @@ class BusTrackingService : LifecycleService() {
         // 服务被销毁（含系统回收）时结束正在追的会话，避免 UI 一直显示“追踪中”
         val active = trackingRepository.sessions.value.filter { !it.interrupted }
         active.forEach { runCatching { trackingRepository.stop(it.sessionId) } }
+        // 会话没了，这些追踪留下的到站提醒也跟着撤（#28）
+        active.forEach { ArrivalAlertNotifier.cancelSessionAlerts(this, it.sessionId) }
         foregroundSessionId = null
         cancelPostedNotifications()
         super.onDestroy()

@@ -4,13 +4,6 @@
     <string name="line_rail_waiting">候车中</string>
     <string name="line_rail_bus">车辆</string>
     <string name="line_arrived">已到站</string>
-    <string name="line_focus_title">开启焦点通知（超级岛）</string>
-    <string name="line_focus_device_xiaomi">检测到您正在使用小米澎湃OS（Xiaomi HyperOS）。</string>
-    <string name="line_focus_permission_xiaomi">允许焦点通知</string>
-    <string name="line_focus_body">开启「%1$s」后，即可在屏幕挖孔两侧显示实时公交小胶囊，并在下拉时展开实时到站倒计时与站点进度。</string>
-    <string name="line_focus_fallback">未开启时仍可正常使用普通通知栏进度追踪。</string>
-    <string name="line_focus_go">前往开启</string>
-    <string name="line_focus_later">暂不开启</string>
     <string name="line_reminder_title">新建定时提醒</string>
     <string name="line_reminder_subtitle">%1$s (开往 %2$s) · %3$s</string>
     <string name="line_reminder_repeat">重复周期</string>
@@ -36,8 +29,6 @@
     <string name="line_timetable_planned">计划发车</string>
     <string name="line_timetable_today_count">今日预估班次表（共 %1$s 班）：</string>
     <string name="line_timetable_yesterday">昨日实际发车时刻（参考）：</string>
-    <string name="line_live_title">开启流体云 / 实时活动</string>
-    <string name="line_live_permission">实时活动 / 置顶通知</string>
     <string name="line_detail_loading">正在连接实时公交数据…</string>
     <string name="line_detail_error">未获取到该线路信息</string>
     <string name="line_detail_reminder">定时提醒</string>

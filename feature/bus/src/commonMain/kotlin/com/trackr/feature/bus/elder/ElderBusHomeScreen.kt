@@ -54,9 +54,13 @@ import com.trackr.feature.bus.home.BusHomeEvent
 import com.trackr.feature.bus.home.BusHomeMapper
 import com.trackr.feature.bus.home.BusHomeUiState
 import com.trackr.feature.bus.home.FavoriteRowUi
+import com.trackr.feature.bus.home.LocationIssue
 import com.trackr.feature.bus.home.NearbyLineUi
 import com.trackr.feature.bus.home.NearbyStopUi
 import com.trackr.feature.bus.home.TrackingCardUi
+import com.trackr.feature.bus.home.actionEvent
+import com.trackr.feature.bus.home.actionRes
+import com.trackr.feature.bus.home.messageRes
 import com.trackr.feature.bus.resources.Res as BusRes
 import com.trackr.feature.bus.resources.bus_elder_favorites_empty
 import com.trackr.feature.bus.resources.bus_elder_favorites_title
@@ -169,9 +173,9 @@ fun ElderBusHomeScreen(
                 }
             }
 
-            state.locationError?.let { error ->
+            state.locationIssue?.let { issue ->
                 item(key = "location_hint", contentType = "location_hint") {
-                    ElderLocationHint(message = error, onRetry = { onEvent(BusHomeEvent.RetryLocation) })
+                    ElderLocationHint(issue = issue, onEvent = onEvent)
                 }
             }
 
@@ -341,11 +345,20 @@ private fun ElderTrackingCard(card: TrackingCardUi, onOpen: () -> Unit, onReadAl
     }
 }
 
+/** 定位提示（长辈版）：一句原因 + 一个大按钮，文案和去处跟标准版同一套（[LocationIssue]） */
 @Composable
-private fun ElderLocationHint(message: String, onRetry: () -> Unit) {
+private fun ElderLocationHint(issue: LocationIssue, onEvent: (BusHomeEvent) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(TrackrTheme.dimens.spaceS)) {
-        Text(text = message, style = MaterialTheme.typography.bodyLarge, color = TrackrTheme.colors.warn)
-        ElderButton(text = stringResource(Res.string.action_relocate), onClick = onRetry, modifier = Modifier.fillMaxWidth())
+        Text(
+            text = stringResource(issue.messageRes),
+            style = MaterialTheme.typography.bodyLarge,
+            color = TrackrTheme.colors.warn
+        )
+        ElderButton(
+            text = stringResource(issue.actionRes),
+            onClick = { onEvent(issue.actionEvent) },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 

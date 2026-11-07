@@ -1,4 +1,4 @@
-package com.trackr.ui.components
+package com.trackr.ui.screens.me
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -21,28 +21,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.ic_bell
-import com.trackr.feature.line.resources.Res as LineRes
-import com.trackr.feature.line.resources.line_focus_body
-import com.trackr.feature.line.resources.line_focus_device_xiaomi
-import com.trackr.feature.line.resources.line_focus_fallback
-import com.trackr.feature.line.resources.line_focus_go
-import com.trackr.feature.line.resources.line_focus_later
-import com.trackr.feature.line.resources.line_focus_permission_xiaomi
-import com.trackr.feature.line.resources.line_focus_title
+import com.trackr.feature.me.resources.Res as MeRes
+import com.trackr.feature.me.resources.me_live_guide_body
+import com.trackr.feature.me.resources.me_live_guide_fallback
+import com.trackr.feature.me.resources.me_live_guide_go
+import com.trackr.feature.me.resources.me_live_guide_later
+import com.trackr.feature.me.resources.me_live_guide_title
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
 
 /**
- * 系统实时活动（状态栏胶囊 / 流体云 / 焦点通知）权限未授权时的引导对话框
+ * 「我的」→「状态栏胶囊」点「去开启」时的说明弹窗。
+ *
+ * 只在用户自己走进设置、主动想开的时候出现——开始追踪时不再拦（issue #29）。
+ * 各家系统的名字（小米焦点通知 / 超级岛、OPPO 流体云、Android 实时活动）在文案里统一叫「实时活动通知」，
+ * 不跟着 ROM 和版本改，免得每出一个新系统就要补一套说法。
  */
 @Composable
-fun FocusPermissionGuideDialog(
+internal fun LiveUpdateGuideDialog(
     onDismissRequest: () -> Unit,
-    onContinueWithoutSettings: () -> Unit,
-    onGoToSettings: () -> Unit,
-    title: String = stringResource(LineRes.string.line_focus_title),
-    deviceHint: String = stringResource(LineRes.string.line_focus_device_xiaomi),
-    permissionName: String = stringResource(LineRes.string.line_focus_permission_xiaomi)
+    onGoToSettings: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
@@ -65,51 +63,36 @@ fun FocusPermissionGuideDialog(
         },
         title = {
             Text(
-                text = title,
+                text = stringResource(MeRes.string.me_live_guide_title),
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
-            Column(
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = deviceHint,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = stringResource(LineRes.string.line_focus_body, permissionName),
+                    text = stringResource(MeRes.string.me_live_guide_body),
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = stringResource(LineRes.string.line_focus_fallback),
+                    text = stringResource(MeRes.string.me_live_guide_fallback),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
         },
         confirmButton = {
-            Button(
-                onClick = onGoToSettings,
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text(stringResource(LineRes.string.line_focus_go))
+            Button(onClick = onGoToSettings, shape = RoundedCornerShape(10.dp)) {
+                Text(stringResource(MeRes.string.me_live_guide_go))
             }
         },
         dismissButton = {
-            OutlinedButton(
-                onClick = onContinueWithoutSettings,
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text(stringResource(LineRes.string.line_focus_later))
+            OutlinedButton(onClick = onDismissRequest, shape = RoundedCornerShape(10.dp)) {
+                Text(stringResource(MeRes.string.me_live_guide_later))
             }
         }
     )

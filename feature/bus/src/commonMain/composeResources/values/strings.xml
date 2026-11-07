@@ -16,6 +16,13 @@
     <string name="bus_home_switch_city">换城市</string>
     <string name="bus_home_settings">设置</string>
     <string name="bus_home_search_hint">搜线路、车站</string>
+    <!-- 定位失败的三种原因（issue #34）：文案要指清楚该去哪开，别都写「定位不可用」 -->
+    <!-- 定位失败时附近站不会空着，会按上次的位置兜底查，所以别写「取不到」 -->
+    <string name="bus_home_location_permission_missing">没有定位权限，附近用的是上次位置</string>
+    <string name="bus_home_location_service_disabled">手机定位服务未开启，附近用的是上次位置</string>
+    <string name="bus_home_location_unavailable">定位不可用，已保留当前位置</string>
+    <string name="bus_home_location_action_grant">去授权</string>
+    <string name="bus_home_location_action_enable">去开启</string>
     <string name="bus_favorites_title">收藏</string>
     <string name="bus_favorites_empty">在线路页点 ☆，常坐的车会出现在这里</string>
     <string name="bus_favorites_group_empty">这个分组还没有收藏</string>

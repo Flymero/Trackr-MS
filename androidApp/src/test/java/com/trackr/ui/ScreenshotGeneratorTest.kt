@@ -882,7 +882,7 @@ class ScreenshotGeneratorTest {
 
     private val aboutScreenshotState = AboutUiState(versionName = "0.0.3", canCheckUpdates = true, showLiveUpdateNote = true)
 
-    /** 「我的」页截图用的状态：两个定时提醒、小米焦点通知没开 */
+    /** 「我的」页截图用的状态：两个定时提醒、实时活动通知没开 */
     private fun meScreenshotState(): MeUiState {
         val initialReminders = listOf(
             ScheduledReminder(
@@ -924,7 +924,7 @@ class ScreenshotGeneratorTest {
             amapKeys = FakeAmapKeyRepository(),
             notices = MeNotices(),
             liveUpdateAccess = object : LiveUpdateAccess {
-                override fun status() = LiveUpdateStatus(supported = true, allowed = false, systemName = "小米焦点通知")
+                override fun status() = LiveUpdateStatus(supported = true, allowed = false)
                 override fun openSettings() = Unit
             },
             versionName = "0.0.3"

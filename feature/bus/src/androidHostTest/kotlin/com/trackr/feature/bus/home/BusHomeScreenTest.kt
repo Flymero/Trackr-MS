@@ -257,4 +257,32 @@ class BusHomeScreenTest {
         assertTrue(events.none { it is BusHomeEvent.Refresh })
     }
 
+    /** issue #34：三种定位失败原因各说各的话，按钮各去各的地方 */
+    @Test
+    fun locationIssue_showsOwnMessage_andButtonGoesToTheRightPlace() {
+        setContent(stateOf().copy(locationIssue = LocationIssue.ServiceDisabled))
+
+        composeTestRule.onNodeWithText("手机定位服务未开启，附近用的是上次位置").assertIsDisplayed()
+        composeTestRule.onNodeWithText("去开启").performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.OpenLocationSettings), events)
+    }
+
+    @Test
+    fun locationIssue_permissionMissing_goesToAppSettings() {
+        setContent(stateOf().copy(locationIssue = LocationIssue.PermissionMissing))
+
+        composeTestRule.onNodeWithText("没有定位权限，附近用的是上次位置").assertIsDisplayed()
+        composeTestRule.onNodeWithText("去授权").performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.OpenAppSettings), events)
+    }
+
+    @Test
+    fun locationIssue_unavailable_stillOffersRelocate() {
+        setContent(stateOf().copy(locationIssue = LocationIssue.Unavailable))
+
+        composeTestRule.onNodeWithText("定位不可用，已保留当前位置").assertIsDisplayed()
+        composeTestRule.onNodeWithText("重新定位").performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.RetryLocation), events)
+    }
+
 }

@@ -195,6 +195,23 @@ class MeViewModelTest {
     }
 
     @Test
+    fun autoStopAfterBoarding_switchWritesSetting_andDefaultsOn() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // 默认开：这本来才是该有的行为（issue #32）
+        assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
+
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(settings.autoStopAfterBoarding.value)
+        assertFalse(viewModel.uiState.value.autoStopAfterBoarding)
+
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(true))
+        testScheduler.advanceUntilIdle()
+        assertTrue(settings.autoStopAfterBoarding.value)
+        assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
+    }
+
+    @Test
     fun alertThreshold_isGlobalSetting_choicesOneToThree() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         assertEquals(listOf(1, 2, 3), ALERT_THRESHOLD_CHOICES)
@@ -255,7 +272,7 @@ class MeViewModelTest {
     fun liveUpdateRow_hiddenWhenLiveNotificationOff_orNoPlatformSupport() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         testScheduler.advanceUntilIdle()
-        assertEquals(LiveUpdateStatus(supported = true, allowed = false, systemName = "小米焦点通知"), viewModel.uiState.value.liveUpdate)
+        assertEquals(LiveUpdateStatus(supported = true, allowed = false), viewModel.uiState.value.liveUpdate)
 
         // 和原来一样：实时通知关着时不显示胶囊权限
         viewModel.onEvent(MeEvent.SetLiveNotificationEnabled(false))
@@ -277,7 +294,7 @@ class MeViewModelTest {
         assertEquals(1, liveUpdate.openCount)
 
         // 用户在系统设置里开了，回到前台重查
-        liveUpdate.current = LiveUpdateStatus(supported = true, allowed = true, systemName = "小米焦点通知")
+        liveUpdate.current = LiveUpdateStatus(supported = true, allowed = true)
         viewModel.onScreenResumed()
         testScheduler.advanceUntilIdle()
         assertTrue(viewModel.uiState.value.liveUpdate!!.allowed)
@@ -381,7 +398,7 @@ class FakeNotificationHealthAccess(
 }
 
 class FakeLiveUpdateAccess(
-    var current: LiveUpdateStatus = LiveUpdateStatus(supported = true, allowed = false, systemName = "小米焦点通知")
+    var current: LiveUpdateStatus = LiveUpdateStatus(supported = true, allowed = false)
 ) : LiveUpdateAccess {
     var openCount: Int = 0
         private set

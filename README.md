@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/5151561/Trackr-/releases">
-    <img src="https://img.shields.io/badge/Release-v0.1.0-006874?style=flat&logo=github" alt="Release" />
+  <a href="https://github.com/5151561/Trackr/releases/latest">
+    <img src="https://img.shields.io/github/v/release/5151561/Trackr?label=Release&color=006874&logo=github&style=flat" alt="Release" />
   </a>
   <a href="https://developer.android.com">
     <img src="https://img.shields.io/badge/Platform-Android%208.0%2B-3DDC84?style=flat&logo=android&logoColor=white" alt="Android" />

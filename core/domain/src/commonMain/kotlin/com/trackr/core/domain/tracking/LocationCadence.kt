@@ -27,7 +27,14 @@ object LocationCadence {
     fun tierFor(session: TrackingSessionState): Tier {
         if (!session.isActive) return Tier.OFF
         return when (session.legPhase) {
-            LegPhase.SINGLE -> Tier.OFF
+            // 单线路本身不取定位；开着「上车后自动结束追踪」时才按「车临近候车站 → 到站 → 已开走」这一小段取
+            LegPhase.SINGLE -> when {
+                session.boardingCandidateBusId != null -> Tier.BOARDING_CHECK
+                session.isBusArrivedAtStop -> Tier.BOARDING_CHECK
+                session.stopsRemaining in 0..NEAR_STOPS -> Tier.WAITING_NEAR
+                session.etaSeconds in 1..NEAR_ETA_SECONDS -> Tier.WAITING_NEAR
+                else -> Tier.OFF
+            }
             LegPhase.WAITING_BOARD -> when {
                 session.isAwaitingBoardingConfirmation -> Tier.BOARDING_CHECK
                 session.stopsRemaining in 0..NEAR_STOPS -> Tier.WAITING_NEAR

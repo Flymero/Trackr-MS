@@ -2,25 +2,19 @@ package com.trackr.ui.screens.linedetail
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.model.TransitCodeProvider
-import com.trackr.feature.line.resources.Res as LineRes
-import com.trackr.feature.line.resources.line_focus_permission_xiaomi
-import com.trackr.feature.line.resources.line_focus_title
-import com.trackr.feature.line.resources.line_live_permission
-import com.trackr.feature.line.resources.line_live_title
-import com.trackr.ui.components.FocusPermissionGuideDialog
-import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 
 /**
- * 线路详情的有状态入口：收集状态、轮询随页面 RESUMED 启停（§4.4），把页面事件分给 ViewModel 或平台能力
- * （乘车码、实时活动权限引导）。页面本身是无状态的 [LineDetailScreen]。
+ * 线路详情的有状态入口：收集状态、轮询随页面 RESUMED 启停（§4.4），把页面事件分给 ViewModel 或平台能力（乘车码）。
+ * 页面本身是无状态的 [LineDetailScreen]。
+ *
+ * 注意：开始追踪**不做**系统实时活动（焦点通知 / 超级岛 / 置顶通知）的权限拦截，点了就直接追。
+ * 那个引导只在「我的」→「实时活动通知」里，用户自己去点开启时才提示（issue #29：MIUI 没有焦点通知，
+ * 每次追踪都弹一遍「去开启」，而设置页里根本没有那个开关）。
  */
 @Composable
 fun LineDetailRoute(
@@ -39,8 +33,6 @@ fun LineDetailRoute(
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val transitCodeLauncher: TransitCodeLauncher = koinInject()
-    val liveUpdateGate = rememberLiveUpdateGate()
-    var pendingGuide by rememberSaveable { mutableStateOf<LiveUpdateGuide?>(null) }
 
     screen(
         state,
@@ -74,8 +66,8 @@ fun LineDetailRoute(
                     if (state.isTrackingThisStop) {
                         viewModel.stopTracking()
                     } else if (state.selectedStop != null) {
-                        val guide = liveUpdateGate.blockingGuide()
-                        if (guide != null) pendingGuide = guide else viewModel.startTrackingSelectedStop()
+                        // 不拦：系统实时活动开没开都能追，普通通知栏照常出进度（引导在「我的」里）
+                        viewModel.startTrackingSelectedStop()
                     }
                 }
                 // 一点就开默认渠道，「每次询问」才弹选择（不用长按）
@@ -94,25 +86,4 @@ fun LineDetailRoute(
             }
         }
     )
-
-    // 系统实时活动权限（小米焦点通知 / Android 16 置顶通知）未开时的引导；不开也能继续追踪
-    val guide = pendingGuide
-    if (guide != null) {
-        val isXiaomi = guide == LiveUpdateGuide.XIAOMI_FOCUS
-        FocusPermissionGuideDialog(
-            onDismissRequest = { pendingGuide = null },
-            onContinueWithoutSettings = {
-                pendingGuide = null
-                viewModel.startTrackingSelectedStop()
-            },
-            onGoToSettings = {
-                pendingGuide = null
-                liveUpdateGate.openSettings(guide)
-                viewModel.startTrackingSelectedStop()
-            },
-            title = if (isXiaomi) stringResource(LineRes.string.line_focus_title) else stringResource(LineRes.string.line_live_title),
-            deviceHint = liveUpdateGate.deviceHint(guide),
-            permissionName = if (isXiaomi) stringResource(LineRes.string.line_focus_permission_xiaomi) else stringResource(LineRes.string.line_live_permission)
-        )
-    }
 }

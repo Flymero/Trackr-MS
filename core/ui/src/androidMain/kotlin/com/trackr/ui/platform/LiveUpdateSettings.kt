@@ -22,8 +22,11 @@ interface LiveUpdateSettings {
     /** `LiveUpdatePromotion.openAppNotificationSettings(context)` */
     fun openAppNotificationSettings(context: Context): Boolean
 
-    /** `XiaomiFocusAdapter.isXiaomiRom()` */
-    fun isXiaomiRom(): Boolean
+    /**
+     * `XiaomiFocusAdapter.isFocusSupported(context)`：这台机器到底有没有焦点通知 / 超级岛。
+     * 「有没有这功能」和「用户开没开」是两件事——MIUI 全系没有，`canShowXiaomiFocus` 恒为 false，不能当没开。
+     */
+    fun isXiaomiFocusSupported(context: Context): Boolean
 
     /** `XiaomiFocusAdapter.canShowFocus(context)` */
     fun canShowXiaomiFocus(context: Context): Boolean

@@ -77,6 +77,8 @@ import com.trackr.feature.me.resources.me_about_title
 import com.trackr.feature.me.resources.me_amap_title
 import com.trackr.feature.me.resources.me_arrival_alert
 import com.trackr.feature.me.resources.me_arrival_alert_desc
+import com.trackr.feature.me.resources.me_auto_stop_after_boarding
+import com.trackr.feature.me.resources.me_auto_stop_after_boarding_desc
 import com.trackr.feature.me.resources.me_data_source
 import com.trackr.feature.me.resources.me_elder_mode
 import com.trackr.feature.me.resources.me_elder_mode_desc
@@ -103,7 +105,8 @@ import com.trackr.feature.me.resources.me_reminders_count
 import com.trackr.feature.me.resources.me_reminders_empty
 import com.trackr.feature.me.resources.me_reminders_empty_hint
 import com.trackr.feature.me.resources.me_reminders_none
-import com.trackr.feature.me.resources.me_status_chip
+import com.trackr.feature.me.resources.me_live_update_desc
+import com.trackr.feature.me.resources.me_live_update_name
 import com.trackr.feature.me.resources.me_status_chip_off
 import com.trackr.feature.me.resources.me_status_chip_on
 import com.trackr.feature.me.resources.me_status_chip_settings
@@ -128,6 +131,8 @@ fun MeScreen(
     var showRailModeDialog by rememberSaveable { mutableStateOf(false) }
     var showEngineModeDialog by rememberSaveable { mutableStateOf(false) }
     var showRemindersSheet by rememberSaveable { mutableStateOf(false) }
+    // 状态栏胶囊「去开启」的说明弹窗：只有用户自己点进来时才出现，开始追踪时不弹（issue #29）
+    var showLiveUpdateGuide by rememberSaveable { mutableStateOf(false) }
 
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -207,6 +212,13 @@ fun MeScreen(
                         onClick = { showAlertThresholdDialog = true }
                     )
                     GroupDivider()
+                    SwitchRow(
+                        title = stringResource(MeRes.string.me_auto_stop_after_boarding),
+                        subtitle = stringResource(MeRes.string.me_auto_stop_after_boarding_desc),
+                        checked = state.autoStopAfterBoarding,
+                        onCheckedChange = { onEvent(MeEvent.SetAutoStopAfterBoarding(it)) }
+                    )
+                    GroupDivider()
                     SettingRow(
                         title = stringResource(MeRes.string.me_reminders),
                         subtitle = state.remindersSubtitle,
@@ -258,9 +270,9 @@ fun MeScreen(
                     state.liveUpdate?.let { liveUpdate ->
                         GroupDivider()
                         SettingRow(
-                            title = stringResource(MeRes.string.me_status_chip),
+                            title = stringResource(MeRes.string.me_live_update_name),
                             subtitle = if (liveUpdate.supported) {
-                                liveUpdate.systemName
+                                stringResource(MeRes.string.me_live_update_desc)
                             } else {
                                 stringResource(MeRes.string.me_status_chip_unsupported)
                             },
@@ -274,7 +286,14 @@ fun MeScreen(
                             } else {
                                 null
                             },
-                            onClick = { onEvent(MeEvent.OpenLiveUpdateSettings) }
+                            // 支持但没开：先说明开了有什么用，再去系统设置；已开 / 不支持直接跳设置
+                            onClick = {
+                                if (liveUpdate.supported && !liveUpdate.allowed) {
+                                    showLiveUpdateGuide = true
+                                } else {
+                                    onEvent(MeEvent.OpenLiveUpdateSettings)
+                                }
+                            }
                         )
                     }
                 }
@@ -330,6 +349,17 @@ fun MeScreen(
                 showEngineModeDialog = false
             },
             onDismiss = { showEngineModeDialog = false }
+        )
+    }
+
+    val liveUpdateStatus = state.liveUpdate
+    if (showLiveUpdateGuide && liveUpdateStatus != null) {
+        LiveUpdateGuideDialog(
+            onDismissRequest = { showLiveUpdateGuide = false },
+            onGoToSettings = {
+                showLiveUpdateGuide = false
+                onEvent(MeEvent.OpenLiveUpdateSettings)
+            }
         )
     }
 

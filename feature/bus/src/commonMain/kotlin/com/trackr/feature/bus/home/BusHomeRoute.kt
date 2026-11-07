@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -29,6 +30,9 @@ fun BusHomeRoute(
         viewModel.setPollingActive(true)
         onStopOrDispose { viewModel.setPollingActive(false) }
     }
+
+    // 上一次定位失败的话，回到前台（多半刚从系统设置里开了定位 / 补了权限）静默再试一次，见 issue #34
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.retryLocationIfFailed() }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current

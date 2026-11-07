@@ -38,9 +38,9 @@ android {
 
     defaultConfig {
         applicationId = "com.github.u5151561.trackr.ms"
-        versionCode = 10
-        // Keep the fork package identity while aligning product capabilities with upstream 0.1.6.
-        versionName = "0.1.6-ms.1"
+        versionCode = 11
+        // Keep the fork package identity while aligning product capabilities with upstream 0.1.7.
+        versionName = "0.1.7-ms.1"
 
         buildConfigField("String", "AMAP_WEB_KEY", "\"$amapWebServiceKey\"")
         // 第 9 步存储开关 USE_NEW_STORE 的默认值（true = Room + DataStore）；运行时可用 files/store_switch 覆盖，见 StoreSwitch

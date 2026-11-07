@@ -52,6 +52,12 @@ object SettingsKeys {
     /** 到站前提醒：车离上车站还有几站时提醒（第 25 步「我的」全局设置，1–3，旧存储没有这个键）；没有 = 2 */
     val ALERT_THRESHOLD_STOPS = intPreferencesKey("alert_threshold_stops")
 
+    /**
+     * 上车后自动结束追踪（issue #32）：定位判断用户已经坐上这班车，就直接结束本次追踪。
+     * 只对「没有下车站」的追踪生效（单线路、站点页一起等）；没有 = 开。
+     */
+    val AUTO_STOP_AFTER_BOARDING = booleanPreferencesKey("auto_stop_after_boarding")
+
     /** 界面模式（`UiMode` 的名字，第 30 步新加，旧存储没有这个键）；没有或认不出 = 标准版 */
     val UI_MODE = stringPreferencesKey("ui_mode")
 

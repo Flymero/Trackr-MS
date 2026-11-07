@@ -118,6 +118,25 @@ interface TransitCodeLauncher {
 }
 
 /**
+ * 跳系统设置页（引导用户自己去开定位 / 补授权，App 自己没有开关权限的能力）。
+ * Android：`Settings.ACTION_LOCATION_SOURCE_SETTINGS` / `ACTION_APPLICATION_DETAILS_SETTINGS`；iOS：`UIApplication.openSettingsURLString`。
+ */
+interface SystemSettingsLauncher {
+
+    /** 打开系统「位置信息」页（总开关、定位模式、模糊定位都在那里）；打不开返回 false */
+    fun openLocationSettings(): Boolean
+
+    /** 打开本应用的系统设置页（权限在那里）；打不开返回 false */
+    fun openAppSettings(): Boolean
+}
+
+/** 没有跳转能力（iOS 还没做、测试里不关心跳转时的默认值）：都不打开 */
+object NoSystemSettingsLauncher : SystemSettingsLauncher {
+    override fun openLocationSettings(): Boolean = false
+    override fun openAppSettings(): Boolean = false
+}
+
+/**
  * 手机定位（WGS-84）。Android：系统 LocationManager；iOS：CLLocationManager。
  * 上车 / 下车判定只认精确定位，模糊定位精度在公里级。
  */
@@ -134,6 +153,14 @@ interface LocationSource {
 
     /** 是否有任一定位权限（精确或模糊）；首页取城市、附近站用模糊定位也行 */
     fun hasAnyPermission(): Boolean = hasPrecisePermission()
+
+    /**
+     * 系统「位置信息」总开关是否打开。
+     *
+     * 权限和总开关是两层：权限给了但总开关关着时，所有 provider 都会被系统判为不可用，
+     * 一个定位也拿不到（issue #34 就是这种情况）。Android：`LocationManagerCompat.isLocationEnabled`。
+     */
+    fun isLocationEnabled(): Boolean = true
 
     /** 各定位来源（Android：fused / network / gps / passive）缓存的最近定位，各一个；默认只有 [lastKnown] */
     fun lastKnownFixes(): List<UserFix> = listOfNotNull(lastKnown())

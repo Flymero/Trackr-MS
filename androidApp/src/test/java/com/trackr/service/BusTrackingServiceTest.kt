@@ -410,7 +410,28 @@ class BusTrackingServiceTest {
     }
 
     @Test
-    fun singleLine_neverAsksForLocationType() {
+    fun singleLine_takesLocationType_withAutoStopAfterBoarding() {
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
+        )
+        // 默认开着「上车后自动结束追踪」：单线路也要定位（判人有没有跟着车走），前台就得带 location 类型
+        val session = requireNotNull(trackingRepository.start(singleTarget()))
+        val service = startService(session.sessionId).get()
+
+        assertEquals(
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+            service.lastForegroundServiceType
+        )
+        waitUntil("第一次轮询写回仓库") { trackingRepository.legState.value.currentBusId == "b1" }
+        assertEquals(LegPhase.SINGLE, trackingRepository.legState.value.legPhase)
+        // 车还有 1 站：这时候开始取定位，车到站后才判得出人有没有跟着走
+        assertEquals(LocationCadence.Tier.WAITING_NEAR, service.currentLocationTier)
+        assertEquals(listOf(LocationCadence.Tier.WAITING_NEAR), location.requestedTiers)
+    }
+
+    @Test
+    fun singleLine_autoStopOff_neverAsksForLocationType() {
+        transit.settings.setAutoStopAfterBoarding(false)
         transit.realtime.lineDetailResult = Result.success(
             lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
         )
@@ -420,6 +441,7 @@ class BusTrackingServiceTest {
         assertEquals(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE, service.lastForegroundServiceType)
         waitUntil("第一次轮询写回仓库") { trackingRepository.legState.value.currentBusId == "b1" }
         assertEquals(LegPhase.SINGLE, trackingRepository.legState.value.legPhase)
+        assertEquals(LocationCadence.Tier.OFF, service.currentLocationTier)
         assertTrue(location.requestedTiers.isEmpty())
     }
 
@@ -440,6 +462,41 @@ class BusTrackingServiceTest {
         assertEquals(0, location.activeCollectors)
         assertTrue(shadowOf(service).isForegroundStopped)
         assertNull(trackingRepository.session.value)
+    }
+
+    /**
+     * #28：结束追踪以后，这一项留下的到站提醒也要跟着消失，不能继续挂在通知栏和锁屏上等用户手动点掉。
+     */
+    @Test
+    fun stop_cancelsArrivalAlertOfThatSession() {
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 2, segmentProgress = 0.5f)))
+        )
+        val session = requireNotNull(trackingRepository.start(routeTarget()))
+        val service = startService(session.sessionId).get()
+        waitUntil("定位打开") { location.activeCollectors == 1 }
+
+        // 到站那一刻服务会发这条；这里直接替它发出来，然后结束追踪
+        val alerts = GlobalContext.get().get<ArrivalAlertNotifier>()
+        alerts.triggerArrivedAlert(
+            app,
+            trackingRepository.legState.value,
+            forceStandalone = true,
+            sessionId = session.sessionId
+        )
+        val arrivedId = ArrivalAlertNotifier.alertNotificationId(
+            ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED,
+            session.sessionId
+        )
+        assertNotNull("到站提醒应先发出来", shadowOf(notificationManager).getNotification(arrivedId))
+
+        trackingRepository.stop()
+        waitUntil("服务停下") { shadowOf(service).isStoppedBySelf }
+
+        assertNull(
+            "追踪结束后提醒不该留着",
+            shadowOf(notificationManager).getNotification(arrivedId)
+        )
     }
 
     @Test

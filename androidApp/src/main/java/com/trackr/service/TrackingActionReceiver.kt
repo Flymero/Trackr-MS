@@ -62,6 +62,9 @@ class TrackingActionReceiver : BroadcastReceiver(), KoinComponent {
                     return
                 }
                 trackingRepository.stop(target)
+                // 这条追踪的到站提醒也跟着撤（#28）：通知栏点「结束」就是「这趟我不管了」，
+                // 不该留一条「车辆已到站」在那儿等用户再点一次
+                ArrivalAlertNotifier.cancelSessionAlerts(context, target)
                 // 仓库里已经没有这一份了（用户先前已经结束过 / 服务已退出）：这条通知也没有主人了，
                 // 直接撤掉，免得留一条点不动的常驻通知
                 if (trackingRepository.sessionById(target) == null) {

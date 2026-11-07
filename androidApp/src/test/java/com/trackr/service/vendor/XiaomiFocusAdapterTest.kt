@@ -1,12 +1,14 @@
 package com.trackr.service.vendor
 
 import android.app.Application
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.test.core.app.ApplicationProvider
 import com.trackr.core.model.LegPhase
 import com.trackr.core.model.TrackingSessionState
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -162,6 +164,36 @@ class XiaomiFocusAdapterTest {
         val root = JSONObject(extraJson!!)
         assertTrue(root.has("param_v2"))
         assertEquals("剩2站", root.getJSONObject("param_v2").getJSONObject("capsule").getString("text"))
+    }
+
+    @Test
+    fun testBuildCancelPayload_requestsFocusNotificationCancellation() {
+        val paramV2 = JSONObject(XiaomiFocusAdapter.buildCancelPayload()).getJSONObject("param_v2")
+
+        assertEquals(1, paramV2.getInt("protocol"))
+        assertTrue(paramV2.getBoolean("cancel"))
+    }
+
+    @Test
+    fun testFocusProtocolVersion_readsOfficialSystemSetting() {
+        // 澎湃OS 开发指南的查询接口：Settings.System.notification_focus_protocol
+        Settings.System.putInt(context.contentResolver, XiaomiFocusAdapter.SETTINGS_KEY_FOCUS_PROTOCOL, 2)
+        assertEquals(2, XiaomiFocusAdapter.focusProtocolVersion(context))
+    }
+
+    @Test
+    fun testFocusProtocolVersion_missingKeyMeansNoFeature() {
+        // MIUI 13 / 14 没有这个键 —— 只能当「没这功能」，不能当「用户没开」
+        assertEquals(0, XiaomiFocusAdapter.focusProtocolVersion(context))
+    }
+
+    @Test
+    fun testIsFocusSupported_miuiHasNoFocusNotification() {
+        // 小米设备但协议版本 0（MIUI）→ 不支持，别去引导用户开一个不存在的开关
+        assertFalse(XiaomiFocusAdapter.isFocusSupported(isXiaomi = true, protocolVersion = 0))
+        assertFalse(XiaomiFocusAdapter.isFocusSupported(isXiaomi = false, protocolVersion = 3))
+        assertTrue(XiaomiFocusAdapter.isFocusSupported(isXiaomi = true, protocolVersion = 1))
+        assertTrue(XiaomiFocusAdapter.isFocusSupported(isXiaomi = true, protocolVersion = 3))
     }
 
     @Test

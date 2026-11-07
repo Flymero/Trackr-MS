@@ -414,8 +414,8 @@ data class TrackingSessionState(
     val isSignalLost: Boolean = false,
     /** 单线路模式：正在追踪的车辆连续从数据里消失的轮询次数（短暂消失时保持原车） */
     val missingBusPolls: Int = 0,
-    // 定位上车检测（仅分组换乘、有精确定位时使用）
-    /** WAITING_BOARD：车已到上车站、正在用定位确认用户是否上了这辆车；null 表示没有待确认的车 */
+    // 定位上车检测（路线、一起等始终使用；单线路只在开着「上车后自动结束追踪」时使用）
+    /** 待确认的车：WAITING_BOARD 里车已到上车站，或 SINGLE 里车已停到候车站；null 表示没有待确认的车 */
     val boardingCandidateBusId: String? = null,
     /** 进入待确认的时刻（墙钟毫秒），用于超时兜底 */
     val boardingCandidateSinceMillis: Long = 0L,

@@ -9,9 +9,9 @@
     <string name="me_about_license">开源协议</string>
     <string name="me_about_data_title">数据声明</string>
     <string name="me_about_data_body">公交实时数据来源于公开网络接口，仅供出行参考。</string>
-    <string name="me_about_live_title">实时通知与灵动胶囊支持</string>
-    <string name="me_about_live_body_1">支持 Android 16 原生实时活动 (Live Updates)、小米澎湃OS 焦点通知（超级岛）与 OPPO ColorOS 流体云。</string>
-    <string name="me_about_live_body_2">若未在挖孔旁显示小胶囊，请前往系统设置为本应用开启「置顶通知 / 实时活动」或「允许焦点通知」。</string>
+    <string name="me_about_live_title">实时活动通知</string>
+    <string name="me_about_live_body_1">追踪时把到站倒计时和站点进度常驻在状态栏/通知栏。各家系统的叫法不同：Android 16 叫实时活动，小米澎湃OS 叫焦点通知（OS3 起是超级岛），OPPO 叫流体云。</string>
+    <string name="me_about_live_body_2">若没看到常驻进度，去系统设置为本应用开启对应开关；系统本身没有这项功能时（例如 MIUI 全系），进度只在通知栏里显示。</string>
     <string name="me_about_check_update">检查新版本</string>
     <string name="me_about_checking">正在检查...</string>
     <string name="me_about_new_version">发现新版本</string>
@@ -61,6 +61,8 @@
     <string name="me_group_travel">出行</string>
     <string name="me_arrival_alert">到站前提醒</string>
     <string name="me_arrival_alert_desc">车离上车站还剩几站时震动提醒</string>
+    <string name="me_auto_stop_after_boarding">上车后自动结束追踪</string>
+    <string name="me_auto_stop_after_boarding_desc">定位判断你已上车就结束追踪，不再等下一班；路线仍跟到下车站</string>
     <string name="me_reminders">定时提醒</string>
     <string name="me_reminders_none">没有</string>
     <string name="me_reminders_count">%1$s 个</string>
@@ -70,7 +72,6 @@
     <string name="me_lockscreen">锁屏显示追踪</string>
     <string name="me_lockscreen_full">锁屏能看到线路和还有几站</string>
     <string name="me_lockscreen_hidden">锁屏只显示「追踪中」</string>
-    <string name="me_status_chip">状态栏胶囊</string>
     <string name="me_status_chip_unsupported">这台手机不支持，只在通知栏显示</string>
     <string name="me_status_chip_settings">通知设置</string>
     <string name="me_status_chip_on">已开启</string>
@@ -109,4 +110,13 @@
     <string name="me_reminder_no_alarm_permission">没开「闹钟和提醒」权限，到点只发通知，不会自动开始追踪。</string>
     <string name="me_reminder_go_settings">去设置</string>
     <string name="me_reminder_set_time">设定时间</string>
+
+    <!-- 各家系统叫法不同（小米焦点通知 / 超级岛、OPPO 流体云、Android 实时活动），界面统一叫「实时活动通知」 -->
+    <string name="me_live_update_name">实时活动通知</string>
+    <string name="me_live_update_desc">追踪时在状态栏常驻显示进度</string>
+    <string name="me_live_guide_title">开启实时活动通知</string>
+    <string name="me_live_guide_body">开启后，追踪时系统会在状态栏常驻显示这班车的到站倒计时和站点进度，不用一直开着应用。开关在系统设置里，各家叫法不太一样。</string>
+    <string name="me_live_guide_fallback">未开启也能正常追踪，只是进度只在通知栏里。</string>
+    <string name="me_live_guide_go">前往开启</string>
+    <string name="me_live_guide_later">暂不开启</string>
 </resources>

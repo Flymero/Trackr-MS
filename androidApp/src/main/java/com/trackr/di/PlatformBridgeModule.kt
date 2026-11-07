@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
@@ -15,6 +16,7 @@ import com.trackr.core.data.repository.UserLocationStore
 import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.AppSigningInfo
 import com.trackr.core.domain.platform.AppVersionInfo
+import com.trackr.core.domain.platform.SystemSettingsLauncher
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.data.repository.ITransitRepository
@@ -44,6 +46,8 @@ import org.koin.dsl.onClose
  */
 val platformBridgeModule: Module = module {
     single<TransitCodeLauncher> { AndroidTransitCodeLauncher(androidContext()) }
+    // 定位提示里的「去授权 / 去开启」：跳应用详情页或系统位置信息页（issue #34）
+    single<SystemSettingsLauncher> { AndroidSystemSettingsLauncher(androidContext()) }
     single<AppSigningInfo> { AndroidAppSigningInfo(androidContext()) }
     // 「读给我听」（第 33 步）：进程级一个，第一次读才建引擎；Koin 关闭时释放
     single<Announcer> { AndroidTtsAnnouncer(androidContext(), get(AppScopeQualifier)) } onClose {
@@ -75,6 +79,35 @@ class AndroidTransitCodeLauncher(context: Context) : TransitCodeLauncher {
     }
 }
 
+/**
+ * 定位提示里的「去授权 / 去开启」：用 applicationContext 带 NEW_TASK 打开系统页。
+ *
+ * 权限和系统总开关是两层，提示里必须指向对应那一层：没授权去应用详情页，总开关关着去位置信息页。
+ * 打不开（没这个 Activity，多是 ROM 裁掉了）返回 false，页面就不做任何事。
+ */
+class AndroidSystemSettingsLauncher(context: Context) : SystemSettingsLauncher {
+    private val appContext: Context = context.applicationContext ?: context
+
+    override fun openLocationSettings(): Boolean = open(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+
+    override fun openAppSettings(): Boolean = open(
+        action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        data = Uri.fromParts("package", appContext.packageName, null)
+    )
+
+    private fun open(action: String, data: Uri? = null): Boolean = try {
+        appContext.startActivity(
+            Intent(action).apply {
+                data?.let { this.data = it }
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
+        true
+    } catch (_: Exception) {
+        false
+    }
+}
+
 /** 包名 + 签名 SHA-1：转调 [SignatureUtils]（取不到时为空串，和原来一样） */
 class AndroidAppSigningInfo(context: Context) : AppSigningInfo {
     private val appContext: Context = context.applicationContext ?: context
@@ -91,7 +124,7 @@ object AndroidLiveUpdateSettings : LiveUpdateSettings {
     override fun openPromotionSettings(context: Context): Boolean = LiveUpdatePromotion.openPromotionSettings(context)
     override fun openAppNotificationSettings(context: Context): Boolean =
         LiveUpdatePromotion.openAppNotificationSettings(context)
-    override fun isXiaomiRom(): Boolean = XiaomiFocusAdapter.isXiaomiRom()
+    override fun isXiaomiFocusSupported(context: Context): Boolean = XiaomiFocusAdapter.isFocusSupported(context)
     override fun canShowXiaomiFocus(context: Context): Boolean = XiaomiFocusAdapter.canShowFocus(context)
     override fun openXiaomiNotificationSettings(context: Context) = XiaomiFocusAdapter.openNotificationSettings(context)
     override fun isColorOs(): Boolean = OppoFluidCloudAdapter.isColorOs()
@@ -101,6 +134,9 @@ object AndroidLiveUpdateSettings : LiveUpdateSettings {
 /**
  * 「我的」页「状态栏胶囊」：判断和跳转和第 17 步「更多」页里的写法一样（经 [LiveUpdateSettings]，用 applicationContext；
  * 厂商适配对象打开设置页时都带 NEW_TASK）。
+ *
+ * 只判断「这台机器有没有 / 用户开没开」，不判断各家叫什么名字——界面上统一叫「实时活动通知」。
+ * 小米要先看焦点通知协议版本：MIUI 13/14 没有这个功能，不能因为 `Build.BRAND` 是 xiaomi 就说支持。
  */
 class AndroidLiveUpdateAccess(
     context: Context,
@@ -108,30 +144,32 @@ class AndroidLiveUpdateAccess(
 ) : LiveUpdateAccess {
     private val appContext: Context = context.applicationContext ?: context
 
+    /** 澎湃OS 1 起才有焦点通知（3 起叫超级岛）；MIUI 全系为 false */
+    private fun xiaomiFocusSupported(): Boolean = settings.isXiaomiFocusSupported(appContext)
+
     private val supported: Boolean
-        get() = settings.isPromotionSupported() || settings.isXiaomiRom() || settings.isColorOs()
+        get() = xiaomiFocusSupported() || settings.isPromotionSupported() || settings.isColorOs()
 
     private fun allowed(): Boolean = when {
-        settings.isXiaomiRom() -> settings.canShowXiaomiFocus(appContext)
+        xiaomiFocusSupported() -> settings.canShowXiaomiFocus(appContext)
         settings.isPromotionSupported() -> settings.canPromote(appContext)
         else -> false
     }
 
     override fun status(): LiveUpdateStatus {
-        if (!supported) return LiveUpdateStatus(supported = false, allowed = false, systemName = "")
-        val name = when {
-            settings.isXiaomiRom() -> "小米焦点通知"
-            settings.isColorOs() -> "OPPO 流体云"
-            else -> "Android 实时活动"
-        }
-        return LiveUpdateStatus(supported = true, allowed = allowed(), systemName = name)
+        if (!supported) return LiveUpdateStatus(supported = false, allowed = false)
+        return LiveUpdateStatus(supported = true, allowed = allowed())
     }
 
     override fun openSettings() {
         when {
             !supported -> settings.openAppNotificationSettings(appContext)
-            !allowed() -> settings.openPromotionSettings(appContext)
-            settings.isXiaomiRom() -> settings.openXiaomiNotificationSettings(appContext)
+            !allowed() -> if (xiaomiFocusSupported()) {
+                settings.openXiaomiNotificationSettings(appContext)
+            } else {
+                settings.openPromotionSettings(appContext)
+            }
+            xiaomiFocusSupported() -> settings.openXiaomiNotificationSettings(appContext)
             settings.isColorOs() -> settings.openFluidCloudSettings(appContext)
             else -> settings.openAppNotificationSettings(appContext)
         }

@@ -103,6 +103,24 @@ class LiveUpdatePromotionTest {
     }
 
     @Test
+    fun testBuildNotification_carriesExplicitAccentColor() {
+        val state = TrackingSessionState(
+            isActive = true,
+            lineName = "49路",
+            targetStopName = "上海体育馆",
+            targetOrder = 10,
+            startTrackingOrder = 7,
+            currentBusOrder = 9,
+            currentBusProgress = 0.5f,
+            stopsRemaining = 1
+        )
+
+        val notification = liveNotifier.buildNotification(context, state)
+        // 染色通知的前景/背景由系统按 notification.color 推算，不给颜色系统自己挑就会出浅底浅字（issue #31）
+        assertEquals(LiveProgressNotifier.COLOR_ACCENT, notification.color)
+    }
+
+    @Test
     fun testBuildNotification_progressStyleIsSetAsCompatTemplate() {
         val state = TrackingSessionState(
             isActive = true,

@@ -48,6 +48,19 @@ class AndroidLocationSource(context: Context) : LocationSource {
             ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    /**
+     * 系统「位置信息」总开关。关着时所有 provider 都拿不到数据（权限给了也一样），
+     * 首页据此把提示写成「手机定位服务未开启」而不是笼统的「定位不可用」。
+     */
+    override fun isLocationEnabled(): Boolean {
+        val lm = locationManager ?: return false
+        return try {
+            LocationManagerCompat.isLocationEnabled(lm)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     /** 各个已开启的 provider 缓存的最近定位（fused / network / gps / passive，各一个） */
     override fun lastKnownFixes(): List<UserFix> {
         if (!hasAnyPermission()) return emptyList()

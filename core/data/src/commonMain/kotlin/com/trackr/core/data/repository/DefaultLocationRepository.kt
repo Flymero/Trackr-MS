@@ -86,6 +86,10 @@ class DefaultLocationRepository(
     override fun fixes(tier: LocationCadence.Tier): Flow<UserFix> =
         source.fixes(tier).onEach { _latest.value = it }
 
+    override fun hasPermission(): Boolean = source.hasAnyPermission()
+
+    override fun isSystemLocationEnabled(): Boolean = source.isLocationEnabled()
+
     private fun ageOf(fix: UserFix): Long = clock.elapsedMillis() - fix.elapsedMillis
 
     private fun accuracyOf(fix: UserFix): Float = fix.accuracyMeters ?: Float.MAX_VALUE
