@@ -28,6 +28,13 @@ val EngineMode.dataSource: DataSourceType
     }
 
 /**
+ * 官方源独有城市（眉山 / 仁寿）：车来了与掌上公交都不提供，结构上表现为
+ * 既无车来了 cityId 也无掌上公交编码。城市与引擎联动的默认判定。
+ */
+val TransitCity.isMeishanOnlyCity: Boolean
+    get() = cityId.isBlank() && mygolbsCityCode == null
+
+/**
  * 实时公交数据源分发协调器（D1：数据源二选一，不做聚合；眉山特化加官方源）。
  *
  * 搜索、附近站、站点详情按当前数据源（[EngineMode]）选一个 Provider；线路详情、时刻表按线路自带的来源或 id 前缀选，
