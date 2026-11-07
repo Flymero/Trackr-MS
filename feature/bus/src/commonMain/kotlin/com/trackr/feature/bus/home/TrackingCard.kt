@@ -1,5 +1,9 @@
 package com.trackr.feature.bus.home
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -55,7 +59,12 @@ internal fun TrackingCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                if (card.isPushOnline) {
+                // TCP 标签出现/消失淡入淡出，与线路详情页同款
+                AnimatedVisibility(
+                    visible = card.isPushOnline,
+                    enter = fadeIn(tween(durationMillis = 180)),
+                    exit = fadeOut(tween(durationMillis = 120))
+                ) {
                     DataSourceBadge(
                         text = "TCP",
                         containerColor = DataSourceBadgeStyle.MEISHAN.contentColor,

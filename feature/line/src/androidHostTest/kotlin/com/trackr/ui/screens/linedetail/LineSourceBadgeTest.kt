@@ -3,6 +3,7 @@ package com.trackr.ui.screens.linedetail
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.DataSourceType
@@ -26,7 +27,10 @@ class LineSourceBadgeTest {
         compose.runOnIdle { online.value = true }
         compose.onNodeWithText("TCP").assertIsDisplayed()
         compose.runOnIdle { online.value = false }
-        compose.onNodeWithText("TCP").assertDoesNotExist()
+        // 淡出动画 120ms：等它放完再断言消失
+        compose.waitUntil(timeoutMillis = 2_000) {
+            compose.onAllNodesWithText("TCP").fetchSemanticsNodes().isEmpty()
+        }
     }
 
     @Test

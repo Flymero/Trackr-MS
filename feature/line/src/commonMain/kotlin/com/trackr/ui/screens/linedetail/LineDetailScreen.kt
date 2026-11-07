@@ -1,6 +1,7 @@
 package com.trackr.ui.screens.linedetail
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -8,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import com.trackr.core.designsystem.component.DataSourceBadge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -836,17 +838,19 @@ private fun LineBottomBar(
 
 @Composable
 internal fun LineSourceBadge(source: DataSourceType, isPushOnline: Boolean) {
-    if (source != DataSourceType.MEISHAN || !isPushOnline) return
-    Surface(
-        shape = RoundedCornerShape(3.dp),
-        color = DataSourceBadgeStyle.MEISHAN.contentColor
+    if (source != DataSourceType.MEISHAN) return
+    // 出现/消失淡入淡出，与到站大字动画同款（§4.4：只包标签本身）
+    AnimatedVisibility(
+        visible = isPushOnline,
+        enter = fadeIn(tween(durationMillis = 180)),
+        exit = fadeOut(tween(durationMillis = 120))
     ) {
-        Text(
-            "TCP",
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-            color = DataSourceBadgeStyle.MEISHAN.containerColor,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold
+        DataSourceBadge(
+            text = "TCP",
+            containerColor = DataSourceBadgeStyle.MEISHAN.contentColor,
+            contentColor = DataSourceBadgeStyle.MEISHAN.containerColor,
+            shape = RoundedCornerShape(3.dp),
+            fontSize = 9.sp
         )
     }
 }
