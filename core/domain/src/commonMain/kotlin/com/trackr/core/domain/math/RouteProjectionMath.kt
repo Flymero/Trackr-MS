@@ -139,33 +139,67 @@ object RouteProjectionMath {
     }
 
     /**
-     * 路线名称智能排序：纯数字线路按数值升序排在前面，带字母/汉字专线排在后面
+     * 路线名称智能排序（fork 增强：自然分块比较）。
+     * 旧实现只认「整串 = 数字 + 路」的名字，带任何后缀（如「3路夜班」「3路(XX)」）都会掉进
+     * 尾部字典序桶，把「3路夜班」排到「303路」后面。现在按自然序分块比较：数字段按数值比、
+     * 其余按字典序、数字段优先于文字段、前缀短者先——「3路夜班」紧跟「3路」，而不是沉底。
      */
     fun compareLineNames(a: String, b: String): Int {
         val cleanA = a.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]")
             .removeSuffix(" [车来了]").removeSuffix("[车来了]").trim()
         val cleanB = b.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]")
             .removeSuffix(" [车来了]").removeSuffix("[车来了]").trim()
-        val numA = cleanA.removeSuffix("路").toIntOrNull()
-        val numB = cleanB.removeSuffix("路").toIntOrNull()
-        return when {
-            numA != null && numB != null -> {
-                val cmp = numA.compareTo(numB)
-                if (cmp != 0) cmp else {
-                    // 若数字相同，基础名短的（无后缀）排在前面
-                    val lenCmp = a.length.compareTo(b.length)
-                    if (lenCmp != 0) lenCmp else a.compareTo(b)
+        val chunkCmp = compareNaturalChunks(cleanA, cleanB)
+        if (chunkCmp != 0) return chunkCmp
+        // 清洗后分块同序（如「3路」与「03路」）：基础名短的（无多余前后缀）排前面，再按原文兜底
+        val lenCmp = a.length.compareTo(b.length)
+        if (lenCmp != 0) return lenCmp
+        return a.compareTo(b)
+    }
+
+    /** 数字段与文字段的自然序比较：数字段按数值升序，文字段按字典序，数字段优先于文字段 */
+    private fun compareNaturalChunks(a: String, b: String): Int {
+        var ia = 0
+        var ib = 0
+        while (ia < a.length && ib < b.length) {
+            val digitA = a[ia] in '0'..'9'
+            val digitB = b[ib] in '0'..'9'
+            when {
+                digitA && digitB -> {
+                    val runA = digitRun(a, ia)
+                    val runB = digitRun(b, ib)
+                    val numA = runA.toLongOrNull()
+                    val numB = runB.toLongOrNull()
+                    val cmp = when {
+                        numA != null && numB != null -> numA.compareTo(numB)
+                        // 超长数字串兜底按原段比较
+                        else -> runA.compareTo(runB)
+                    }
+                    if (cmp != 0) return cmp
+                    // 数值相同（如「03」与「3」）：段短的在前
+                    if (runA.length != runB.length) return runA.length.compareTo(runB.length)
+                    ia += runA.length
+                    ib += runB.length
                 }
-            }
-            numA != null -> -1
-            numB != null -> 1
-            else -> {
-                val cleanCmp = cleanA.compareTo(cleanB)
-                if (cleanCmp != 0) cleanCmp else {
-                    val lenCmp = a.length.compareTo(b.length)
-                    if (lenCmp != 0) lenCmp else a.compareTo(b)
+                digitA != digitB -> return if (digitA) -1 else 1
+                else -> {
+                    val cmp = a[ia].compareTo(b[ib])
+                    if (cmp != 0) return cmp
+                    ia++
+                    ib++
                 }
             }
         }
+        return when {
+            ia < a.length -> 1  // a 是 b 的前缀：短者在前
+            ib < b.length -> -1
+            else -> 0
+        }
+    }
+
+    private fun digitRun(s: String, start: Int): String {
+        var i = start
+        while (i < s.length && s[i] in '0'..'9') i++
+        return s.substring(start, i)
     }
 }
