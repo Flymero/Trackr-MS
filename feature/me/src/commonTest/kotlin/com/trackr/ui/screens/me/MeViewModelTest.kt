@@ -2,6 +2,7 @@ package com.trackr.ui.screens.me
 
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.TransitCity
@@ -115,6 +116,20 @@ class MeViewModelTest {
         viewModel.onEvent(MeEvent.SetRailMode(RailMode.Horizontal))
         testScheduler.advanceUntilIdle()
         assertEquals(RailMode.Horizontal, viewModel.uiState.value.railMode)
+    }
+
+    @Test
+    fun themeMode_readsSavedChoice_andFollowsChanges() = runTest(main.dispatcher) {
+        settings.setThemeMode(ThemeMode.Dark)
+        val viewModel = createViewModel()
+        assertEquals(ThemeMode.Dark, viewModel.uiState.value.themeMode)
+
+        for (mode in listOf(ThemeMode.Light, ThemeMode.System, ThemeMode.Dark)) {
+            viewModel.onEvent(MeEvent.SetThemeMode(mode))
+            testScheduler.advanceUntilIdle()
+            assertEquals(mode, settings.themeMode.value)
+            assertEquals(mode, viewModel.uiState.value.themeMode)
+        }
     }
 
     @Test

@@ -14,6 +14,10 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.trackr.core.data.repository.DefaultLocationRepository
 import com.trackr.core.data.repository.DefaultTrackingRepository
@@ -882,7 +886,59 @@ class ScreenshotGeneratorTest {
 
     private val aboutScreenshotState = AboutUiState(versionName = "0.0.3", canCheckUpdates = true, showLiveUpdateNote = true)
 
-    /** 「我的」页截图用的状态：两个定时提醒、实时活动通知没开 */
+    /** 主题设置与取色弹窗截图。 */
+    @Test
+    @Config(qualifiers = "zh-rCN-w412dp-h1400dp-420dpi", sdk = [34])
+    fun generateThemeSettingsLightScreenshot() = themeSettingsScreenshot(false)
+
+    @Test
+    @Config(qualifiers = "zh-rCN-w412dp-h1400dp-420dpi", sdk = [34])
+    fun generateThemeSettingsDarkScreenshot() = themeSettingsScreenshot(true)
+
+    @Test
+    @Config(qualifiers = "zh-rCN-w412dp-h1400dp-420dpi", sdk = [34])
+    fun generateThemeCustomColorDarkScreenshot() = themeSettingsScreenshot(dark = true, custom = true)
+
+    @Test
+    @Config(qualifiers = "zh-rCN-w412dp-h915dp-420dpi", sdk = [34])
+    fun generateThemeColorPickerScreenshot() {
+        val colors = com.trackr.core.model.ThemeColors(source = com.trackr.core.model.ThemeColorSource.Custom)
+        composeTestRule.setContent {
+            TrackrTheme(darkTheme = false, themeColors = colors) {
+                com.trackr.ui.screens.me.ThemeSettingsScreen(
+                    state = com.trackr.ui.screens.me.ThemeSettingsUiState(colors = colors),
+                    onEvent = {},
+                )
+            }
+        }
+        composeTestRule.onNodeWithTag("theme_settings").performScrollToNode(hasTestTag("theme_pick_color"))
+        composeTestRule.onNodeWithTag("theme_pick_color").performClick()
+        val bitmap = composeTestRule.onNodeWithTag("theme_color_picker").captureToImage().asAndroidBitmap()
+        FileOutputStream(File(outputDir, "theme_color_picker.png")).use {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
+    private fun themeSettingsScreenshot(dark: Boolean, custom: Boolean = false) {
+        val colors = com.trackr.core.model.ThemeColors(
+            preset = com.trackr.core.model.ThemeSeed.Teal,
+            source = if (custom) com.trackr.core.model.ThemeColorSource.Custom else com.trackr.core.model.ThemeColorSource.Preset,
+        )
+        composeTestRule.setContent {
+            TrackrTheme(darkTheme = dark, themeColors = colors) {
+                com.trackr.ui.screens.me.ThemeSettingsScreen(
+                    state = com.trackr.ui.screens.me.ThemeSettingsUiState(
+                        mode = if (dark) com.trackr.core.model.ThemeMode.Dark else com.trackr.core.model.ThemeMode.Light,
+                        colors = colors,
+                    ),
+                    onEvent = {},
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        saveScreenshot(if (custom) "theme_settings_custom_dark.png" else if (dark) "theme_settings_dark.png" else "theme_settings_light.png")
+    }
+
     private fun meScreenshotState(): MeUiState {
         val initialReminders = listOf(
             ScheduledReminder(

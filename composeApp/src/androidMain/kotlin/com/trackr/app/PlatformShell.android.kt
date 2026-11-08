@@ -2,7 +2,12 @@ package com.trackr.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
@@ -29,6 +34,7 @@ import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import com.trackr.core.navigation.Navigator
+import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.navigation.ScreenKey
 import com.trackr.ui.navigation.LocalAppViewModelStoreOwner
 import com.trackr.ui.navigation.dropUnlessResumed
@@ -44,8 +50,20 @@ import org.koin.compose.viewmodel.koinViewModel
  * 「同意并继续」里的 `navigator.selectTab(RoutePlan)` 作用在旧实例上，用户实际停在上一个页面。
  */
 @Composable
-internal actual fun PlatformHost(enabled: Boolean, content: @Composable () -> Unit) =
+internal actual fun PlatformHost(enabled: Boolean, content: @Composable () -> Unit) {
+    val activity = LocalActivity.current as? ComponentActivity
+    val darkTheme = TrackrTheme.isDark
+    LaunchedEffect(activity, darkTheme) {
+        activity?.let {
+            val style = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { darkTheme }
+            it.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                it.window.isNavigationBarContrastEnforced = false
+            }
+        }
+    }
     ProvideAmapMapSession(enabled = enabled, content = content)
+}
 
 @Composable
 internal actual fun bottomTabIcon(key: ScreenKey): ImageVector = when (key) {

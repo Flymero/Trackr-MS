@@ -28,6 +28,8 @@ object LegacyPrefs {
     const val KEY_SHOW_ON_LOCK_SCREEN = "show_on_lock_screen"
     const val KEY_ALERT_THRESHOLD_STOPS = "alert_threshold_stops"
     const val KEY_UI_MODE = "ui_mode"
+    const val KEY_THEME_MODE = "theme_mode"
+    const val KEY_THEME_COLORS = "theme_colors"
     const val KEY_FONT_SCALE_PROMPT_DISMISSED = "font_scale_prompt_dismissed"
     const val KEY_FAVORITES_GROUP_MIGRATION_VERSION = "favorites_group_migration_version"
 

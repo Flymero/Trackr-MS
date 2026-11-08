@@ -60,6 +60,8 @@ class LegacySettingsMigration(
             (legacy[LegacyPrefs.KEY_ALERT_THRESHOLD_STOPS] as? Int)?.let { target[SettingsKeys.ALERT_THRESHOLD_STOPS] = it }
             // 同上，第 30 步新加
             (legacy[LegacyPrefs.KEY_UI_MODE] as? String)?.let { target[SettingsKeys.UI_MODE] = it }
+            (legacy[LegacyPrefs.KEY_THEME_MODE] as? String)?.let { target[SettingsKeys.THEME_MODE] = it }
+            (legacy[LegacyPrefs.KEY_THEME_COLORS] as? String)?.let { target[SettingsKeys.THEME_COLORS] = it }
             (legacy[LegacyPrefs.KEY_FONT_SCALE_PROMPT_DISMISSED] as? Boolean)?.let { target[SettingsKeys.FONT_SCALE_PROMPT_DISMISSED] = it }
             (legacy[LegacyPrefs.KEY_FAVORITES_GROUP_MIGRATION_VERSION] as? Int)?.let {
                 target[SettingsKeys.FAVORITES_GROUP_MIGRATION_VERSION] = it

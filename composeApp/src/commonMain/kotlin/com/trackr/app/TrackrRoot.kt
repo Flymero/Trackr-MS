@@ -87,7 +87,7 @@ fun TrackrRoot(
     // 界面模式在 NavDisplay 之上读（§8.2）：决定主题和导航结构（标准版 / 长辈版，§8.4）
     val shellViewModel = koinViewModel<AppShellViewModel>()
     val shell by shellViewModel.shell.collectAsStateWithLifecycle()
-    TrackrTheme(uiMode = shell.uiMode) {
+    TrackrTheme(uiMode = shell.uiMode, themeMode = shell.themeMode, themeColors = shell.themeColors) {
         Surface(modifier = Modifier.fillMaxSize()) {
             // 原来在 NavDisplay 外取、跨页共享的 ViewModel（首页、搜索、规划 / 收藏）仍挂在这一层
             val appViewModelStoreOwner = checkNotNull(LocalViewModelStoreOwner.current) {

@@ -24,10 +24,10 @@ fun localOrEnv(name: String): String =
     System.getenv(name)?.trim().orEmpty().ifBlank { localProperties.getProperty(name, "").trim() }
 
 // 高德 Android 平台 Key：与「PackageName + 签名 SHA-1」绑定。
-// debug 与 release 使用同一个 PackageName（见下方 buildTypes），而高德控制台允许在**同一个 Key**
-// 里同时填写「发布版 SHA-1」和「调试版 SHA-1」，因此一把 Key 即可同时覆盖两种构建产物。
+// Fork 刻意不加 .debug 后缀（偏离上游 6d6cfda，debug 包就是日常主用包），
+// debug 与 release 使用同一个 PackageName（ms），同一把 Key 填两种 SHA-1 即可。
 val amapAndroidKeyFallback = localOrEnv("AMAP_ANDROID_KEY")
-// 仅在使用自定义签名 / 需要为某个变体单独配 Key 时才需要这两项，通常留空
+// 可分别配置 debug / release 的 Android Key，未配置时回落到通用值。
 val amapAndroidKeyDebug = localOrEnv("AMAP_ANDROID_KEY_DEBUG").ifBlank { amapAndroidKeyFallback }
 val amapAndroidKeyRelease = localOrEnv("AMAP_ANDROID_KEY_RELEASE").ifBlank { amapAndroidKeyFallback }
 // 高德 Web 服务 Key（restapi.amap.com），与 Android 平台 Key 互不通用。
@@ -38,9 +38,10 @@ android {
 
     defaultConfig {
         applicationId = "com.github.u5151561.trackr.ms"
-        versionCode = 11
-        // Keep the fork package identity while aligning product capabilities with upstream 0.1.7.
-        versionName = "0.1.7-ms.1"
+        resValue("string", "shortcut_target_package", applicationId!!)
+        versionCode = 12
+        // Keep the fork package identity while aligning product capabilities with upstream 0.1.8.
+        versionName = "0.1.8-ms.1"
 
         buildConfigField("String", "AMAP_WEB_KEY", "\"$amapWebServiceKey\"")
         // 第 9 步存储开关 USE_NEW_STORE 的默认值（true = Room + DataStore）；运行时可用 files/store_switch 覆盖，见 StoreSwitch
@@ -81,8 +82,8 @@ android {
 
     buildTypes {
         debug {
-            // 刻意不再加 .d 后缀：与 release 共用 PackageName，
-            // 这样同一个高德 Key（同时填了发布版 + 调试版 SHA-1）对两种构建都有效。
+            // Fork 刻意不加 .debug 后缀（偏离上游 6d6cfda）：debug 包就是日常主用包（ms 身份），
+            // 改后缀等于换应用身份，设备上的收藏/设置等数据会被清空。
             enableUnitTestCoverage = true
             buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKeyDebug\"")
             manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKeyDebug
@@ -115,6 +116,7 @@ android {
 
     buildFeatures {
         buildConfig = true
+        resValues = true
     }
 
     packaging {

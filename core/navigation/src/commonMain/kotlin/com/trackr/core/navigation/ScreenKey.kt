@@ -56,6 +56,9 @@ sealed interface ScreenKey : NavKey {
     @Serializable
     data object About : ScreenKey
 
+    @Serializable
+    data object ThemeSettings : ScreenKey
+
     /** 编辑一个定时提醒（§3.1「我的」页签子页，第 25 步） */
     @Serializable
     data class ReminderEdit(val reminderId: String) : ScreenKey

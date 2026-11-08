@@ -1,5 +1,6 @@
 package com.trackr.feature.me
 
+import com.trackr.ui.screens.me.ThemeSettingsViewModel
 import com.trackr.core.domain.platform.AppVersionInfo
 import com.trackr.core.navigation.ScreenKey
 import com.trackr.ui.screens.me.AboutViewModel
@@ -38,6 +39,7 @@ val meModule = module {
             notices = get()
         )
     }
+    viewModel { ThemeSettingsViewModel(settings = get()) }
     viewModel { AmapKeyViewModel(amapKeys = get(), signingInfo = get(), defaults = get(), notices = get()) }
     viewModel {
         val version = getOrNull<AppVersionInfo>() ?: AppVersionInfo(1, "0.0.1")

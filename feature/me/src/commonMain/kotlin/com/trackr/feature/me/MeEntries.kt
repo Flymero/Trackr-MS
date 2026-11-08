@@ -1,5 +1,8 @@
 package com.trackr.feature.me
 
+import com.trackr.ui.screens.me.ThemeSettingsScreen
+import com.trackr.ui.screens.me.ThemeSettingsEvent
+import com.trackr.ui.screens.me.ThemeSettingsViewModel
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +50,15 @@ fun EntryProviderScope<NavKey>.meEntries(navigator: TrackrNavigator) {
         AmapKeyRoute(viewModel = koinViewModel(), navigator = navigator)
     }
 
+    entry<ScreenKey.ThemeSettings> {
+        val viewModel: ThemeSettingsViewModel = koinViewModel()
+        val state by viewModel.uiState.collectAsStateWithLifecycle()
+        val back = dropUnlessResumed { navigator.popChildPage() }
+        ThemeSettingsScreen(state = state, onEvent = { event ->
+            if (event == ThemeSettingsEvent.Back) back() else viewModel.onEvent(event)
+        })
+    }
+
     entry<ScreenKey.About> {
         AboutRoute(viewModel = koinViewModel(), navigator = navigator)
     }
@@ -75,6 +87,7 @@ private fun MeRoute(viewModel: MeViewModel, navigator: TrackrNavigator) {
                 is MeEvent.OpenReminder -> whenResumed { navigator.open(ScreenKey.ReminderEdit(event.id)) }
                 MeEvent.OpenAmapKey -> whenResumed { navigator.open(ScreenKey.AmapKey) }
                 MeEvent.OpenAbout -> whenResumed { navigator.open(ScreenKey.About) }
+                MeEvent.OpenThemeSettings -> whenResumed { navigator.open(ScreenKey.ThemeSettings) }
                 else -> viewModel.onEvent(event)
             }
         }

@@ -64,6 +64,10 @@ object SettingsKeys {
     /** 线路详情走向条样式（`RailMode` 的名字）；没有或认不出 = 横排 */
     val RAIL_MODE = stringPreferencesKey("rail_mode")
 
+    /** 深浅色偏好（`ThemeMode` 的名字）；没有或认不出 = 跟随系统 */
+    val THEME_MODE = stringPreferencesKey("theme_mode")
+    val THEME_COLORS = stringPreferencesKey("theme_colors")
+
     /** 系统字体放大时的「试试长辈版」提示点过了（第 30 步新加）；没有 = 还没点过 */
     val FONT_SCALE_PROMPT_DISMISSED = booleanPreferencesKey("font_scale_prompt_dismissed")
     val FAVORITES_GROUP_MIGRATION_VERSION = intPreferencesKey("favorites_group_migration_version")

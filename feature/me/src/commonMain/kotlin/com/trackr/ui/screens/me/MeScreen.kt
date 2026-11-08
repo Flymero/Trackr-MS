@@ -69,6 +69,11 @@ import com.trackr.core.designsystem.resources.transit_code
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
+import com.trackr.feature.me.resources.theme_title
+import com.trackr.feature.me.resources.me_theme_system
+import com.trackr.feature.me.resources.me_theme_light
+import com.trackr.feature.me.resources.me_theme_dark
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.feature.me.resources.Res as MeRes
@@ -137,6 +142,11 @@ fun MeScreen(
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val layoutDirection = LocalLayoutDirection.current
+    val themeModeLabels = mapOf(
+        ThemeMode.System to stringResource(MeRes.string.me_theme_system),
+        ThemeMode.Light to stringResource(MeRes.string.me_theme_light),
+        ThemeMode.Dark to stringResource(MeRes.string.me_theme_dark)
+    )
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -180,6 +190,12 @@ fun MeScreen(
                         subtitle = stringResource(MeRes.string.me_rail_mode_desc),
                         value = railModeLabel(state.railMode),
                         onClick = { showRailModeDialog = true }
+                    )
+                    GroupDivider()
+                    SettingRow(
+                        title = stringResource(MeRes.string.theme_title),
+                        value = themeModeLabels.getValue(state.themeMode),
+                        onClick = { onEvent(MeEvent.OpenThemeSettings) }
                     )
                 }
             }

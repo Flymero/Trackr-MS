@@ -51,7 +51,10 @@ atomicfu = "0.33.0"
 # DataStore 的 Okio 存储（:core:datastore 的追踪会话 JSON 文件用）
 okio = "3.18.2"
 
+materialKolor = "5.0.1"
+
 [libraries]
+material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 amap-search = { group = "com.amap.api", name = "3dmap-location-search", version.ref = "amap3dBundle" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

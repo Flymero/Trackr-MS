@@ -71,4 +71,13 @@ kotlin {
             runtimeOnly("org.robolectric:android-all:14-robolectric-10818077")
         }
     }
+
+    // iOS 侧：产出静态 framework 给 Xcode 宿主工程消费（build phase 调
+    // embedAndSignAppleFrameworkForXcode）。目前仓库里还没有 iosApp 工程。
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
+        target.binaries.framework {
+            baseName = "ComposeApp"
+            isStatic = true
+        }
+    }
 }

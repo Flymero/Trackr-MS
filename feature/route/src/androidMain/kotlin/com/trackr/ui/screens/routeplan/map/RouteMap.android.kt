@@ -1,6 +1,5 @@
 package com.trackr.ui.screens.routeplan.map
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -26,6 +25,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.trackr.data.remote.amap.AmapSdkManager
+import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.feature.route.resources.Res as RouteRes
 import com.trackr.feature.route.resources.route_map_recenter
 import com.trackr.ui.screens.routeplan.LocalAmapMapSession
@@ -46,8 +46,8 @@ actual val isRouteMapSupported: Boolean = true
 actual fun RouteMap(state: RouteMapState, modifier: Modifier, bottomInset: () -> Dp) {
     val session = LocalAmapMapSession.current
     val androidKey = state.androidKey
-    // 地图跟随系统深色：深色时切高德夜间样式，避免夜里一张白底图刺眼
-    val isDarkTheme = isSystemInDarkTheme()
+    // 地图跟随应用深浅色设置，包括手动选择的夜间样式。
+    val isDarkTheme = TrackrTheme.isDark
 
     val mapUnavailableReason = remember(androidKey) { AmapSdkManager.mapUnavailableReason(androidKey) }
     var mapRuntimeError by remember(androidKey) { mutableStateOf<String?>(null) }

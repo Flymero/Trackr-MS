@@ -34,6 +34,8 @@ class RoomDataStoreTransitStore(
             alertThresholdStops = prefs[SettingsKeys.ALERT_THRESHOLD_STOPS],
             uiMode = prefs[SettingsKeys.UI_MODE],
             railMode = prefs[SettingsKeys.RAIL_MODE],
+            themeMode = prefs[SettingsKeys.THEME_MODE],
+            themeColorsJson = prefs[SettingsKeys.THEME_COLORS],
             fontScalePromptDismissed = prefs[SettingsKeys.FONT_SCALE_PROMPT_DISMISSED],
             searchHistory = db.searchHistory().getAll().map { it.query }
         )
@@ -80,6 +82,14 @@ class RoomDataStoreTransitStore(
 
     override suspend fun saveRailMode(name: String) {
         settings.edit { it[SettingsKeys.RAIL_MODE] = name }
+    }
+
+    override suspend fun saveThemeColors(json: String) {
+        settings.edit { it[SettingsKeys.THEME_COLORS] = json }
+    }
+
+    override suspend fun saveThemeMode(name: String) {
+        settings.edit { it[SettingsKeys.THEME_MODE] = name }
     }
 
     override suspend fun saveFontScalePromptDismissed(dismissed: Boolean) {
