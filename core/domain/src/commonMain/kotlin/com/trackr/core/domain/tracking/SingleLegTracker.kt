@@ -21,6 +21,9 @@ internal object SingleLegTracker {
     /** 追踪车辆短暂消失时最多保持原车的轮询次数 */
     const val MAX_MISSING_POLLS = 2
 
+    /** 只补回最近一轮漏掉的到站，避免用中断前的旧车辆启动检测。 */
+    private const val DEPARTURE_RECOVERY_WINDOW_MILLIS = 60_000L
+
     /** 判出上车后写进状态的文案（会话马上就被清掉了，只有通知里会读到它） */
     const val BOARDED_SUMMARY = "已上车，本次追踪结束"
 
@@ -62,7 +65,8 @@ internal object SingleLegTracker {
     ): SingleUpdate {
         if (boarding == null) return processBus(session, buses, operatingState, statusDescription, nowMillis)
 
-        val checked = checkBoarding(session, buses, boarding, nowMillis)
+        val recovered = recoverDepartedCandidate(session, buses, boarding, nowMillis)
+        val checked = checkBoarding(recovered, buses, boarding, nowMillis)
         if (checked.boarded) {
             return SingleUpdate(checked.state.copy(statusSummary = BOARDED_SUMMARY), boarded = true)
         }
@@ -223,6 +227,27 @@ internal object SingleLegTracker {
     }
 
     /**
+     * 轮询可能直接从进站前跳到离站后，或车到站那轮还没取得定位。
+     * 必须在选下一班车之前补回原车；只认最近追过的同一辆车、刚过一站且人在站旁。
+     * 此处只创建待确认，是否上车仍由两次不同定位判断，不能因车过站直接结束。
+     */
+    private fun recoverDepartedCandidate(
+        session: TrackingSessionState,
+        buses: List<LiveBus>,
+        input: BoardingDetector.Input,
+        nowMillis: Long
+    ): TrackingSessionState {
+        if (session.boardingCandidateBusId != null) return session
+        if (nowMillis - session.updatedAtMillis !in 0..DEPARTURE_RECOVERY_WINDOW_MILLIS) return session
+        if (session.currentBusOrder !in (session.targetOrder - 1)..session.targetOrder) return session
+        val previousId = session.currentBusId ?: return session
+        val departed = buses.firstOrNull { it.busId == previousId } ?: return session
+        if (departed.order != session.targetOrder + 1) return session
+        if (!BoardingDetector.shouldStartCandidate(input)) return session
+        return withCandidate(session, previousId, nowMillis)
+    }
+
+    /**
      * 车到候车站、人也在站附近：开始用定位确认（没有定位、人明显不在站附近时不创建）。
      *
      * 用 `stopsRemaining == 0` 而不是「已停靠」：公交往往不停稳就过站，数据里也常常只有站序没有停靠状态，
@@ -236,12 +261,18 @@ internal object SingleLegTracker {
         if (state.boardingCandidateBusId != null || state.stopsRemaining != 0) return state
         val busId = state.currentBusId ?: return state
         if (!BoardingDetector.shouldStartCandidate(input)) return state
-        return state.copy(
-            boardingCandidateBusId = busId,
-            boardingCandidateSinceMillis = nowMillis,
-            boardingConfirmStreak = 0,
-            boardingMissStreak = 0,
-            boardingLastFixElapsedMillis = -1L
-        )
+        return withCandidate(state, busId, nowMillis)
     }
+
+    private fun withCandidate(
+        state: TrackingSessionState,
+        busId: String,
+        nowMillis: Long
+    ): TrackingSessionState = state.copy(
+        boardingCandidateBusId = busId,
+        boardingCandidateSinceMillis = nowMillis,
+        boardingConfirmStreak = 0,
+        boardingMissStreak = 0,
+        boardingLastFixElapsedMillis = -1L
+    )
 }

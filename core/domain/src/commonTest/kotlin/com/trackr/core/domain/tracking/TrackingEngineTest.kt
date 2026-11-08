@@ -615,6 +615,82 @@ class TrackingEngineTest {
     }
 
     @Test
+    fun engine_single_autoStop_recoversWhenPollSkipsArrival() {
+        val approaching = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0))
+        assertNull(approaching.session.state.boardingCandidateBusId)
+        val departed = singlePoll(approaching.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
+        assertEquals("b1", departed.session.state.boardingCandidateBusId)
+        assertEquals(LocationCadence.Tier.BOARDING_CHECK,
+            TrackingEngine.locationTier(departed.session.state, locationEnabled = true, stopAfterBoarding = true))
+        val repeated = singlePoll(departed.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
+        assertEquals(1, repeated.session.state.boardingConfirmStreak)
+        assertTrue(repeated.effects.none { it is TrackingEngine.Effect.Finished })
+        val done = singlePoll(repeated.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 250)), serviceFixNorth(250, ageMillis = 5_000))
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
+    }
+
+    @Test
+    fun engine_single_autoStop_recoversWhenLocationArrivesAfterDeparture() {
+        val arrived = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0)), fix = null)
+        val departed = singlePoll(arrived.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
+        assertEquals("b1", departed.session.state.boardingCandidateBusId)
+        val done = singlePoll(departed.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 250)), serviceFixNorth(250, ageMillis = 5_000))
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
+    }
+
+    @Test
+    fun engine_single_skippedArrival_userStaysAtStop_doesNotFinish() {
+        var session = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0)).session
+        repeat(2) { index ->
+            val result = singlePoll(session,
+                listOf(boardingBus("b1", order = 11, metersNorth = 350)),
+                serviceFixNorth(0, ageMillis = 6_000L - index * 1_000))
+            assertTrue(result.effects.none { it is TrackingEngine.Effect.Finished })
+            session = result.session
+        }
+        assertNull(session.state.boardingCandidateBusId)
+    }
+
+    @Test
+    fun engine_single_skippedArrival_doesNotRecoverUnrelatedOrOldVehicle() {
+        val approaching = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0)).session
+        val cases = listOf(
+            approaching to boardingBus("other", order = 11, metersNorth = 150),
+            approaching to boardingBus("b1", order = 12, metersNorth = 150),
+            approaching.copy(state = approaching.state.copy(updatedAtMillis = NOW_MILLIS - 61_000)) to
+                boardingBus("b1", order = 11, metersNorth = 150)
+        )
+        cases.forEach { (session, bus) ->
+            val result = singlePoll(session, listOf(bus), serviceFixNorth(150))
+            assertNull(result.session.state.boardingCandidateBusId)
+            assertTrue(result.effects.none { it is TrackingEngine.Effect.Finished })
+        }
+    }
+
+    @Test
+    fun engine_single_skippedArrival_requiresUsableLocationNearStop() {
+        val approaching = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0)).session
+        val fixes = listOf(null, serviceFixNorth(500), serviceFixNorth(150, ageMillis = 31_000),
+            serviceFixNorth(150).copy(accuracyMeters = 100f))
+        fixes.forEach { fix ->
+            val result = singlePoll(approaching,
+                listOf(boardingBus("b1", order = 11, metersNorth = 150)), fix)
+            assertNull(result.session.state.boardingCandidateBusId)
+            assertTrue(result.effects.none { it is TrackingEngine.Effect.Finished })
+        }
+    }
+
+    @Test
     fun engine_single_autoStopOff_neverEndsTracking() {
         val session = beginSingle()
         val arrived = singlePoll(
