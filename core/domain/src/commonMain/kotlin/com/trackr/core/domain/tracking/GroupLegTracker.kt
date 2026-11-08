@@ -495,6 +495,9 @@ internal object GroupLegTracker {
                 stopsRemaining = stopsRemaining,
                 etaSeconds = locked.etaSeconds,
                 isBusArrivedAtStop = arrivedDrop,
+                // 权威停靠标志跟锁定车走：上车瞬间车不在数据里时标志为 false，补锁到眉山权威车后要升级，
+                // 否则会话级到站判定的 ETA 旁路对权威车保持开启，提前报「到站了」（同 selectWaitingBus 口径）
+                hasAuthoritativeArrival = locked.hasAuthoritativeArrival,
                 isSignalLost = false,
                 statusSummary = summary,
                 updatedAtMillis = nowMillis

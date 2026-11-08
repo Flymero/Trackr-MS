@@ -32,7 +32,8 @@ val EngineMode.dataSource: DataSourceType
  *
  * 搜索、附近站、站点详情按当前数据源（[EngineMode]）选一个 Provider；线路详情、时刻表按线路自带的来源或 id 前缀选，
  * 认不出来才用当前数据源。城市列表合并三家，官方源只补眉山 / 仁寿。
- * 官方源不做附近站 / 站点经过线路，官方模式下这两类查询回退掌上公交。
+ * 官方源自带附近站（siteAndRedPacket）与同站线路（line/site）接口，官方模式下这两类查询不回退掌上公交；
+ * 带 `ms-st:` 站点特征的请求无论当前模式都路由官方源（第三方 Provider 认不出这个 id）。
  */
 class TransitProviderCoordinator(
     val providers: Map<DataSourceType, ITransitProvider>
@@ -247,9 +248,11 @@ class TransitProviderCoordinator(
     ): List<NearbyStop> {
         val chelaileProvider = providers[DataSourceType.CHELAILE]
         val mygolbsProvider = providers[DataSourceType.MYGOLBS]
+        val meishanProvider = providers[DataSourceType.MEISHAN]
 
-        if (mode == EngineMode.MEISHAN) {
-            return providers[DataSourceType.MEISHAN]?.getStopDetail(city, request).orEmpty()
+        // 官方站 ID（ms-st:）只有官方源认得：切走数据源后页面残留的官方站请求也不能送去第三方
+        if (mode == EngineMode.MEISHAN || meishanProvider?.supportsStop(request) == true) {
+            return meishanProvider?.getStopDetail(city, request).orEmpty()
         }
 
         // 若请求明确包含掌上公交前缀特征，或当前引擎模式为掌上公交，路由至掌上公交

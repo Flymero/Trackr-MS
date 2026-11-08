@@ -202,14 +202,19 @@ internal object WatchTogetherTracker {
         }
 
         val boarded = mutableListOf<BoardingRule.Option>()
-        // 「上了哪辆？」等用户选的时候不再开始新的待确认（否则同一批车会再判一次、待选被重写）
-        // 计划内线路没被本轮覆盖（官方逐线推送 / 部分补漏）时也不做上车判定：
+        // 「上了哪辆？」等用户选的时候不再开始新的待确认（否则同一批车会再判一次、待选被重写）。
+        // 建候选只是标记不是判定：部分数据（轮转补查、官方逐线帧）也可以建，上游同款。
+        val allowNewCandidates = session.boardChoice == null
+        // 上车判定只信「覆盖了本轮所需线路」的轮询，所需线与 plan() 的收窄口径一致：
+        // 有待选/待确认时只需覆盖涉及的线（收窄后覆盖重新可达，>4 条线轮转、≥3 条线待选不再卡死），
+        // 否则覆盖全部计划线。单线推送帧缺席了另一条候选线时判不了车——
         // 另一条线在本轮缺席，会把「两车都在站」的歧义误判成单车自动上车。
         val watchTarget = session.watchTarget
-        val pollCoversPlan = watchTarget == null ||
-            watchTarget.lines.isEmpty() ||
-            poll.requested.containsAll(watchTarget.lines.map { it.lineId })
-        val allowNewCandidates = session.boardChoice == null && pollCoversPlan
+        val planLines = when (val p = plan(session)) {
+            is WatchPollPlan.Lines -> p.lines.map { it.lineId }
+            null, is WatchPollPlan.Stop -> watchTarget?.lines?.map { it.lineId }.orEmpty()
+        }
+        val pollCoversPlan = planLines.isEmpty() || poll.requested.containsAll(planLines)
         var lines = session.watchedLines.map { wl ->
             val lineId = wl.line.lineId
             if (lineId !in poll.requested) return@map wl // 待确认期间没请求它：保持上次
@@ -257,10 +262,11 @@ internal object WatchTogetherTracker {
             }
         }
 
-        // 判上车：定位判出来的、或「上了哪辆？」被定位分清了的
+        // 判上车：定位判出来的、或「上了哪辆？」被定位分清了的。
+        // 覆盖不全时既有候选也不拍板（本轮缺席的候选线无从比较），streak 照常积累，等凑齐再判。
         val pick = when {
-            boarded.size == 1 -> boarded.single()
-            boarded.size >= 2 -> BoardingRule.distinguish(boarded, fix)
+            boarded.size == 1 -> if (pollCoversPlan) boarded.single() else null
+            boarded.size >= 2 -> if (pollCoversPlan) BoardingRule.distinguish(boarded, fix) else null
             else -> choicePick
         }
         if (pick != null) {

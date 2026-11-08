@@ -153,7 +153,7 @@ class BusHomeViewModel(
                             currentLng = coords.second
                         )
                     }
-                    loadNearbyStops(coords.first, coords.second, cityOverride = city)
+                    loadNearbyStops(coords.first, coords.second, cityOverride = city, keepOnFailure = false)
                 }
             }
         }
@@ -317,7 +317,8 @@ class BusHomeViewModel(
         lat: Double,
         lng: Double,
         cityOverride: TransitCity? = null,
-        showLoading: Boolean = true
+        showLoading: Boolean = true,
+        keepOnFailure: Boolean = true
     ) {
         viewModelScope.launch {
             if (showLoading) {
@@ -327,8 +328,9 @@ class BusHomeViewModel(
             val result = realtime.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
             edit {
                 it.copy(
-                    // 同城刷新失败保留上一份结果，不显示成「附近没有站」；换城失败不能留着旧城的站
-                    nearbyStops = result.getOrNull() ?: if (cityOverride == null) it.nearbyStops else emptyList(),
+                    // 失败保留上一份结果，不显示成「附近没有站」；真换了城市就不能留旧城的站
+                    // （[keepOnFailure] 由调用方按「是否真的换城」传入，不能用 cityOverride 是否为空推断）
+                    nearbyStops = result.getOrNull() ?: if (keepOnFailure) it.nearbyStops else emptyList(),
                     isLoadingNearby = false
                 )
             }
@@ -428,8 +430,9 @@ class BusHomeViewModel(
                 val firstResult = realtime.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
                 var stops = firstResult.getOrNull()
 
-                // 人不在已选城市（如出差在外）时，GPS 坐标查不到该城市的站点：改用已选城市中心点再查一次
-                if (stops?.isEmpty() == true && gpsLocation != null && !targetCity.matchesCity(_uiState.value.locatedCity)) {
+                // 人不在已选城市（如出差在外）时，GPS 坐标查不到该城市的站点：改用已选城市中心点再查一次。
+                // 官方源把「请求失败」上抛成 null（区别于「附近没有站」的空列表），失败也值得再试一次中心点
+                if ((stops == null || stops.isEmpty()) && gpsLocation != null && !targetCity.matchesCity(_uiState.value.locatedCity)) {
                     val center = ProvinceCityCatalog.findCityCenterCoordinates(targetCity.cityName)
                     if (center != null) {
                         stops = realtime.getNearbyStops(targetCity, center.first, center.second, limit = NEARBY_STOPS_LIMIT)
@@ -515,6 +518,7 @@ class BusHomeViewModel(
     fun selectCity(city: TransitCity) {
         viewModelScope.launch {
             val state = _uiState.value
+            val cityBefore = state.currentCity
             val isLocated = city.matchesCity(state.locatedCity)
             val coords = if (isLocated) {
                 // 优先用真实 GPS 坐标：当前坐标可能已回退为其他城市的中心点
@@ -523,10 +527,16 @@ class BusHomeViewModel(
                 ProvinceCityCatalog.getCityCenterCoordinates(city.cityName)
             }
 
-            // 若所选城市仅某单一数据源支持，自动联动切换至支持的引擎
-            if (city.cityId.isBlank() && !city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.MYGOLBS) {
+            // 若所选城市仅某单一数据源支持，自动联动切换至支持的引擎。
+            // 官方（MEISHAN）模式不参与联动：重选眉山/仁寿不能把用户选的官方源静默改回第三方；
+            // 切到非眉山城市时的 MEISHAN→MYGOLBS 降级由数据层 selectCity 负责
+            if (state.engineMode != EngineMode.MEISHAN && city.cityId.isBlank() &&
+                !city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.MYGOLBS
+            ) {
                 setEngineMode(EngineMode.MYGOLBS)
-            } else if (city.cityId.isNotBlank() && city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.CHELAILE) {
+            } else if (state.engineMode != EngineMode.MEISHAN && city.cityId.isNotBlank() &&
+                city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.CHELAILE
+            ) {
                 setEngineMode(EngineMode.CHELAILE)
             }
 
@@ -541,7 +551,8 @@ class BusHomeViewModel(
                 )
             }
             settings.selectCity(city)
-            loadNearbyStops(coords.first, coords.second, cityOverride = city)
+            // 重选当前城市失败保留旧列表；真换城失败不能留旧城的站
+            loadNearbyStops(coords.first, coords.second, cityOverride = city, keepOnFailure = !city.matchesCity(cityBefore))
             refreshFavoritesRealtime()
         }
     }

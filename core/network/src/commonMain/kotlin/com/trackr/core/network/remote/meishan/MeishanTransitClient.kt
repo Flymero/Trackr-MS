@@ -229,6 +229,13 @@ class MeishanTransitClient(
     )
 }
 
-/** 原始数值字段：缺失、null、非数字返回 null，不用 0 冒充 */
-internal fun JSONObject.intOrNull(key: String): Int? =
-    if (isNull(key)) null else (opt(key) as? Int ?: opt(key)?.toString()?.toIntOrNull())
+/** 原始数值字段：缺失、null、非数字返回 null，不用 0 冒充。
+ *  数字语义与同文件 optInt（兼容层 longOrNull 截断）一致：小数字面量（5.0）截断取值，
+ *  超 Int 范围的整数字面量不静默回绕；数值字符串保持原有容错。 */
+internal fun JSONObject.intOrNull(key: String): Int? = when (val value = opt(key)) {
+    is Int -> value
+    is Long -> value.takeIf { it in Int.MIN_VALUE..Int.MAX_VALUE }?.toInt()
+    is Number -> value.toInt()
+    is String -> value.toIntOrNull()
+    else -> null
+}

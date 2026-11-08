@@ -314,6 +314,26 @@ class TrackingEngineTest {
     }
 
     @Test
+    fun group_confirmBoarded_busAbsentThenAuthoritativeRelock_upgradesArrivalFlag() {
+        // 手动确认上车时车都不在数据里：权威标志保持 false，锁定车等补锁
+        val confirmed = GroupLegTracker.confirmBoarded(groupWaitingSession(), emptyList(), nowMillis = NOW_MILLIS)
+        assertEquals(LegPhase.ON_BOARD, confirmed.legPhase)
+        assertNull(confirmed.lockedBusId)
+        assertFalse(confirmed.hasAuthoritativeArrival)
+
+        // 之后眉山权威车出现：补锁成功，权威标志跟锁定车升级——
+        // 否则会话级到站判定的 ETA 旁路对权威车保持开启，提前报「到站了」
+        val authoritative = groupBus("mine", order = 4, progress = 0.4f).copy(hasAuthoritativeArrival = true)
+        val update = GroupLegTracker.processPoll(
+            confirmed,
+            listOf(groupBus("next", order = 2), authoritative),
+            nowMillis = NOW_MILLIS + 1_000
+        )
+        assertEquals("mine", update.state.lockedBusId)
+        assertTrue(update.state.hasAuthoritativeArrival, "补锁到权威车后权威标志必须升级")
+    }
+
+    @Test
     fun group_onBoard_nullLockedBus_firstRelockStaysStrict_thenRelaxesToAPlusFour() {
         val confirmed = GroupLegTracker.confirmBoarded(groupWaitingSession(), emptyList(), nowMillis = NOW_MILLIS)
         assertNull(confirmed.lockedBusId)
@@ -1844,8 +1864,8 @@ class TrackingEngineTest {
     private fun watchStops(count: Int = 12) =
         (1..count).map { BusStop(stopId = "s$it", name = "站$it", order = it, wgsLat = northOfStop((it - 5) * 111), wgsLng = STOP_LNG) }
 
-    private fun linePoll(vararg lines: Pair<String, List<LiveBus>>) = WatchPoll(
-        requested = lines.map { it.first }.toSet(),
+    private fun linePoll(vararg lines: Pair<String, List<LiveBus>>, requested: Set<String>? = null) = WatchPoll(
+        requested = requested ?: lines.map { it.first }.toSet(),
         lines = lines.associate { it.first to LinePoll(buses = it.second, fromLineDetail = true, stops = watchStops()) }
     )
 
@@ -1913,6 +1933,118 @@ class TrackingEngineTest {
         ).session
         assertNotNull(afterPartial.boardChoice, "部分轮询不改变待选")
         assertEquals(LegPhase.WAITING_BOARD, afterPartial.state.legPhase)
+    }
+
+    @Test
+    fun watch_existingCandidate_singleLineFrame_defersBoarding_untilCoveredRound() {
+        // 两车的候选先由一轮完整数据建立（都在站、人在站台）
+        val both = reduceWatch(
+            watchBegin(l325, lM194),
+            linePoll(
+                "L1" to listOf(lineBus("a", order = 5, metersNorth = 0, arrived = true)),
+                "L2" to listOf(lineBus("b", order = 5, metersNorth = 0, arrived = true))
+            ),
+            locationEnabled = true,
+            fix = userFix(10)
+        ).session
+        assertEquals("a", both.watchedLines.first { it.line.lineId == "L1" }.candidateBusId)
+        assertEquals("b", both.watchedLines.first { it.line.lineId == "L2" }.candidateBusId)
+
+        // 只来 L1 的帧、人跟着 a 走远：候选两次确认判成 BOARDED，但另一条候选线本轮缺席，不拍板
+        val frames = listOf(
+            Triple(6, 200, 10_000L),
+            Triple(7, 400, 20_000L)
+        )
+        var partial = both
+        for ((order, meters, elapsed) in frames) {
+            partial = reduceWatch(
+                partial,
+                linePoll("L1" to listOf(lineBus("a", order = order, metersNorth = meters, progress = 0.4f))),
+                locationEnabled = true,
+                fix = userFix(meters + 20, elapsedMillis = ELAPSED_NOW + elapsed),
+                now = NOW_MILLIS + elapsed,
+                elapsedMillis = ELAPSED_NOW + elapsed
+            ).session
+            assertEquals(LegPhase.WAITING_BOARD, partial.state.legPhase, "既有候选在单线帧判到上车也不拍板（另一条候选线缺席）")
+        }
+
+        // 凑齐两线的完整轮询：b 的车没跟人走（判不了上车信号），只剩 a 在身边 → 正常上车
+        val full = reduceWatch(
+            partial,
+            linePoll(
+                "L1" to listOf(lineBus("a", order = 8, metersNorth = 600, progress = 0.6f)),
+                "L2" to listOf(lineBus("b", order = 5, metersNorth = 0, arrived = true))
+            ),
+            locationEnabled = true,
+            fix = userFix(620, elapsedMillis = ELAPSED_NOW + 30_000),
+            now = NOW_MILLIS + 30_000,
+            elapsedMillis = ELAPSED_NOW + 30_000
+        ).session
+        assertEquals(LegPhase.ON_BOARD, full.state.legPhase, "完整轮询里正常判上车")
+        assertEquals("L1", full.leg.lineId)
+        assertEquals("a", full.state.lockedBusId)
+    }
+
+    @Test
+    fun watch_boardChoice_subsetOfThreeLines_resolvesByLocation() {
+        // ≥3 条线一起等：待选只含其中 2 条，plan() 收窄后判定覆盖口径按收窄算——
+        // 否则「上了哪辆？」定位再准也不会自动消解，只能手选或等 5 分钟超时
+        val stopBuses = mapOf(
+            "L1" to listOf(stopBus("a", order = 5, arrived = true)),
+            "L2" to listOf(stopBus("b", order = 5, arrived = true)),
+            "L3" to emptyList()
+        )
+        val choosing = requireNotNull(TrackingEngine.confirmBoarded(watchBegin(l325, lM194, l19), emptyList(), NOW_MILLIS, stopBuses))
+        assertNotNull(choosing.boardChoice)
+        assertEquals(setOf("a", "b"), choosing.boardChoice?.options?.map { it.busId }?.toSet())
+
+        // 之后每轮只请求待选涉及的 L1/L2（plan 收窄），定位分清跟着 a 走：待选自动消解
+        val resolved = reduceWatch(
+            choosing,
+            linePoll(
+                "L1" to listOf(lineBus("a", order = 6, metersNorth = 200, progress = 0.2f)),
+                "L2" to listOf(lineBus("b", order = 5, metersNorth = 0, arrived = true)),
+                requested = setOf("L1", "L2")
+            ),
+            locationEnabled = true,
+            fix = userFix(200),
+            now = NOW_MILLIS + 20_000
+        ).session
+        assertEquals(LegPhase.ON_BOARD, resolved.state.legPhase, "待选只含部分计划线时也应能定位消解")
+        assertEquals("a", resolved.state.lockedBusId)
+    }
+
+    @Test
+    fun watch_candidateCreatedOnPartialRotatingRound_narrowedPlanThenBoards() {
+        // >4 条线轮转补查：候选可以在部分轮里建（只是标记不是判定，上游同款）；
+        // 建了候选计划收窄，覆盖重新可达，后续单线帧就能判上车
+        val partial = reduceWatch(
+            watchBegin(l325, lM194, l19),
+            linePoll("L1" to listOf(lineBus("a", order = 5, metersNorth = 0, arrived = true)), requested = setOf("L1")),
+            locationEnabled = true,
+            fix = userFix(10)
+        ).session
+        assertEquals("a", partial.watchedLines.first { it.line.lineId == "L1" }.candidateBusId, "部分轮里可以建待确认")
+        assertEquals(LegPhase.WAITING_BOARD, partial.state.legPhase, "建候选不是判定")
+
+        // 计划收窄到 L1：单线帧覆盖所需线，连续两次确认判上车
+        val frames = listOf(
+            Triple(6, 200, 10_000L),
+            Triple(7, 400, 20_000L)
+        )
+        var boarded = partial
+        for ((order, meters, elapsed) in frames) {
+            boarded = reduceWatch(
+                boarded,
+                linePoll("L1" to listOf(lineBus("a", order = order, metersNorth = meters, progress = 0.4f))),
+                locationEnabled = true,
+                fix = userFix(meters + 20, elapsedMillis = ELAPSED_NOW + elapsed),
+                now = NOW_MILLIS + elapsed,
+                elapsedMillis = ELAPSED_NOW + elapsed
+            ).session
+        }
+        assertEquals(LegPhase.ON_BOARD, boarded.state.legPhase, "计划收窄后单线帧覆盖所需线，正常判上车")
+        assertEquals("a", boarded.state.lockedBusId)
     }
 
     @Test

@@ -380,6 +380,123 @@ class BusTrackingServiceTest {
         } finally { controller.destroy() }
     }
 
+    @Test
+    fun officialWatchTogether_mixedPlan_autoBoardsByLocation() {
+        // P2-1(a)：一起等计划混有非官方线（L59 走站点轮询、1路走官方推送）——
+        // 聚合缓冲按「有数据」凑齐、判定覆盖按 plan() 收窄口径算，定位自动上车不再整体失效
+        val lines = listOf(
+            WatchLine("ms:1_1_0", "1路", 5, source = DataSourceType.MEISHAN),
+            WatchLine("L59", "59路", 5)
+        )
+        transit.realtime.lineDetailsMap["ms:1_1_0"] = officialAtStop("a")
+        transit.realtime.stopDetailResult = Result.success(
+            listOf(
+                NearbyStop(
+                    stopId = "s5",
+                    name = "站5",
+                    wgsLat = 25.005,
+                    wgsLng = 119.0,
+                    lines = listOf(
+                        stopStatus("L59", listOf(LiveBus(busId = "b9", plateOrFleetNo = "闽B9", order = 2, etaSeconds = 600)))
+                    )
+                )
+            )
+        )
+        val session = requireNotNull(trackingRepository.start(watchTarget().copy(lines = lines)))
+        // 关掉「上车后自动结束追踪」：断言停在 ON_BOARD 才能看清锁的是哪辆车
+        transit.settings.setAutoStopAfterBoarding(false)
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("官方订阅建立") { push.subscriptions.size == 1 }
+            waitUntil("两线数据写入") {
+                requireNotNull(trackingRepository.session.value).watchedLines.all { it.hasData }
+            }
+            waitUntil("定位收集启动") { location.activeCollectors > 0 }
+            // 车在站、人在站台：进待确认（1路的官方补漏数据带车）
+            location.emit(fixAtStop(20.0))
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11))
+            waitUntil("进入待确认") { trackingRepository.legState.value.boardingCandidateBusId == "a" }
+
+            val sub = push.subscriptions.single()
+            // 推送帧带车开走 + 人跟着走：连续两次确认 → 自动上车。
+            // 两次定位之间推 1 秒虚拟时钟：判定按 elapsedMillis 去重同一快照，不推进会被当成同一次定位
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+            location.emit(fixAtStop(130.0))
+            sub.updates.tryEmit(onlineFrame("a", order = 6))
+            waitUntil("第一次确认") { trackingRepository.legState.value.boardingConfirmStreak >= 1 }
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+            location.emit(fixAtStop(240.0))
+            sub.updates.tryEmit(onlineFrame("a", order = 7))
+            waitUntil("混源一起等自动上车") {
+                val state = trackingRepository.legState.value
+                state.legPhase == LegPhase.ON_BOARD && state.lockedBusId == "a"
+            }
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun officialWatchTogether_pushNeverComes_httpFallbackStillAutoBoards() {
+        // P2-1(b)：官方线的 TCP 推送始终不上线（从未收到一帧），只靠 HTTP 补漏——
+        // 聚合缓冲按「有数据」凑齐（不再要求推送级），定位自动上车不因此失效
+        val lines = listOf(WatchLine("ms:1_1_0", "1路", 5, source = DataSourceType.MEISHAN))
+        transit.realtime.lineDetailsMap["ms:1_1_0"] = officialAtStop("b1")
+        // 关掉「上车后自动结束追踪」：断言停在 ON_BOARD 才能看清锁的是哪辆车
+        transit.settings.setAutoStopAfterBoarding(false)
+        val session = requireNotNull(trackingRepository.start(watchTarget().copy(lines = lines)))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("订阅建立") { push.subscriptions.size == 1 }
+            waitUntil("补漏数据写入") {
+                requireNotNull(trackingRepository.session.value).watchedLines.single().hasData
+            }
+            waitUntil("定位收集启动") { location.activeCollectors > 0 }
+            // 车在站、人在站台：下一轮补漏带定位做完整判定（10 秒轮询档，定位新鲜度 ≤30 秒够用）
+            location.emit(fixAtStop(20.0))
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11))
+            waitUntil("进入待确认") { trackingRepository.legState.value.boardingCandidateBusId == "b1" }
+
+            // 车开走、人跟着：补漏数据改成车已离站，两轮确认判上车
+            transit.realtime.lineDetailsMap["ms:1_1_0"] = officialRiding("b1", order = 6)
+            location.emit(fixAtStop(130.0))
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11))
+            waitUntil("第一次确认") { trackingRepository.legState.value.boardingConfirmStreak >= 1 }
+            transit.realtime.lineDetailsMap["ms:1_1_0"] = officialRiding("b1", order = 7)
+            location.emit(fixAtStop(240.0))
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11))
+            waitUntil("HTTP 兜底自动上车") {
+                val state = trackingRepository.legState.value
+                state.legPhase == LegPhase.ON_BOARD && state.lockedBusId == "b1"
+            }
+            assertTrue(
+                "全程没收到推送帧，推送在线状态应为空",
+                trackingRepository.pushOnlineLines.value.isEmpty()
+            )
+        } finally { controller.destroy() }
+    }
+
+    /** 官方线在站车：order 5 = 站5（25.005），带坐标、已停靠 */
+    private fun officialAtStop(id: String) = officialDetail(id = id, order = 5).copy(
+        buses = listOf(LiveBus(id, id, 5, segmentProgress = 1f, isArrived = true, wgsLat = 25.005, wgsLng = 119.0))
+    )
+
+    /** 官方线在途车：order 站序对应坐标 25.0 + order×0.001 */
+    private fun officialRiding(id: String, order: Int) = officialDetail(id = id, order = order).copy(
+        buses = listOf(LiveBus(id, id, order, segmentProgress = 0.3f, wgsLat = 25.0 + order * 0.001, wgsLng = 119.0))
+    )
+
+    /** 帧携带的在线更新：车已在 [order] 站序对应坐标上 */
+    private fun onlineFrame(id: String, order: Int) =
+        MeishanPushUpdate(MeishanPushAvailability.ONLINE, officialRiding(id, order))
+
+    /** 站5（25.005）以北 metersNorth 米、精度 10 米的新鲜定位 */
+    private fun fixAtStop(metersNorth: Double) = UserFix(
+        lat = 25.005 + metersNorth / 111_000.0,
+        lng = 119.0,
+        accuracyMeters = 10f,
+        // 服务用 AndroidMonotonicClock（SystemClock.elapsedRealtime）判定位新鲜度，测试对齐同一时基
+        elapsedMillis = android.os.SystemClock.elapsedRealtime()
+    )
+
     // ---------------------------------------------------------------- 样例数据
 
     private fun lineDetail(lineId: String, buses: List<LiveBus>) = BusLineDetail(

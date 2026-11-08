@@ -170,6 +170,11 @@ class LineListViewModel(
                 null
             }
             // 名称包含关系会把「1路」配到「11路」：只认完全相同的名称
+            // 搜索期间切了城：结果属于旧城市，丢弃（与 loadLines 的请求代际守卫同口径）
+            if (!settings.selectedCity.value.matchesCity(city)) {
+                _uiState.update { it.copy(openingLineId = null) }
+                return@launch
+            }
             val summary = searchResult?.getOrNull()?.lines?.firstOrNull { it.name == line.name }
             val direction = summary?.primaryDirection
             if (summary != null && direction != null) {

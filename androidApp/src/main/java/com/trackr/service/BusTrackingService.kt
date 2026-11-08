@@ -91,13 +91,12 @@ class BusTrackingService : LifecycleService() {
         val pushBindings: MutableMap<String, PushBinding> = mutableMapOf()
 
         /**
-         * 一起等官方逐线推送的聚合缓冲：每条线最后一次 LinePoll（HTTP 补漏也算数据，
-         * 但只有收到过**推送帧**的线才计入 [pushFresh]）。凑齐计划内全部线路的推送级
-         * 数据后才补一轮完整 reduce 做上车判定——单线帧直接判定会把「两车都在站」的
-         * 歧义误判成单车自动上车（另一条线在本轮缺席）。
+         * 一起等的聚合缓冲：每条线最后一次 LinePoll（推送帧、HTTP 补漏、站点轮询任一
+         * 来源都算）。凑齐计划内全部线路就用完整缓冲补一轮全量 reduce 做上车判定——
+         * 单线帧直接判定会把「两车都在站」的歧义误判成单车自动上车（另一条线在本轮缺席）。
+         * 来源断掉且补漏失败的线会清出缓冲，凑不齐就不判定（数据/提醒照常）。
          */
         val watchBuffer: MutableMap<String, LinePoll> = mutableMapOf()
-        val pushFresh: MutableSet<String> = mutableSetOf()
         var watchRequested: Set<String>? = null
 
         /** 正在轮询的代际号 */
@@ -625,12 +624,14 @@ class BusTrackingService : LifecycleService() {
                         val currentBinding = worker.pushBindings[line.lineId]
                         if (currentBinding !== binding || (currentBinding?.revision ?: 0L) != revision) return@withPermit
                         result.onSuccess { detail ->
-                            applyPushDetail(worker, detail, watch = true, fromPush = false)
+                            applyPushDetail(worker, detail, watch = true)
                             if (isCurrent(worker) && worker.generation == generation) {
                                 startPush(worker, detail, line.stopOrder, line.stopIdOnLine.ifBlank { target.stopId }, watch = true)
                             }
                         }.onFailure { error ->
                             officialFailures++
+                            // 补漏失败：这条线清出聚合缓冲，凑不齐就不做上车判定（数据用旧值等恢复）
+                            worker.watchBuffer.remove(line.lineId)
                             Log.w(TAG, "Failed to refresh official watch line", error)
                         }
                     }
@@ -664,15 +665,43 @@ class BusTrackingService : LifecycleService() {
             val nowElapsed = monotonicClock.elapsedMillis()
             var effects: List<TrackingEngine.Effect> = emptyList()
             val applied = trackingRepository.update(worker.sessionId, worker.generation) { current ->
-                val reduced = TrackingEngine.reduceWatchPoll(
-                    session = current,
-                    poll = poll,
-                    locationEnabled = locationEnabled,
-                    serviceFix = serviceFix,
-                    nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed,
-                    stopAfterBoarding = stopAfterBoarding
-                )
+                val requested = current.watchTarget?.lines?.map { it.lineId }?.toSet().orEmpty()
+                if (worker.watchRequested != requested) {
+                    worker.watchRequested = requested
+                    worker.watchBuffer.clear()
+                }
+                // 其他线（非官方）这轮的数据入聚合缓冲；请求了却没拿到数据的线清出缓冲
+                poll.lines.forEach { (lineId, linePoll) -> worker.watchBuffer[lineId] = linePoll }
+                poll.requested.filterNot { it in poll.lines }.forEach { worker.watchBuffer.remove(it) }
+                // 缓冲凑齐计划内线路时用完整缓冲做一轮全量 reduce（含上车判定，与上游整轮对齐）；
+                // 否则维持原样只交其他线这轮的数据——引擎侧覆盖门禁挡住判定，官方线由推送帧/补漏凑齐
+                val reduced = if (requested.isNotEmpty() && worker.watchBuffer.keys.containsAll(requested)) {
+                    TrackingEngine.reduceWatchPoll(
+                        session = current,
+                        poll = WatchPoll(
+                            requested = requested,
+                            lines = requested.associateWith { worker.watchBuffer.getValue(it) },
+                            // 站点接口给的上车站坐标要带上：target 没存坐标时判定定位用
+                            stopLat = poll.stopLat,
+                            stopLng = poll.stopLng
+                        ),
+                        locationEnabled = locationEnabled,
+                        serviceFix = serviceFix,
+                        nowMillis = nowMillis,
+                        nowElapsedMillis = nowElapsed,
+                        stopAfterBoarding = stopAfterBoarding
+                    )
+                } else {
+                    TrackingEngine.reduceWatchPoll(
+                        session = current,
+                        poll = poll,
+                        locationEnabled = locationEnabled,
+                        serviceFix = serviceFix,
+                        nowMillis = nowMillis,
+                        nowElapsedMillis = nowElapsed,
+                        stopAfterBoarding = stopAfterBoarding
+                    )
+                }
                 effects = reduced.effects
                 if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
             }
@@ -728,7 +757,7 @@ class BusTrackingService : LifecycleService() {
                             trackingRepository.setPushOnline(worker.sessionId, binding.generation, line.lineId, true)
                             backoff = PUSH_RETRY_MIN_MILLIS
                             worker.refreshWakeup.trySend(Unit)
-                            applyPushDetail(worker, fresh, binding.watch, fromPush = true)
+                            applyPushDetail(worker, fresh, binding.watch)
                         } else if (binding.online) {
                             binding.online = false
                             trackingRepository.setPushOnline(worker.sessionId, binding.generation, line.lineId, false)
@@ -740,9 +769,13 @@ class BusTrackingService : LifecycleService() {
                 } catch (_: Exception) {
                     binding.online = false
                 } finally {
+                    // 只在「在线 → 掉线」转变且异常路径没发过 DISCONNECTED 时唤醒一次 HTTP 兜底；
+                    // 重试退避期间每次失败都唤醒会把 HTTP 请求节奏带成推送退避（2s/4s/8s…）
+                    if (binding.online) {
+                        worker.refreshWakeup.trySend(Unit)
+                    }
                     binding.online = false
                     trackingRepository.setPushOnline(worker.sessionId, binding.generation, line.lineId, false)
-                    worker.refreshWakeup.trySend(Unit)
                 }
                 if (!isActive || !isCurrent(worker) || worker.pushBindings[line.lineId] !== binding) break
                 delay(backoff)
@@ -754,8 +787,7 @@ class BusTrackingService : LifecycleService() {
     private fun applyPushDetail(
         worker: PollWorker,
         detail: BusLineDetail,
-        watch: Boolean,
-        fromPush: Boolean
+        watch: Boolean
     ) {
         val locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission()
         val dropFix = trackingRepository.latestUserFix
@@ -769,54 +801,47 @@ class BusTrackingService : LifecycleService() {
                 mapOf(detail.line.lineId to detail.buses)
             )
             trackingRepository.update(worker.sessionId, worker.generation) { current ->
-                // 阶段一：单线帧照常逐线 reduce（数据 / 提醒更新）。
-                // 引擎侧守卫保证覆盖不全的轮询不做上车判定（见 WatchTogetherTracker）。
-                val reduced = TrackingEngine.reduceWatchPoll(
-                    session = current,
-                    poll = WatchPoll(
-                        requested = setOf(detail.line.lineId),
-                        lines = mapOf(detail.line.lineId to LinePoll(detail.buses, fromLineDetail = true, stops = detail.stops))
-                    ),
-                    locationEnabled = locationEnabled,
-                    serviceFix = serviceFix,
-                    nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed,
-                    stopAfterBoarding = stopAfterBoarding
-                )
-                effects = reduced.effects
-                var next: TrackingSession? =
-                    if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
-
-                // 阶段二：计划内全部线路都有推送级数据时，用聚合缓冲补一轮完整判定。
-                // 一起等的两车歧义 / 自动上车只信完整轮询（与上游 watchPoller 的整轮语义对齐）。
-                if (next != null) {
-                    val requested = next.watchTarget?.lines?.map { it.lineId }?.toSet().orEmpty()
-                    if (requested.isNotEmpty()) {
-                        if (worker.watchRequested != requested) {
-                            worker.watchRequested = requested
-                            worker.watchBuffer.clear()
-                            worker.pushFresh.clear()
-                        }
-                        worker.watchBuffer[detail.line.lineId] =
-                            LinePoll(detail.buses, fromLineDetail = true, stops = detail.stops)
-                        if (fromPush) worker.pushFresh.add(detail.line.lineId)
-                        if (worker.pushFresh.containsAll(requested)) {
-                            val lines = requested.associateWith { worker.watchBuffer.getValue(it) }
-                            val full = TrackingEngine.reduceWatchPoll(
-                                session = next,
-                                poll = WatchPoll(requested = requested, lines = lines),
-                                locationEnabled = locationEnabled,
-                                serviceFix = serviceFix,
-                                nowMillis = nowMillis,
-                                nowElapsedMillis = nowElapsed,
-                                stopAfterBoarding = stopAfterBoarding
-                            )
-                            effects = effects + full.effects
-                            next = if (full.effects.any { it is TrackingEngine.Effect.Finished }) null else full.session
-                        }
-                    }
+                val requested = current.watchTarget?.lines?.map { it.lineId }?.toSet().orEmpty()
+                if (worker.watchRequested != requested) {
+                    worker.watchRequested = requested
+                    worker.watchBuffer.clear()
                 }
-                next
+                val linePoll = LinePoll(detail.buses, fromLineDetail = true, stops = detail.stops)
+                worker.watchBuffer[detail.line.lineId] = linePoll
+                // 缓冲凑齐计划内线路（推送帧、HTTP 补漏、站点轮询任一来源都算）时：
+                // 用完整缓冲做一轮全量 reduce（上车判定与上游 watchPoller 整轮语义对齐），
+                // 并跳过单线 reduce，避免同一帧被处理两次（阶段一 MISSED 的候选被阶段二重选回）。
+                // 没凑齐时只跑单线 reduce 更新数据/提醒；引擎侧覆盖门禁保证它不做上车判定
+                // （见 WatchTogetherTracker.reduce 的 pollCoversPlan）。
+                val reduced = if (requested.isNotEmpty() && worker.watchBuffer.keys.containsAll(requested)) {
+                    TrackingEngine.reduceWatchPoll(
+                        session = current,
+                        poll = WatchPoll(
+                            requested = requested,
+                            lines = requested.associateWith { worker.watchBuffer.getValue(it) }
+                        ),
+                        locationEnabled = locationEnabled,
+                        serviceFix = serviceFix,
+                        nowMillis = nowMillis,
+                        nowElapsedMillis = nowElapsed,
+                        stopAfterBoarding = stopAfterBoarding
+                    )
+                } else {
+                    TrackingEngine.reduceWatchPoll(
+                        session = current,
+                        poll = WatchPoll(
+                            requested = setOf(detail.line.lineId),
+                            lines = mapOf(detail.line.lineId to linePoll)
+                        ),
+                        locationEnabled = locationEnabled,
+                        serviceFix = serviceFix,
+                        nowMillis = nowMillis,
+                        nowElapsedMillis = nowElapsed,
+                        stopAfterBoarding = stopAfterBoarding
+                    )
+                }
+                effects = reduced.effects
+                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
             }
         } else {
             trackingRepository.recordBuses(worker.sessionId, worker.generation, detail.buses)
@@ -933,7 +958,9 @@ class BusTrackingService : LifecycleService() {
         // 实时活动（上岛）只给这一项的第一条通知
         val promotionKey = specs.firstOrNull()?.key
         specs.forEach { spec ->
-            val content = spec.state to spec.watch
+            // 去重键剥离 updatedAtMillis：每次 reduce 都会刷新时间戳，TCP 帧率下会让每帧都重发通知；
+            // 分钟级的 ETA / 站数 / 状态摘要是通知实际渲染的内容，真正变了才会走到 notify
+            val content = spec.state.copy(updatedAtMillis = 0L) to spec.watch
             if (!force && worker.rendered[spec.key] == content) return@forEach
             worker.rendered[spec.key] = content
             val notificationId = liveProgressNotifier.notificationIdOf(spec.key)

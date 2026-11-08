@@ -21,25 +21,34 @@ internal class AndroidPushSocket : MeishanPushSocket {
     private var input: InputStream? = null
     private var writer: BufferedWriter? = null
 
+    /** 建连中的 socket：字段 [socket] 要等 connect 成功才赋值，归零关闭必须能打断在建连接 */
+    @Volatile
+    private var connecting: Socket? = null
+
     override suspend fun connect(host: String, port: Int, timeoutMs: Long) {
         val s = Socket()
-        cancellableIo(onCancel = { runCatching { s.close() } }) { continuation ->
-            try {
-                s.tcpNoDelay = true
-                s.soTimeout = 0
-                s.connect(InetSocketAddress(host, port), timeoutMs.toInt())
-                if (!continuation.isActive) {
+        connecting = s
+        try {
+            cancellableIo(onCancel = { runCatching { s.close() } }) { continuation ->
+                try {
+                    s.tcpNoDelay = true
+                    s.soTimeout = 0
+                    s.connect(InetSocketAddress(host, port), timeoutMs.toInt())
+                    if (!continuation.isActive) {
+                        runCatching { s.close() }
+                        return@cancellableIo
+                    }
+                    socket = s
+                    input = s.getInputStream()
+                    writer = BufferedWriter(OutputStreamWriter(s.getOutputStream(), Charsets.UTF_8))
+                    trace("connected")
+                } catch (failure: Throwable) {
                     runCatching { s.close() }
-                    return@cancellableIo
+                    throw failure
                 }
-                socket = s
-                input = s.getInputStream()
-                writer = BufferedWriter(OutputStreamWriter(s.getOutputStream(), Charsets.UTF_8))
-                trace("connected")
-            } catch (failure: Throwable) {
-                runCatching { s.close() }
-                throw failure
             }
+        } finally {
+            if (connecting === s) connecting = null
         }
     }
 
@@ -69,7 +78,10 @@ internal class AndroidPushSocket : MeishanPushSocket {
 
     override fun close() {
         // Interrupt a blocking read first. Closing the input wrapper first can wait on its lock.
-        if (socket != null) trace("closed")
+        // 建连中的 socket 也一并关：CONNECTING 窗口内归零要立刻断开，不能等建连完成后走空订阅自清。
+        if (socket != null || connecting != null) trace("closed")
+        runCatching { connecting?.close() }
+        connecting = null
         runCatching { socket?.close() }
         runCatching { input?.close() }
         runCatching { writer?.close() }
