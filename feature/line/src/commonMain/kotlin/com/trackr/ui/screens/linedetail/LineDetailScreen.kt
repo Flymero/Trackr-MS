@@ -465,6 +465,7 @@ fun LineDetailScreen(
     val selectedStop = state.selectedStop
     if (state.isReminderDialogOpen && static != null && selectedStop != null) {
         ScheduledReminderDialog(
+            supportsAutoStart = state.supportsAutoStartReminders,
             lineName = static.line.name,
             endStopName = static.line.endStop,
             targetStopName = selectedStop.name,

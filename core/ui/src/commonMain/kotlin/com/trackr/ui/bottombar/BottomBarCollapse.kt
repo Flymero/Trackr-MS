@@ -1,6 +1,10 @@
 package com.trackr.ui.bottombar
 
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.unit.dp
+
+/** 应用底栏的实际内容高度，不包含系统安全区；没有底栏（详情页、长辈版）时为 0。 */
+val LocalBottomBarHeight = staticCompositionLocalOf { 0.dp }
 
 /**
  * 底栏（页签）收起时，页面底部贴着它的悬浮元素要跟着往下挪的距离（px）。

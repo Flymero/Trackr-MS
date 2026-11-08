@@ -18,7 +18,19 @@ import org.jetbrains.compose.resources.vectorResource
 internal actual fun PlatformHost(enabled: Boolean, content: @Composable () -> Unit) = content()
 
 @Composable
-internal actual fun PermissionOnboarding(afterOnboarding: @Composable () -> Unit) = afterOnboarding()
+internal actual fun PermissionOnboarding(afterOnboarding: @Composable () -> Unit) {
+    val source = org.koin.compose.koinInject<com.trackr.app.platform.IosLocationSource>()
+    val home = org.koin.compose.viewmodel.koinViewModel<com.trackr.feature.bus.home.BusHomeViewModel>(
+        viewModelStoreOwner = com.trackr.ui.navigation.LocalAppViewModelStoreOwner.current
+    )
+    androidx.compose.runtime.LaunchedEffect(source) {
+        source.requestPermission()
+        source.authorizationChanges.collect {
+            if (source.hasAnyPermission()) home.retryLocationIfFailed()
+        }
+    }
+    afterOnboarding()
+}
 
 @Composable
 internal actual fun bottomTabIcon(key: ScreenKey): ImageVector = when (key) {

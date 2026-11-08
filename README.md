@@ -173,6 +173,8 @@
 
 传到 GitHub Release 时按 `trackr-<版本>-arm64-v8a.apk` / `trackr-<版本>-armeabi-v7a.apk` 命名，应用会按设备架构下载对应包。
 
+iOS 包（未签名，需自行重签）用 Xcode 打包，命令和限制见 [iOS 启动工程](docs/ios.md#打包-ipa)，发布资产命名 `trackr-<版本>-unsigned.ipa`。
+
 ### 重新生成 README 截图
 
 ```bash
@@ -305,6 +307,12 @@ AMAP_WEB_KEY=你的 Web 服务 Key
 - **算路提示额度不足**：Web 服务 Key 的个人开发者配额较低（约 3 QPS），把应用内配置换成自己的 Key。
 - **自己编译后地图不出图**：debug 签名和发布签名不同，需要把当前构建的 SHA-1 也加进同一个 Key，或单独注册。
 - **16 KB 页设备上地图加载失败**：确认依赖是 `11.2.100` 及以上。
+
+---
+
+## iOS 开发
+
+已提供复用现有 CMP 页面的 Xcode 宿主，打开 `iosApp/Trackr.xcodeproj` 的 Trackr scheme 即可构建。模拟器运行、存储说明和当前能力范围见 [iOS 启动工程](docs/ios.md)。
 
 ---
 

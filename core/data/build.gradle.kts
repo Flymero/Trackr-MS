@@ -28,6 +28,7 @@ kotlin {
             implementation(kotlin("test-junit"))
             implementation(libs.junit)
             implementation(libs.robolectric)
+            implementation(libs.ktor.client.mock)
             runtimeOnly("org.robolectric:android-all:14-robolectric-10818077")
         }
     }

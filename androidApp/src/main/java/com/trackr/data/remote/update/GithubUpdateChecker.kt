@@ -13,6 +13,8 @@ import io.ktor.http.isSuccess
 import io.ktor.http.parseUrl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.IOException
@@ -64,61 +66,61 @@ class GithubUpdateChecker(
         currentVersionCode: Int,
         currentVersionName: String
     ): UpdateCheckResult = withContext(Dispatchers.IO) {
-        var lastException: Throwable? = null
+        // 各源的缓存可能不同步；不能把第一个有效响应当成最新版本（#36）。
+        // 并发查询避免不可达的源逐个累加超时；同版本保留 endpointUrls 中靠前的源。
+        val results = endpointUrls.map { url ->
+            async {
+                try {
+                    Result.success(fetchUpdateInfo(url, currentVersionName))
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    Result.failure<AppUpdateInfo>(e)
+                }
+            }
+        }.awaitAll()
+        val newest = results.mapNotNull { it.getOrNull() }.maxByOrNull { it.versionCode }
 
-        for (url in endpointUrls) {
-            try {
-                val response = httpClient.get(url) {
-                    header("User-Agent", "Trackr-Android-App/$currentVersionName")
-                    header("Cache-Control", "no-cache")
-                }
-                if (!response.status.isSuccess()) {
-                    lastException = IOException("HTTP ${response.status.value}: ${response.status.description}")
-                    continue
-                }
-
-                val bodyString = response.bodyAsText()
-                if (bodyString.isBlank()) {
-                    lastException = IOException("Empty response body from $url")
-                    continue
-                }
-
-                val updateInfo = json.decodeFromString<AppUpdateInfo>(bodyString)
-                // 按 ABI 选包；细分的地址不合规（非 https / 域名不在白名单）时回退到通用地址
-                val pickedUrl = updateInfo.pickDownloadUrl(supportedAbis)
-                val downloadUrl = when {
-                    isAllowedDownloadUrl(pickedUrl) -> pickedUrl
-                    isAllowedDownloadUrl(updateInfo.downloadUrl) -> updateInfo.downloadUrl
-                    else -> null
-                }
-                if (downloadUrl == null) {
-                    // 下载地址不合规（非 https 或域名不在白名单）视为该源出错，继续尝试下一个源
-                    lastException = IOException("更新下载地址不合规：$pickedUrl")
-                    continue
-                }
-                val resolvedInfo = updateInfo.copy(downloadUrl = downloadUrl)
-                val hasUpdate = resolvedInfo.versionCode > currentVersionCode
-                val isForce = resolvedInfo.forceUpdate || currentVersionCode < resolvedInfo.minSupportedVersionCode
-
-                return@withContext if (hasUpdate) {
-                    UpdateCheckResult.HasUpdate(
-                        updateInfo = resolvedInfo,
-                        isForceUpdate = isForce
-                    )
-                } else {
-                    UpdateCheckResult.UpToDate(currentVersionName)
-                }
-            } catch (ce: CancellationException) {
-                // 页面离开时取消检查，不再挨个试剩下的源
-                throw ce
-            } catch (e: Exception) {
-                lastException = e
+        if (newest != null) {
+            return@withContext if (newest.versionCode > currentVersionCode) {
+                UpdateCheckResult.HasUpdate(
+                    updateInfo = newest,
+                    isForceUpdate = newest.forceUpdate || currentVersionCode < newest.minSupportedVersionCode
+                )
+            } else {
+                UpdateCheckResult.UpToDate(currentVersionName)
             }
         }
 
+        val lastException = results.lastOrNull()?.exceptionOrNull()
         UpdateCheckResult.Error(
             message = lastException?.localizedMessage ?: "未能连接到更新服务器，请检查网络后重试",
             cause = lastException
         )
+    }
+
+    private suspend fun fetchUpdateInfo(url: String, currentVersionName: String): AppUpdateInfo {
+        val response = httpClient.get(url) {
+            header("User-Agent", "Trackr-Android-App/$currentVersionName")
+            header("Cache-Control", "no-cache")
+        }
+        if (!response.status.isSuccess()) {
+            throw IOException("HTTP ${response.status.value}: ${response.status.description}")
+        }
+
+        val bodyString = response.bodyAsText()
+        if (bodyString.isBlank()) {
+            throw IOException("Empty response body from $url")
+        }
+
+        val updateInfo = json.decodeFromString<AppUpdateInfo>(bodyString)
+        // 按 ABI 选包；细分地址不合规时回退到通用地址，两者均不合规则排除该源。
+        val pickedUrl = updateInfo.pickDownloadUrl(supportedAbis)
+        val downloadUrl = when {
+            isAllowedDownloadUrl(pickedUrl) -> pickedUrl
+            isAllowedDownloadUrl(updateInfo.downloadUrl) -> updateInfo.downloadUrl
+            else -> throw IOException("更新下载地址不合规：$pickedUrl")
+        }
+        return updateInfo.copy(downloadUrl = downloadUrl)
     }
 }

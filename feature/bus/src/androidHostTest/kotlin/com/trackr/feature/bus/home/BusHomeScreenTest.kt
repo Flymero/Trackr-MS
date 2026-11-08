@@ -1,5 +1,8 @@
 package com.trackr.feature.bus.home
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -25,6 +28,7 @@ import com.trackr.core.model.TransitCity
 import com.trackr.core.model.WatchLine
 import com.trackr.core.model.WatchedLine
 import com.trackr.ui.components.transitcode.TRANSIT_CODE_FAB_TAG
+import com.trackr.ui.bottombar.LocalBottomBarHeight
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -128,6 +132,25 @@ class BusHomeScreenTest {
         composeTestRule.onNodeWithText("掌上公交", useUnmergedTree = true).assertDoesNotExist()
         composeTestRule.runOnIdle { online.value = false }
         composeTestRule.onNodeWithText("TCP", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun transitCodeFab_tracksPlatformBarHeight_withoutFixedMaterialClearance() {
+        val height = mutableStateOf(80.dp)
+        composeTestRule.setContent {
+            TrackrTheme {
+                CompositionLocalProvider(LocalBottomBarHeight provides height.value) {
+                    BusHomeScreen(state = stateOf(), onEvent = {})
+                }
+            }
+        }
+        val fab = composeTestRule.onNodeWithTag(TRANSIT_CODE_FAB_TAG)
+        val materialBottom = fab.getUnclippedBoundsInRoot().bottom
+        composeTestRule.runOnIdle { height.value = 49.dp }
+        val nativeBottom = fab.getUnclippedBoundsInRoot().bottom
+        assertEquals(31f, (nativeBottom - materialBottom).value, 0.5f)
+        composeTestRule.runOnIdle { height.value = 0.dp }
+        assertEquals(49f, (fab.getUnclippedBoundsInRoot().bottom - nativeBottom).value, 0.5f)
     }
 
     @Test

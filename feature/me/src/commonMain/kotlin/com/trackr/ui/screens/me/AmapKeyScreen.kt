@@ -54,6 +54,7 @@ import com.trackr.feature.me.resources.me_amap_android_key
 import com.trackr.feature.me.resources.me_amap_android_key_hint
 import com.trackr.feature.me.resources.me_amap_bind_title
 import com.trackr.feature.me.resources.me_amap_copy_both
+import com.trackr.feature.me.resources.me_amap_ios_intro
 import com.trackr.feature.me.resources.me_amap_intro_1
 import com.trackr.feature.me.resources.me_amap_intro_2
 import com.trackr.feature.me.resources.me_amap_intro_3
@@ -140,9 +141,10 @@ fun AmapKeyScreen(
         ) {
             item(key = "intro") {
                 Text(
-                    text = stringResource(MeRes.string.me_amap_intro_1) +
+                    text = if (state.showAndroidSlot) stringResource(MeRes.string.me_amap_intro_1) +
                         stringResource(MeRes.string.me_amap_intro_2) +
-                        stringResource(MeRes.string.me_amap_intro_3),
+                        stringResource(MeRes.string.me_amap_intro_3)
+                    else stringResource(MeRes.string.me_amap_ios_intro),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -162,35 +164,39 @@ fun AmapKeyScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         IdentityRow(
-                            label = stringResource(MeRes.string.me_amap_package),
+                            label = if (state.showAndroidSlot) stringResource(MeRes.string.me_amap_package) else "Bundle ID",
                             value = state.appId,
-                            onCopy = { copy(state.appId, "包名") }
+                            onCopy = { copy(state.appId, if (state.showAndroidSlot) "包名" else "Bundle ID") }
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        IdentityRow(
-                            label = stringResource(MeRes.string.me_amap_sha1),
-                            value = state.sha1?.takeIf { it.isNotBlank() } ?: stringResource(MeRes.string.me_amap_unreadable),
-                            onCopy = state.sha1?.takeIf { it.isNotBlank() }?.let { sha1 ->
-                                { copy(sha1, "SHA-1") }
-                            }
-                        )
+                        if (state.showAndroidSlot) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            IdentityRow(
+                                label = stringResource(MeRes.string.me_amap_sha1),
+                                value = state.sha1?.takeIf { it.isNotBlank() } ?: stringResource(MeRes.string.me_amap_unreadable),
+                                onCopy = state.sha1?.takeIf { it.isNotBlank() }?.let { sha1 ->
+                                    { copy(sha1, "SHA-1") }
+                                }
+                            )
+                        }
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            TextButton(
-                                onClick = {
-                                    val text = buildString {
-                                        append("包名：${state.appId}")
-                                        state.sha1?.takeIf { it.isNotBlank() }?.let { append("\nSHA-1：$it") }
-                                    }
-                                    copy(text, "包名和 SHA-1")
-                                },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                modifier = Modifier.testTag("btn_copy_pkg_sha1")
-                            ) {
-                                Text(stringResource(MeRes.string.me_amap_copy_both), style = MaterialTheme.typography.labelSmall)
+                            if (state.showAndroidSlot) {
+                                TextButton(
+                                    onClick = {
+                                        val text = buildString {
+                                            append("包名：${state.appId}")
+                                            state.sha1?.takeIf { it.isNotBlank() }?.let { append("\nSHA-1：$it") }
+                                        }
+                                        copy(text, "包名和 SHA-1")
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                    modifier = Modifier.testTag("btn_copy_pkg_sha1")
+                                ) {
+                                    Text(stringResource(MeRes.string.me_amap_copy_both), style = MaterialTheme.typography.labelSmall)
+                                }
                             }
                             TextButton(
                                 onClick = {
@@ -233,6 +239,21 @@ fun AmapKeyScreen(
                 }
             }
 
+            if (state.showIosSlot) item(key = "ios_key") {
+                OutlinedTextField(
+                    value = state.iosInput,
+                    onValueChange = { onEvent(AmapKeyEvent.EditIosKey(it)) },
+                    modifier = Modifier.fillMaxWidth().testTag("input_amap_ios_key"),
+                    label = { Text("iOS 地图 Key（可选）") },
+                    isError = !state.iosKeyValid,
+                    supportingText = { Text(state.iosHint, style = MaterialTheme.typography.labelSmall) },
+                    trailingIcon = { if (state.iosInput.isNotEmpty()) TextButton(onClick = { onEvent(AmapKeyEvent.EditIosKey("")) }) {
+                        Text(stringResource(Res.string.action_clear), style = MaterialTheme.typography.labelSmall)
+                    } },
+                    singleLine = true
+                )
+            }
+
             item(key = "web_key") {
                 OutlinedTextField(
                     value = state.webInput,
@@ -257,6 +278,9 @@ fun AmapKeyScreen(
                 )
             }
 
+            if (state.showIosSlot && state.privacyConsented) item(key = "revoke_privacy") {
+                TextButton(onClick = { onEvent(AmapKeyEvent.RevokePrivacy) }) { Text("撤回高德隐私授权") }
+            }
             item(key = "status") {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

@@ -154,6 +154,12 @@ class MeViewModel(
         )
     )
 
+    init {
+        notificationHealthAccess?.changes?.let { changes ->
+            viewModelScope.launch { changes.collect { notificationHealthStatus.value = it } }
+        }
+    }
+
     fun onEvent(event: MeEvent) {
         when (event) {
             is MeEvent.SetEngineMode -> settings.setEngineMode(event.mode)
@@ -164,7 +170,12 @@ class MeViewModel(
             is MeEvent.SetAutoStopAfterBoarding -> settings.setAutoStopAfterBoarding(event.enabled)
             is MeEvent.SetAlertThresholdStops -> settings.setAlertThresholdStops(event.stops)
             is MeEvent.ToggleReminder -> viewModelScope.launch {
-                reminderRepository.toggleReminder(event.id, event.enabled)
+                try {
+                    reminderRepository.toggleReminder(event.id, event.enabled)
+                } catch (error: Exception) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    notices.post(error.message ?: "提醒更新失败，请重试")
+                }
             }
             is MeEvent.SetLiveNotificationEnabled -> settings.setLiveNotificationEnabled(event.enabled)
             is MeEvent.SetShowOnLockScreen -> settings.setShowOnLockScreen(event.enabled)

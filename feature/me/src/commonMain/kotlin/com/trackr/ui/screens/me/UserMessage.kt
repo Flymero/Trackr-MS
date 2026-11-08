@@ -1,6 +1,7 @@
 package com.trackr.ui.screens.me
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import com.trackr.ui.components.message.HostMessage
 import com.trackr.ui.components.message.UserMessageHost
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,9 +44,11 @@ class MeNotices {
 @Composable
 internal fun MeMessageHost(
     messages: List<UserMessage>,
+    modifier: Modifier = Modifier,
     onShown: (Long) -> Unit
 ) {
     UserMessageHost(
+        modifier = modifier,
         message = messages.firstOrNull()?.let { HostMessage(key = it.id, text = it.text) },
         onResult = { key, _ -> onShown(key as Long) }
     )

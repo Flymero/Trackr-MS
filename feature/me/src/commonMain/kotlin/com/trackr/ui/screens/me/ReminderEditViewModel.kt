@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
  * @param closed 已保存或已删除，Route 看到就返回
  */
 data class ReminderEditUiState(
+    val supportsAutoStart: Boolean = true,
     val draft: ScheduledReminder? = null,
     val missing: Boolean = false,
     val changed: Boolean = false,
@@ -59,6 +60,7 @@ class ReminderEditViewModel(
 
     private val _uiState = MutableStateFlow(
         ReminderEditUiState(
+            supportsAutoStart = alarms.supportsAutoStart,
             draft = original,
             missing = original == null,
             showExactAlarmHint = original?.let { needsExactAlarmHint(it) } ?: false
@@ -101,7 +103,7 @@ class ReminderEditViewModel(
     }
 
     private fun needsExactAlarmHint(reminder: ScheduledReminder): Boolean =
-        reminder.autoStartLiveTracking && !alarms.canScheduleExact()
+        alarms.supportsAutoStart && reminder.autoStartLiveTracking && !alarms.canScheduleExact()
 
     private inline fun editDraft(transform: (ScheduledReminder) -> ScheduledReminder) {
         _uiState.update { state ->
@@ -121,9 +123,15 @@ class ReminderEditViewModel(
         if (state.saving || state.closed) return
         _uiState.update { it.copy(saving = true) }
         viewModelScope.launch {
-            reminderRepository.saveReminder(draft)
-            notices.post("提醒已保存：${reminderSummary(draft)}")
-            _uiState.update { it.copy(saving = false, closed = true) }
+            try {
+                reminderRepository.saveReminder(draft)
+                notices.post("提醒已保存：${reminderSummary(draft)}")
+                _uiState.update { it.copy(saving = false, closed = true) }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _uiState.update { it.copy(saving = false) }
+                addMessage(error.message ?: "提醒保存失败，请重试")
+            }
         }
     }
 
@@ -132,9 +140,15 @@ class ReminderEditViewModel(
         if (state.draft == null || state.closed) return
         _uiState.update { it.copy(confirmingDelete = false, saving = true) }
         viewModelScope.launch {
-            reminderRepository.deleteReminder(reminderId)
-            notices.post("提醒已删除")
-            _uiState.update { it.copy(saving = false, closed = true) }
+            try {
+                reminderRepository.deleteReminder(reminderId)
+                notices.post("提醒已删除")
+                _uiState.update { it.copy(saving = false, closed = true) }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _uiState.update { it.copy(saving = false) }
+                addMessage(error.message ?: "提醒保存失败，请重试")
+            }
         }
     }
 

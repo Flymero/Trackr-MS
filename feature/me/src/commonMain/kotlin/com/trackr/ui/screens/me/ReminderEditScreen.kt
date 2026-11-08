@@ -188,7 +188,13 @@ fun ReminderEditScreen(
                 }
             }
 
-            item(key = "auto_start") {
+            if (!state.supportsAutoStart) item(key = "notification_only") {
+                SettingsCard(title = stringResource(MeRes.string.me_reminder_after)) {
+                    Text("到点发送通知，打开追客后可开始追踪", modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            if (state.supportsAutoStart) item(key = "auto_start") {
                 SettingsCard(title = stringResource(MeRes.string.me_reminder_after)) {
                     Row(
                         modifier = Modifier

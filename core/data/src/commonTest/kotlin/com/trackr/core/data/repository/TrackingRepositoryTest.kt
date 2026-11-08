@@ -126,6 +126,35 @@ class TrackingRepositoryTest {
     }
 
     @Test
+    fun update_transformRunsOncePerCall_andRepeatedRegistrationIsIdempotent() = runTest {
+        // §7.2 评审项：update 的 transform 在仓库锁内单次执行（无乐观重试）；
+        // 同一份「缓冲登记 + reduce」重复执行不得改变会话状态（登记按 key 覆盖写、幂等）。
+        val repo = newRepo()
+        repo.awaitLoaded()
+        val started = assertNotNull(repo.start(single))
+        val buffer = mutableMapOf<String, String>()
+        var applications = 0
+        val transform: (TrackingSession) -> TrackingSession? = { session ->
+            applications++
+            // 模拟推送路径的成功盖戳（常量值）+ watchFetch reduce lambda 里的缓冲登记：同一帧登记两次是覆盖写
+            buffer["ms:1_1_0"] = "frame"
+            session.copy(lastRealtimeAtMillis = 123L, refreshFailed = false)
+        }
+        assertTrue(repo.update(started.sessionId, started.generation, transform))
+        assertEquals(1, applications, "transform 每次调用恰好执行一次（仓库锁内单次，无乐观重试）")
+        val afterFirst = assertNotNull(repo.sessionById(started.sessionId))
+        assertTrue(repo.update(started.sessionId, started.generation, transform))
+        assertEquals(2, applications)
+        val afterSecond = assertNotNull(repo.sessionById(started.sessionId))
+        // 同一份 transform 重复执行：盖戳与登记结果不变（幂等）
+        assertEquals(123L, afterSecond.lastRealtimeAtMillis)
+        assertFalse(afterSecond.refreshFailed)
+        assertEquals(afterFirst.state.stopsRemaining, afterSecond.state.stopsRemaining)
+        assertEquals(afterFirst.state.currentBusId, afterSecond.state.currentBusId)
+        assertEquals(mapOf("ms:1_1_0" to "frame"), buffer)
+    }
+
+    @Test
     fun pushOnline_removedWatchLineCannotReturn_andGenerationChangeClearsStatus() = runTest {
         val repo = newRepo()
         repo.awaitLoaded()

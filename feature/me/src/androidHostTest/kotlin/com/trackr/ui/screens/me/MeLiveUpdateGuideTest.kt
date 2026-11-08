@@ -92,6 +92,6 @@ class MeLiveUpdateGuideTest {
 
         // 不管底下是澎湃OS 3 的超级岛还是 OPPO 流体云，这一行统一叫「实时活动通知」
         composeTestRule.onNodeWithText("实时活动通知").assertIsDisplayed()
-        composeTestRule.onNodeWithText("追踪时在状态栏常驻显示进度").assertIsDisplayed()
+        composeTestRule.onNodeWithText("在系统界面显示追踪进度").assertIsDisplayed()
     }
 }

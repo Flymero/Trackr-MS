@@ -117,6 +117,7 @@ data class LineUserMessage(
  * 线路详情页 UI 状态。高频部分只在 [live] 里。
  */
 data class LineDetailUiState(
+    val supportsAutoStartReminders: Boolean = true,
     /** 进页面时带来的线路名（数据回来前顶栏先显示它） */
     val lineNameHint: String = "",
     /** 进页面时带来的站序（从某个站点点进来才有）；页面据此把走向条直接滚到那一站 */
@@ -206,6 +207,7 @@ class LineDetailViewModel(
 
     private val _uiState = MutableStateFlow(
         LineDetailUiState(
+            supportsAutoStartReminders = reminderRepository.supportsAutoStart,
             lineNameHint = lineNameHint,
             entryStopOrder = initialTargetOrder?.takeIf { it > 0 }
         )
@@ -1061,6 +1063,7 @@ class LineDetailViewModel(
 
     /** 顶栏时钟：定时提醒 */
     fun openReminderDialog() {
+        reminderRepository.unavailableReason?.let { postMessage(it); return }
         if (_uiState.value.static == null || _uiState.value.selectedStop == null) return
         _uiState.update { it.copy(isReminderDialogOpen = true) }
     }
@@ -1072,6 +1075,7 @@ class LineDetailViewModel(
     /** 保存定时提醒（当前线路 + 候车站），保存后提示条报时间 */
     @OptIn(ExperimentalUuidApi::class)
     fun saveReminder(hour: Int, minute: Int, daysOfWeek: Set<Int>, autoStartTracking: Boolean) {
+        reminderRepository.unavailableReason?.let { postMessage(it); return }
         val state = _uiState.value
         val static = state.static ?: return
         val stop = state.selectedStop ?: return
@@ -1097,8 +1101,13 @@ class LineDetailViewModel(
             autoStartLiveTracking = autoStartTracking
         )
         viewModelScope.launch {
-            reminderRepository.saveReminder(reminder)
-            postMessage("已设好定时提醒：${reminder.formatTime()}（${reminder.formatRepeatSummary()}）")
+            try {
+                reminderRepository.saveReminder(reminder)
+                postMessage("已设好定时提醒：${reminder.formatTime()}（${reminder.formatRepeatSummary()}）")
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                postMessage(error.message ?: "提醒保存失败，请重试")
+            }
         }
     }
 

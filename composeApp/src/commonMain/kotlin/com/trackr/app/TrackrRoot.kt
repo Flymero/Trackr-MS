@@ -12,10 +12,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.ime
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,7 +36,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation3.runtime.NavKey
@@ -64,6 +61,8 @@ import com.trackr.feature.stop.stopEntries
 import com.trackr.ui.navigation.LocalAppViewModelStoreOwner
 import com.trackr.ui.navigation.rememberVisibleTabs
 import com.trackr.ui.bottombar.LocalBottomBarCollapseOffset
+import com.trackr.ui.bottombar.LocalBottomBarHeight
+import com.trackr.app.navigation.AppTabBar
 import com.trackr.feature.bus.home.BusHomeViewModel
 import com.trackr.ui.screens.routedetail.RouteDetailViewModel
 import com.trackr.ui.screens.routeplan.RoutePlanViewModel
@@ -195,6 +194,7 @@ private fun TrackrNavApp(
         onDeepLinkConsumed()
     }
 
+    val tabBar = koinInject<AppTabBar>()
     val isTopLevel = navigationState.isAtTabRoot
 
     // 控制滑动时底部导航栏平滑收起与展开
@@ -207,14 +207,14 @@ private fun TrackrNavApp(
         }
     }
 
-    val nestedScrollConnection = remember(isTopLevel) {
+    val nestedScrollConnection = remember(isTopLevel, tabBar) {
         object : NestedScrollConnection {
             override fun onPostScroll(
                 consumed: Offset,
                 available: Offset,
                 source: NestedScrollSource
             ): Offset {
-                if (isTopLevel) {
+                if (isTopLevel && tabBar.collapsesOnScroll) {
                     // 手指向上推，浏览下方更多内容 -> 向下滑出隐藏导航栏
                     if (consumed.y < -8f) {
                         isNavigationBarVisible = false
@@ -247,51 +247,45 @@ private fun TrackrNavApp(
         navBarTranslationY * (navBarHeightPx - systemNavBarInsetPx).coerceAtLeast(0)
     }
 
-    CompositionLocalProvider(LocalBottomBarCollapseOffset provides bottomBarCollapseOffset) {
+    val keyboardVisible = WindowInsets.ime.getBottom(density) > systemNavBarInsetPx
+    val showTabBar = isTopLevel && (tabBar.collapsesOnScroll || !keyboardVisible)
+    val tabBarContentHeight = if (!showTabBar) 0.dp else if (navBarHeightPx == 0) {
+        tabBar.initialContentHeight
+    } else with(density) { (navBarHeightPx - systemNavBarInsetPx).coerceAtLeast(0).toDp() }
+    val onSelectTab: (ScreenKey) -> Unit = { key ->
+        if (key == ScreenKey.RoutePlan && privacyConsent != true) {
+            showAmapPrivacyDialog = true
+        } else {
+            navigator.selectTab(key)
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalBottomBarCollapseOffset provides bottomBarCollapseOffset,
+        LocalBottomBarHeight provides tabBarContentHeight,
+    ) {
         Scaffold(
             modifier = Modifier.nestedScroll(nestedScrollConnection),
             contentWindowInsets = WindowInsets(0.dp),
             bottomBar = {
-                AnimatedVisibility(
-                    visible = isTopLevel,
-                    enter = slideInVertically(
-                        initialOffsetY = { it },
-                        animationSpec = tween(280)
-                    ) + fadeIn(animationSpec = tween(200)),
-                    exit = slideOutVertically(
-                        targetOffsetY = { it },
-                        animationSpec = tween(280)
-                    ) + fadeOut(animationSpec = tween(200))
-                ) {
-                    NavigationBar(
-                        modifier = Modifier
-                            .onSizeChanged { navBarHeightPx = it.height }
-                            .graphicsLayer {
-                                translationY = navBarTranslationY * size.height
-                            }
-                    ) {
-                        visibleTabs.forEach { key ->
-                            val label = bottomTabLabel(key)
-                            NavigationBarItem(
-                                selected = navigationState.topLevel == key,
-                                // 点当前页签回到它的根页；点别的页签切过去，各自的返回栈保留
-                                onClick = dropUnlessResumed {
-                                    if (key == ScreenKey.RoutePlan && privacyConsent != true) {
-                                        showAmapPrivacyDialog = true
-                                    } else {
-                                        navigator.selectTab(key)
-                                    }
-                                },
-                                icon = {
-                                    Icon(
-                                        imageVector = bottomTabIcon(key),
-                                        contentDescription = label
-                                    )
-                                },
-                                label = { Text(label) }
-                            )
-                        }
-                    }
+                val bar: @Composable () -> Unit = {
+                    tabBar.Content(
+                        tabs = visibleTabs,
+                        selected = navigationState.topLevel,
+                        onSelect = onSelectTab,
+                        modifier = Modifier.onSizeChanged { navBarHeightPx = it.height },
+                    )
+                }
+                if (tabBar.collapsesOnScroll) {
+                    AnimatedVisibility(
+                        visible = showTabBar,
+                        enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(280)) + fadeIn(tween(200)),
+                        exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(280)) + fadeOut(tween(200)),
+                        modifier = Modifier.graphicsLayer { translationY = navBarTranslationY * size.height },
+                    ) { bar() }
+                } else if (showTabBar) {
+                    // 原生视图不套 Compose 图层位移动画，避免点击区域和 UIKit 位置不同步。
+                    bar()
                 }
             }
         ) { _ ->

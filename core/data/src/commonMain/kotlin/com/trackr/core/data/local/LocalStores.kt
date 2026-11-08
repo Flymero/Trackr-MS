@@ -138,6 +138,8 @@ interface ReminderScheduleStateStore {
 
 /** 高德 Key 两槽（Android 槽、Web 槽，严格分开、互不回落）。值为 null 表示没填 */
 interface AmapKeyStore {
+    suspend fun loadIosKey(): String? = null
+    suspend fun saveIosKey(key: String?) = Unit
     suspend fun loadAndroidKey(): String?
     suspend fun loadWebKey(): String?
     suspend fun saveAndroidKey(key: String?)

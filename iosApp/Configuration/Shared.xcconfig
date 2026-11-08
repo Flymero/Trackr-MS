@@ -1,0 +1,7 @@
+AMAP_IOS_KEY =
+AMAP_WEB_KEY =
+TRACKR_APP_GROUP = group.com.github.u5151561.trackr
+#include? "Local.xcconfig"
+// The vendor SDK does not provide an arm64 simulator slice.
+EXCLUDED_ARCHS[sdk=iphonesimulator*] =
+OTHER_LDFLAGS[sdk=iphonesimulator*] = -framework ComposeApp

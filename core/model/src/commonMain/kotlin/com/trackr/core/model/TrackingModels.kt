@@ -178,7 +178,10 @@ data class TrackingSession(
     val state: TrackingSessionState,
     val interrupted: Boolean = false,
     val watchedLines: List<WatchedLine> = emptyList(),
-    val boardChoice: BoardChoice? = null
+    val boardChoice: BoardChoice? = null,
+    /** Snapshot freshness is independent of commands and failed refreshes. */
+    val lastRealtimeAtMillis: Long = 0L,
+    val refreshFailed: Boolean = false
 ) {
     /** 一起等（等车或已上车）；单线路、路线为 null */
     val watchTarget: TrackingTarget.WatchTogether?

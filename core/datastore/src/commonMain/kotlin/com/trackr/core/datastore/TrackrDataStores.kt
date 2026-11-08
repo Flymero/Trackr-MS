@@ -84,6 +84,7 @@ object SettingsKeys {
 
 /** `trackr_amap_keys` 的键，和旧 SharedPreferences `trackr_amap_keys` 同名 */
 object AmapKeyKeys {
+    val IOS = stringPreferencesKey("custom_amap_ios_key")
     val ANDROID = stringPreferencesKey("custom_amap_android_key")
     val WEB = stringPreferencesKey("custom_amap_web_key")
     val PRIVACY_CONSENT = booleanPreferencesKey("privacy_consent")

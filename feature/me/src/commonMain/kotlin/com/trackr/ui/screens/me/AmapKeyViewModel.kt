@@ -32,6 +32,11 @@ internal fun isAmapKeyFormatAcceptable(key: String): Boolean =
  */
 data class AmapKeyUiState(
     val showAndroidSlot: Boolean = true,
+    val showIosSlot: Boolean = false,
+    val privacyConsented: Boolean = false,
+    val iosInput: String = "",
+    val iosKeyValid: Boolean = true,
+    val iosHint: String = "",
     val androidInput: String = "",
     val webInput: String = "",
     val androidKeyValid: Boolean = true,
@@ -45,12 +50,14 @@ data class AmapKeyUiState(
     val closed: Boolean = false,
     val userMessages: List<UserMessage> = emptyList()
 ) {
-    val canSave: Boolean get() = changed && androidKeyValid && webKeyValid
+    val canSave: Boolean get() = changed && androidKeyValid && iosKeyValid && webKeyValid
 }
 
 sealed interface AmapKeyEvent {
+    data class EditIosKey(val text: String) : AmapKeyEvent
     data class EditAndroidKey(val text: String) : AmapKeyEvent
     data class EditWebKey(val text: String) : AmapKeyEvent
+    data object RevokePrivacy : AmapKeyEvent
     data object Save : AmapKeyEvent
     /** 页面把文字放进剪贴板后发，[what] 是「包名」「SHA-1」「包名和 SHA-1」 */
     data class Copied(val what: String) : AmapKeyEvent
@@ -70,6 +77,7 @@ class AmapKeyViewModel(
     private val notices: MeNotices
 ) : ViewModel() {
 
+    private val savedIosKey = amapKeys.iosKey.value.orEmpty()
     private val savedAndroidKey: String = amapKeys.androidKey.value.orEmpty()
     private val savedWebKey: String = amapKeys.webKey.value.orEmpty()
 
@@ -77,6 +85,9 @@ class AmapKeyViewModel(
         derive(
             AmapKeyUiState(
                 showAndroidSlot = defaults.hasAndroidMapSdk,
+                showIosSlot = !defaults.hasAndroidMapSdk,
+                privacyConsented = amapKeys.privacyConsent.value == true,
+                iosInput = savedIosKey,
                 androidInput = savedAndroidKey,
                 webInput = savedWebKey,
                 statusText = amapKeyStatusText(amapKeys.hasMapKey.value, amapKeys.canShowMap.value),
@@ -90,9 +101,15 @@ class AmapKeyViewModel(
     fun onEvent(event: AmapKeyEvent) {
         when (event) {
             // 粘贴时常带空格换行，去掉（和原来的对话框一样）
+            is AmapKeyEvent.EditIosKey -> _uiState.update { derive(it.copy(iosInput = event.text.trim())) }
             is AmapKeyEvent.EditAndroidKey -> _uiState.update { derive(it.copy(androidInput = event.text.trim())) }
             is AmapKeyEvent.EditWebKey -> _uiState.update { derive(it.copy(webInput = event.text.trim())) }
             AmapKeyEvent.Save -> save()
+            AmapKeyEvent.RevokePrivacy -> {
+                amapKeys.setPrivacyConsent(false)
+                _uiState.update { it.copy(privacyConsented = false) }
+                addMessage("已撤回高德隐私授权，地图和路线规划已停用")
+            }
             is AmapKeyEvent.Copied -> addMessage("${event.what}已复制")
             AmapKeyEvent.OpenConsoleFailed -> addMessage("没找到浏览器，请手动打开 console.amap.com")
             is AmapKeyEvent.MessageShown -> _uiState.update { state ->
@@ -105,6 +122,7 @@ class AmapKeyViewModel(
     private fun save() {
         val state = _uiState.value
         if (!state.canSave || state.closed) return
+        if (state.showIosSlot && state.iosInput != savedIosKey) amapKeys.setIosKey(state.iosInput.ifBlank { null })
         // 各写各的：只写改过的那一槽
         if (state.showAndroidSlot && state.androidInput != savedAndroidKey) {
             amapKeys.setAndroidKey(state.androidInput.ifBlank { null })
@@ -121,6 +139,8 @@ class AmapKeyViewModel(
         val webValid = isAmapKeyFormatAcceptable(state.webInput)
         return state.copy(
             androidKeyValid = androidValid,
+            iosKeyValid = isAmapKeyFormatAcceptable(state.iosInput),
+            iosHint = if (isAmapKeyFormatAcceptable(state.iosInput)) "绑定上方 Bundle ID；仅用于 iOS 地图，规划仍需 Web Key" else "Key 是 32 位字母和数字",
             webKeyValid = webValid,
             androidHint = when {
                 !androidValid -> "Key 是 32 位字母和数字，检查一下有没有粘全"
@@ -130,9 +150,10 @@ class AmapKeyViewModel(
             webHint = when {
                 !webValid -> "Key 是 32 位字母和数字，检查一下有没有粘全"
                 AmapKeyRules.effective(state.webInput, defaults.webKey).isNotEmpty() -> "填了，用它搜地点、算路线"
-                else -> "不填时只用地图 SDK 算路线"
+                defaults.hasAndroidMapSdk -> "不填时只用地图 SDK 算路线"
+                else -> "填写 Web Key 后可搜地点、算路线"
             },
-            changed = (state.showAndroidSlot && state.androidInput != savedAndroidKey) || state.webInput != savedWebKey
+            changed = (state.showIosSlot && state.iosInput != savedIosKey) || (state.showAndroidSlot && state.androidInput != savedAndroidKey) || state.webInput != savedWebKey
         )
     }
 

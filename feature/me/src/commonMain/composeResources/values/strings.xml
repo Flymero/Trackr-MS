@@ -72,7 +72,7 @@
     <string name="me_reminders_count">%1$s 个</string>
     <string name="me_group_notify">通知</string>
     <string name="me_live_notify">实时通知</string>
-    <string name="me_live_notify_desc">追踪时在通知栏显示车还有几站</string>
+    <string name="me_live_notify_desc">追踪时显示车辆位置与到站进度</string>
     <string name="me_lockscreen">锁屏显示追踪</string>
     <string name="me_lockscreen_full">锁屏能看到线路和还有几站</string>
     <string name="me_lockscreen_hidden">锁屏只显示「追踪中」</string>
@@ -117,10 +117,11 @@
 
     <!-- 各家系统叫法不同（小米焦点通知 / 超级岛、OPPO 流体云、Android 实时活动），界面统一叫「实时活动通知」 -->
     <string name="me_live_update_name">实时活动通知</string>
-    <string name="me_live_update_desc">追踪时在状态栏常驻显示进度</string>
+    <string name="me_live_update_desc">在系统界面显示追踪进度</string>
     <string name="me_live_guide_title">开启实时活动通知</string>
-    <string name="me_live_guide_body">开启后，追踪时系统会在状态栏常驻显示这班车的到站倒计时和站点进度，不用一直开着应用。开关在系统设置里，各家叫法不太一样。</string>
+    <string name="me_live_guide_body">开启后，系统可在锁屏或其他系统界面显示追踪进度。请留意更新时间和暂停提示；过期后打开应用刷新。开关在系统设置里。</string>
     <string name="me_live_guide_fallback">未开启也能正常追踪，只是进度只在通知栏里。</string>
     <string name="me_live_guide_go">前往开启</string>
     <string name="me_live_guide_later">暂不开启</string>
+    <string name="me_amap_ios_intro">用自己的高德账号申请 Key。「iOS 平台 Key」用于地图，需绑定下方 Bundle ID；「Web 服务 Key」用于搜地点和公交规划，两者不能混填。只有 Web Key 时也能规划路线。</string>
 </resources>

@@ -6,6 +6,11 @@ package com.trackr.ui.platform
  * Android 只报告系统公开 API 能确认的状态；其他平台不绑定此接口，页面不显示该行。
  */
 interface NotificationHealthAccess {
+    /** Native asynchronous permission changes, when available. */
+    val changes: kotlinx.coroutines.flow.StateFlow<NotificationHealth>? get() = null
+
+
+    /** 现在的状态；每次回到前台重查（用户可能刚去过系统设置） */
     fun status(): NotificationHealth
     fun openSettings(issue: NotificationHealthIssue)
 }

@@ -47,6 +47,9 @@ val appShellModule: Module = module {
     viewModel { AppShellViewModel(settings = get()) }
 }
 
+/** 平台 UI 注入：Android Material 底栏、iOS UIKit 底栏。 */
+expect val platformUiModule: Module
+
 /** 各平台额外的 feature 模块（Android：高德 SDK 通道等） */
 internal expect val platformFeatureModules: List<Module>
 

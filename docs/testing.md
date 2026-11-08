@@ -76,7 +76,7 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 | `deeplink` | `DeepLinkIntentsTest` | Intent ↔ `trackr://` 链接（第 18 步）：data 里的新链接；旧版 6 个 extra、两种拼法的旧 `OPEN_TRANSIT_CODE` action 兼容（只有 alipay 是支付宝）；`consume` 后同一个 Intent 不重放、不碰非 `trackr` 的 data；别的 App 传来的坏 Intent 忽略；动态快捷方式发的是 `ACTION_VIEW` + `trackr://line` | Robolectric (JVM) |
 | `data/remote/amap` | `AmapSdkManagerTest` | 高德 Key 本地持久化（`AmapKeyStorage`）：Android / Web 两槽分开存、读 Android Key 不回落到 Web 槽、旧 Key 从 `trackr_prefs` 挪出只做一次、新文件里已有的 Key 不被旧值覆盖（SDK 封装的用例第 17 步搬到 `:feature:route`） | Robolectric (JVM) |
 |  | `AmapSdkKeySyncTest` | 改了 Android Key 才重新注入 SDK：跳过启动时的值、改 Web Key 不注入、重复 `start()` 不开第二个收集 | 本地 JVM |
-| `data/remote/update` | `GithubUpdateCheckerTest` | 更新检查多源回退、强制更新判定、下载地址 https 与域名白名单校验、取消后不再试剩下的源（Ktor `MockEngine`） | Robolectric (JVM) |
+| `data/remote/update` | `GithubUpdateCheckerTest` | 更新检查并发多源择新（旧缓存 / 已最新响应不遮挡新版本）、部分源失败或无效时保留有效结果、强制更新判定、下载地址 https 与域名白名单校验、取消全部在途请求（Ktor `MockEngine`） | Robolectric (JVM) |
 | `data/local` | `StorageBackendTest` | 整套存储端到端：同一份旧数据经新存储和旧存储读出来完全相同、旧文件不被改动、新存储写入重开读回、USE_NEW_STORE 关了再开能带回旧存储期间的改动、库打不开时退回旧存储、旧的聚合配置在新旧存储里读成同一个主数据源 | Robolectric (JVM) |
 |  | `BackupRulesTest` | `backup_rules.xml` 和 `data_extraction_rules.xml` 两段：排除高德 Key（新旧两个文件）和追踪会话、不排除 `trackr.db` 和设置、没有 include、三段一样、Manifest 都接上了 | Robolectric (JVM) |
 | `data/repository` | `RouteGroupRepositoryTest` | 旧存储（SharedPreferences）上：路线分组与收藏分组增删改排序、并发写入不丢更新、JSON 损坏备份（第 14 步起经收藏合一仓库） | Robolectric (JVM) |

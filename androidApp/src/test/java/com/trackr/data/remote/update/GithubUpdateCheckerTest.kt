@@ -143,6 +143,83 @@ class GithubUpdateCheckerTest {
         assertEquals("Unable to resolve host", (result as UpdateCheckResult.Error).message)
     }
 
+    @Test
+    fun checkForUpdates_whenFirstSourceHasIntermediateVersion_returnsNewestVersion() = runTest {
+        // #36：0.1.6 应直接找到 0.1.8，不能在缓存的 0.1.7 处提前结束。
+        val result = checkSources(releasePayload(11), releasePayload(12), releasePayload(10))
+            as UpdateCheckResult.HasUpdate
+
+        assertEquals(12, result.updateInfo.versionCode)
+        assertEquals("0.1.8", result.updateInfo.versionName)
+        assertEquals("Release 12", result.updateInfo.changelog)
+        assertEquals("https://github.com/5151561/Trackr/releases/download/v0.1.8/arm64.apk", result.updateInfo.downloadUrl)
+        assertTrue(result.isForceUpdate)
+    }
+
+    @Test
+    fun checkForUpdates_whenFirstSourceSaysUpToDate_stillChecksForNewerVersion() = runTest {
+        val result = checkSources(releasePayload(10), releasePayload(12))
+            as UpdateCheckResult.HasUpdate
+
+        assertEquals(12, result.updateInfo.versionCode)
+    }
+
+    @Test
+    fun checkForUpdates_whenLaterSourcesAreOlderOrFail_keepsNewestValidResponse() = runTest {
+        val result = checkSources(releasePayload(12), releasePayload(11), null)
+            as UpdateCheckResult.HasUpdate
+
+        assertEquals(12, result.updateInfo.versionCode)
+    }
+
+    @Test
+    fun checkForUpdates_whenNewestResponseIsInvalid_usesValidRelease() = runTest {
+        val invalidRelease = releasePayload(12).replace("https://github.com/", "https://evil.example.com/")
+        val result = checkSources(releasePayload(11), invalidRelease, "invalid json")
+            as UpdateCheckResult.HasUpdate
+
+        assertEquals(11, result.updateInfo.versionCode)
+        assertFalse(result.isForceUpdate)
+    }
+
+    @Test
+    fun checkForUpdates_whenValidSourcesAreNotNewerAndAnotherFails_returnsUpToDate() = runTest {
+        assertEquals(
+            UpdateCheckResult.UpToDate("0.1.6"),
+            checkSources(releasePayload(9), null, releasePayload(10))
+        )
+    }
+
+    private suspend fun checkSources(vararg payloads: String?): UpdateCheckResult {
+        val client = HttpClient(MockEngine { request ->
+            val index = request.url.encodedPath.removePrefix("/").toInt()
+            val payload = payloads[index] ?: throw IOException("Source unavailable")
+            respondJson(payload)
+        })
+        return try {
+            GithubUpdateChecker(
+                httpClient = client,
+                endpointUrls = payloads.indices.map { "https://example.com/$it" },
+                supportedAbis = listOf("arm64-v8a")
+            ).checkForUpdates(currentVersionCode = 10, currentVersionName = "0.1.6")
+        } finally {
+            client.close()
+        }
+    }
+
+    private fun releasePayload(versionCode: Int) = """
+        {
+            "versionCode": $versionCode,
+            "versionName": "0.1.${versionCode - 4}",
+            "changelog": "Release $versionCode",
+            "minSupportedVersionCode": ${if (versionCode == 12) 11 else 1},
+            "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.1.${versionCode - 4}",
+            "downloadUrls": {
+                "arm64-v8a": "https://github.com/5151561/Trackr/releases/download/v0.1.${versionCode - 4}/arm64.apk"
+            }
+        }
+    """.trimIndent()
+
     private fun MockRequestHandleScope.respondJson(jsonPayload: String) =
         respond(jsonPayload, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
 
@@ -179,25 +256,34 @@ class GithubUpdateCheckerTest {
     }
 
     @Test
-    fun checkForUpdates_whenCancelled_doesNotTryRemainingEndpoints() = runBlocking {
+    fun checkForUpdates_whenCancelled_cancelsAllSourceRequests() = runBlocking {
         val requested = java.util.concurrent.atomic.AtomicInteger(0)
+        val cancelled = java.util.concurrent.atomic.AtomicInteger(0)
         val entered = CompletableDeferred<Unit>()
         val client = HttpClient(MockEngine { _ ->
-            requested.incrementAndGet()
-            entered.complete(Unit)
-            awaitCancellation()
+            if (requested.incrementAndGet() == 2) entered.complete(Unit)
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled.incrementAndGet()
+            }
         })
-        val checker = GithubUpdateChecker(
-            httpClient = client,
-            endpointUrls = listOf("https://a.example.com/u.json", "https://b.example.com/u.json")
-        )
+        try {
+            val checker = GithubUpdateChecker(
+                httpClient = client,
+                endpointUrls = listOf("https://a.example.com/u.json", "https://b.example.com/u.json")
+            )
 
-        val job = launch(Dispatchers.Default) { checker.checkForUpdates(currentVersionCode = 2, currentVersionName = "0.0.2") }
-        withTimeout(2_000L) { entered.await() }
-        job.cancelAndJoin()
+            val job = launch(Dispatchers.Default) { checker.checkForUpdates(currentVersionCode = 2, currentVersionName = "0.0.2") }
+            withTimeout(2_000L) { entered.await() }
+            job.cancelAndJoin()
 
-        assertTrue(job.isCancelled)
-        assertEquals(1, requested.get())
+            assertTrue(job.isCancelled)
+            assertEquals(2, requested.get())
+            assertEquals(2, cancelled.get())
+        } finally {
+            client.close()
+        }
     }
 
     @Test

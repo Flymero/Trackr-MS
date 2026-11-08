@@ -16,6 +16,7 @@ import com.trackr.core.data.repository.MeishanPushRepository
 import com.trackr.core.data.repository.MeishanPushTarget
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
+import com.trackr.core.data.repository.TrackingPoller
 import com.trackr.core.data.repository.WatchTogetherPoller
 import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.domain.platform.MonotonicClock
@@ -31,8 +32,8 @@ import com.trackr.core.model.LegPhase
 import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TrackingTarget
-import com.trackr.core.model.WatchedLine
 import com.trackr.core.model.TransitCity
+import com.trackr.core.model.WatchedLine
 import com.trackr.core.model.UserFix
 import com.trackr.data.repository.ITransitRepository
 import kotlinx.coroutines.CancellationException
@@ -44,7 +45,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -102,12 +102,10 @@ class BusTrackingService : LifecycleService() {
         /** 正在轮询的代际号 */
         var generation: Int = NO_GENERATION
 
-        /** 连续刷新失败次数（失败指数退避用，成功后清零） */
-        var consecutiveFailures: Int = 0
-
-        /** 最近一次成功刷新拿到的线路运营状态（非运营时降频轮询） */
-        var operatingState: LineOperatingState = LineOperatingState.RUNNING
         val refreshWakeup = Channel<Unit>(Channel.CONFLATED)
+
+        /** 最近一次取数拿到的线路运营状态：非运营时 roundWait 把等待拉长到 5 分钟（保真 fork 原行为） */
+        var operatingState: LineOperatingState = LineOperatingState.RUNNING
 
         /** 每条通知上次刷过的内容（key -> 内容），相同就不重复刷 */
         val rendered: MutableMap<String, Pair<TrackingSessionState, LiveProgressNotifier.WatchNotice?>> = mutableMapOf()
@@ -143,8 +141,219 @@ class BusTrackingService : LifecycleService() {
         var revision: Long = 0L
     }
 
-    /** 一起等的取数（同一个实时仓库，条数不影响请求数） */
+    /** 一起等的取数（第三方引擎；官方线由钩子里的 HTTP 补漏接管）。轮转游标独立于上游默认路径 */
     private val watchPoller by lazy { WatchTogetherPoller(repository) }
+
+    private val poller by lazy {
+        TrackingPoller(trackingRepository, repository, settings, clock, monotonicClock,
+            locationEnabled = { locationTrackingAllowed && locationSource.hasPrecisePermission() },
+            serviceFix = { serviceFix }, onEffect = ::runEffect,
+            onExpired = { arrivalAlerts.triggerTrackingExpired(this, it.state) }, requestDispatcher = Dispatchers.IO,
+            singleLineFetch = ::singleLineFetchForPoller,
+            watchFetch = ::watchFetchForPoller,
+            roundWait = ::roundWaitForPoller)
+    }
+
+    /** 上游 TrackingPoller 的单线路取数钩子：眉山推送在线时恒等 reduce 让位，离线走 HTTP 取数 */
+    private suspend fun singleLineFetchForPoller(
+        sessionId: String,
+        generation: Int,
+        city: TransitCity,
+        leg: com.trackr.core.model.TrackingLegParams,
+        state: TrackingSessionState,
+        onOperating: (LineOperatingState) -> Unit
+    ): Result<(TrackingSession) -> TrackingEngine.Result> {
+        val worker = workers[sessionId]
+        if (worker?.pushBindings[leg.lineId]?.online == true) {
+            // 推送在线：本轮 HTTP 让位。恒等 reduce 走成功路径——不计失败、盖新鲜度戳、节奏不变。
+            return Result.success { latest -> TrackingEngine.Result(latest) }
+        }
+        val fetchTargetOrder = when {
+            state.legPhase == LegPhase.WAITING_BOARD && state.boardStopOrder > 0 -> state.boardStopOrder
+            state.targetOrder > 0 -> state.targetOrder
+            else -> leg.targetOrder
+        }
+        val fetchStationId = state.targetStopId.ifBlank { leg.targetStopId }
+        val detailResult = withContext(Dispatchers.IO) {
+            repository.getLineDetail(
+                city = city,
+                lineId = leg.lineId,
+                targetOrder = fetchTargetOrder,
+                stationId = fetchStationId,
+                source = leg.source,
+                lineNameHint = state.lineName,
+                directionHint = leg.direction
+            )
+        }
+        return detailResult.map { detail ->
+            val fetchedWorker = workers[sessionId]
+            if (fetchedWorker != null && fetchedWorker.generation == generation) {
+                fetchedWorker.operatingState = detail.operatingState
+                // 官方线 HTTP 取数成功即接上 TCP 订阅（与旧 pollOnce 同口径）
+                if (detail.line.source == DataSourceType.MEISHAN || detail.line.lineId.startsWith("ms:")) {
+                    startPush(fetchedWorker, detail, fetchTargetOrder, fetchStationId, watch = false)
+                }
+            }
+            onOperating(detail.operatingState)
+            trackingRepository.recordBuses(sessionId, generation, detail.buses)
+            val reduce: (TrackingSession) -> TrackingEngine.Result = { latest ->
+                TrackingEngine.reducePoll(
+                    latest, detail,
+                    locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission(),
+                    serviceFix = serviceFix, dropFix = trackingRepository.latestUserFix,
+                    nowMillis = clock.now().toEpochMilliseconds(),
+                    nowElapsedMillis = monotonicClock.elapsedMillis(),
+                    stopAfterBoarding = stopAfterBoarding
+                )
+            }
+            reduce
+        }
+    }
+
+    /** 上游 TrackingPoller 的一起等取数钩子：官方线拆分 + HTTP 补漏 + 聚合缓冲（评估文档 §7.2） */
+    private suspend fun watchFetchForPoller(
+        sessionId: String,
+        generation: Int,
+        target: TrackingTarget.WatchTogether,
+        plan: WatchPollPlan,
+        onOperating: (LineOperatingState) -> Unit
+    ): Result<(TrackingSession) -> TrackingEngine.Result> {
+        val worker = workers[sessionId] ?: return Result.failure(IllegalStateException("worker 已移除"))
+        val city = cityFor(target.cityId, target.mygolbsCityCode, target.cityName)
+        val lines = when (plan) {
+            is WatchPollPlan.Stop -> plan.lines
+            is WatchPollPlan.Lines -> plan.lines
+        }
+        val official = lines.filter { it.source == DataSourceType.MEISHAN || it.lineId.startsWith("ms:") }
+        val online = official.filter { worker.pushBindings[it.lineId]?.online == true }
+        val missing = official.filterNot { it in online }
+        val fetchGeneration = worker.generation
+        var officialFailures = 0
+        val fetched = mutableMapOf<String, LinePoll>()
+        coroutineScope {
+            val semaphore = Semaphore(4)
+            missing.map { line ->
+                async {
+                    semaphore.withPermit {
+                        val result = repository.getLineDetail(
+                            city = city,
+                            lineId = line.lineId,
+                            targetOrder = line.stopOrder,
+                            stationId = line.stopIdOnLine.ifBlank { target.stopId },
+                            source = line.source,
+                            lineNameHint = line.lineName,
+                            directionHint = line.direction
+                        )
+                        if (!isCurrent(worker) || worker.generation != fetchGeneration) return@withPermit
+                        result.onSuccess { detail ->
+                            // 补漏成功即接上推送订阅（TCP 恢复路径）
+                            startPush(worker, detail, line.stopOrder, line.stopIdOnLine.ifBlank { target.stopId }, watch = true)
+                            fetched[line.lineId] = LinePoll(detail.buses, fromLineDetail = true, stops = detail.stops)
+                        }.onFailure { error ->
+                            officialFailures++
+                            Log.w(TAG, "Failed to refresh official watch line", error)
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+        if (!isCurrent(worker) || worker.generation != fetchGeneration) {
+            return Result.failure(CancellationException("watch round superseded"))
+        }
+        val otherLines = lines.filterNot { it in official }
+        if (otherLines.isNotEmpty()) {
+            val otherPlan = when (plan) {
+                is WatchPollPlan.Stop -> WatchPollPlan.Stop(otherLines)
+                is WatchPollPlan.Lines -> WatchPollPlan.Lines(otherLines)
+            }
+            watchPoller.poll(target, otherPlan, city).onSuccess { poll ->
+                fetched.putAll(poll.lines)
+                onOperating(LineOperatingState.RUNNING)
+            }.onFailure { officialFailures++ }
+        } else {
+            onOperating(LineOperatingState.RUNNING)
+        }
+        if (officialFailures > 0 && fetched.isEmpty()) {
+            // 全部线都取不到才算失败：部分成功仍走成功路径更新数据（失败线由缓冲移除）
+            return Result.failure(IllegalStateException("watch fetch failed for all lines"))
+        }
+        return Result.success { latest ->
+            // 缓冲登记 + 「凑齐才全量 reduce」：登记按 lineId 覆盖写、幂等（同一帧重复处理不变）
+            val requested = latest.watchTarget?.lines?.map { it.lineId }?.toSet().orEmpty()
+            if (worker.watchRequested != requested) {
+                worker.watchRequested = requested
+                worker.watchBuffer.clear()
+            }
+            fetched.forEach { (lineId, linePoll) -> worker.watchBuffer[lineId] = linePoll }
+            val reduced = if (requested.isNotEmpty() && worker.watchBuffer.keys.containsAll(requested)) {
+                TrackingEngine.reduceWatchPoll(
+                    session = latest,
+                    poll = WatchPoll(
+                        requested = requested,
+                        lines = requested.associateWith { worker.watchBuffer.getValue(it) }
+                    ),
+                    locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission(),
+                    serviceFix = serviceFix,
+                    nowMillis = clock.now().toEpochMilliseconds(),
+                    nowElapsedMillis = monotonicClock.elapsedMillis(),
+                    stopAfterBoarding = stopAfterBoarding
+                )
+            } else {
+                TrackingEngine.reduceWatchPoll(
+                    session = latest,
+                    poll = WatchPoll(requested = fetched.keys, lines = fetched.toMap()),
+                    locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission(),
+                    serviceFix = serviceFix,
+                    nowMillis = clock.now().toEpochMilliseconds(),
+                    nowElapsedMillis = monotonicClock.elapsedMillis(),
+                    stopAfterBoarding = stopAfterBoarding
+                )
+            }
+            reduced
+        }
+    }
+
+    /** 上游 TrackingPoller 的等待钩子：非运营时段把等待拉长到 5 分钟；推送事件可提前唤醒 */
+    private suspend fun roundWaitForPoller(sessionId: String, millis: Long) {
+        val worker = workers[sessionId]
+        val interval = if (worker?.operatingState != LineOperatingState.RUNNING) {
+            maxOf(millis, TrackingEngine.NOT_RUNNING_POLL_INTERVAL_MS)
+        } else {
+            millis
+        }
+        withTimeoutOrNull(interval) { worker?.refreshWakeup?.receive() }
+    }
+
+    /** 请求用的城市：和当前选的城市一样就用它（带城市名），否则按会话里的 id 拼一个 */
+    private fun cityFor(cityId: String, mygolbsCityCode: String, cityName: String = ""): TransitCity {
+        val selectedCity = repository.selectedCity.value
+        return if (selectedCity.cityId == cityId) {
+            selectedCity
+        } else {
+            TransitCity(
+                cityId = cityId,
+                cityName = cityName,
+                mygolbsCityCode = mygolbsCityCode.takeIf { it.isNotEmpty() }
+            )
+        }
+    }
+
+    /** 这一路推送是否仍属于当前会话（代际号未换且未被中断） */
+    private fun isCurrent(worker: PollWorker): Boolean {
+        val session = sessionOf(worker.sessionId) ?: return false
+        return worker.generation == session.generation && !session.interrupted
+    }
+
+    /** 推送订阅的目标：等车针对上车站，上车后切下车站 */
+    private fun pushTargetOf(session: TrackingSession): MeishanPushTarget {
+        val state = session.state
+        val order = when {
+            state.legPhase == LegPhase.WAITING_BOARD && state.boardStopOrder > 0 -> state.boardStopOrder
+            state.targetOrder > 0 -> state.targetOrder
+            else -> session.leg.targetOrder
+        }
+        return MeishanPushTarget(order, state.targetStopId.ifBlank { session.leg.targetStopId })
+    }
 
     /**
      * 「我的 → 上车后自动结束追踪」（issue #32）现在开着没。
@@ -431,297 +640,18 @@ class BusTrackingService : LifecycleService() {
             serviceFix = null
         }
         worker.generation = session.generation
-        worker.consecutiveFailures = 0
-        worker.operatingState = LineOperatingState.RUNNING
         render(session, force = true)
         startPolling(worker)
     }
 
     private fun startPolling(worker: PollWorker) {
         worker.job?.cancel()
-        worker.job = lifecycleScope.launch {
-            // 首次立即刷新
-            pollOnce(worker)
-            while (isActive && isCurrent(worker)) {
-                val state = sessionOf(worker.sessionId)?.state ?: break
-                val intervalMs = TrackingEngine.pollingIntervalMillis(
-                    state,
-                    consecutiveFailures = worker.consecutiveFailures,
-                    operatingState = worker.operatingState
-                )
-                // TCP 状态变化会唤醒这一项：断流时立即回到 HTTP，在线时跳过多余请求。
-                withTimeoutOrNull(intervalMs) { worker.refreshWakeup.receive() }
-                val current = sessionOf(worker.sessionId) ?: break
-                if (TrackingEngine.isTrackingExpired(current, clock.now().toEpochMilliseconds())) {
-                    arrivalAlerts.triggerTrackingExpired(this@BusTrackingService, current.state)
-                    trackingRepository.stop(current.sessionId)
-                    break
-                }
-                pollOnce(worker)
-            }
+        worker.job = lifecycleScope.launch(Dispatchers.Main) {
+            poller.run(worker.sessionId, worker.generation) { afterUpdate(worker) }
         }
     }
 
-    /** 这一路轮询是否仍属于当前会话 */
-    private fun isCurrent(worker: PollWorker): Boolean {
-        val session = sessionOf(worker.sessionId) ?: return false
-        return worker.generation == session.generation && !session.interrupted
-    }
-
-    private fun sessionOf(sessionId: String): TrackingSession? =
-        trackingRepository.sessions.value.firstOrNull { it.sessionId == sessionId }
-
-    private fun pushTargetOf(session: TrackingSession): MeishanPushTarget {
-        val state = session.state
-        val order = when {
-            state.legPhase == LegPhase.WAITING_BOARD && state.boardStopOrder > 0 -> state.boardStopOrder
-            state.targetOrder > 0 -> state.targetOrder
-            else -> session.leg.targetOrder
-        }
-        return MeishanPushTarget(order, state.targetStopId.ifBlank { session.leg.targetStopId })
-    }
-
-    private suspend fun pollOnce(worker: PollWorker) {
-        if (!isCurrent(worker)) return
-        val session = sessionOf(worker.sessionId) ?: return
-        val watchTarget = session.watchTarget
-        val watchPlan = TrackingEngine.watchPollPlan(session)
-        if (watchTarget != null && watchPlan != null) {
-            pollWatch(worker, watchTarget, watchPlan)
-            return
-        }
-        val state = session.state
-        val leg = session.leg
-        val targetOrder = when {
-            state.legPhase == LegPhase.WAITING_BOARD && state.boardStopOrder > 0 -> state.boardStopOrder
-            state.targetOrder > 0 -> state.targetOrder
-            else -> leg.targetOrder
-        }
-        val targetStationId = state.targetStopId.ifBlank { leg.targetStopId }
-        val target = MeishanPushTarget(targetOrder, targetStationId)
-        val existingPush = worker.pushBindings[leg.lineId]
-        existingPush?.target?.value = target
-        if (existingPush?.online == true && existingPush.generation == worker.generation) return
-        val generation = worker.generation
-        val pushRevision = existingPush?.revision ?: 0L
-        val targetCity = cityFor(leg.cityId, leg.mygolbsCityCode)
-
-        val result = withContext(Dispatchers.IO) {
-            repository.getLineDetail(
-                city = targetCity,
-                lineId = leg.lineId,
-                // 等车阶段的 ETA 必须针对上车站；上车后才切到下车站。一起等刚上车
-                // 还不知道终点站时 targetOrder 为 0，也先按上车站请求，拿到全线站点后补终点。
-                targetOrder = targetOrder,
-                stationId = targetStationId,
-                source = leg.source,
-                lineNameHint = state.lineName,
-                directionHint = leg.direction
-            )
-        }
-
-        // 回到主线程：切程、换目标或 TCP 已先更新时，丢弃这次旧 HTTP 结果。
-        if (!isCurrent(worker) || worker.generation != generation) return
-        val current = sessionOf(worker.sessionId) ?: return
-        if (pushTargetOf(current) != target) return
-        val currentPush = worker.pushBindings[leg.lineId]
-        if (currentPush !== existingPush || (currentPush?.revision ?: 0L) != pushRevision) return
-
-        result.onSuccess { detail ->
-            worker.consecutiveFailures = 0
-            worker.operatingState = detail.operatingState
-            trackingRepository.recordBuses(worker.sessionId, worker.generation, detail.buses)
-
-            val locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission()
-            val dropFix = trackingRepository.latestUserFix
-            val nowMillis = clock.now().toEpochMilliseconds()
-            val nowElapsed = monotonicClock.elapsedMillis()
-            var effects: List<TrackingEngine.Effect> = emptyList()
-            val applied = trackingRepository.update(worker.sessionId, worker.generation) { current ->
-                val reduced = TrackingEngine.reducePoll(
-                    session = current,
-                    detail = detail,
-                    locationEnabled = locationEnabled,
-                    serviceFix = serviceFix,
-                    dropFix = dropFix,
-                    nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed,
-                    stopAfterBoarding = stopAfterBoarding
-                )
-                effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
-            }
-            if (!applied) return
-            if (isCurrent(worker) && worker.generation == generation) {
-                startPush(worker, detail, targetOrder, targetStationId, watch = false)
-            }
-            // 提醒先于刷新通知（和原来一样：先发到站 / 换乘提醒，再刷新常驻通知或切到下一程）
-            effects.forEach { runEffect(it, worker.sessionId) }
-            afterUpdate(worker)
-        }.onFailure { e ->
-            Log.w(TAG, "Failed to refresh line detail", e)
-            worker.consecutiveFailures++
-            val nowMillis = clock.now().toEpochMilliseconds()
-            if (trackingRepository.update(worker.sessionId, worker.generation) {
-                    TrackingEngine.reduceFailure(it, nowMillis)
-                }
-            ) {
-                afterUpdate(worker)
-            }
-        }
-    }
-
-    /** 请求用的城市：和当前选的城市一样就用它（带城市名），否则按会话里的 id 拼一个 */
-    private fun cityFor(cityId: String, mygolbsCityCode: String, cityName: String = ""): TransitCity {
-        val selectedCity = repository.selectedCity.value
-        return if (selectedCity.cityId == cityId) {
-            selectedCity
-        } else {
-            TransitCity(
-                cityId = cityId,
-                cityName = cityName,
-                mygolbsCityCode = mygolbsCityCode.takeIf { it.isNotEmpty() }
-            )
-        }
-    }
-
-    /** 一起等等车阶段的一轮：按计划请求（条数不影响请求数），结果交给引擎 */
-    private suspend fun pollWatch(
-        worker: PollWorker,
-        target: TrackingTarget.WatchTogether,
-        plan: WatchPollPlan
-    ) {
-        val city = cityFor(target.cityId, target.mygolbsCityCode, target.cityName)
-        val lines = when (plan) {
-            is WatchPollPlan.Stop -> plan.lines
-            is WatchPollPlan.Lines -> plan.lines
-        }
-        val official = lines.filter { it.source == DataSourceType.MEISHAN || it.lineId.startsWith("ms:") }
-        val online = official.filter { worker.pushBindings[it.lineId]?.online == true }
-        val missing = official.filterNot { it in online }
-
-        val generation = worker.generation
-        var officialFailures = 0
-        coroutineScope {
-            val semaphore = Semaphore(4)
-            missing.map { line ->
-                async {
-                    semaphore.withPermit {
-                        val binding = worker.pushBindings[line.lineId]
-                        val revision = binding?.revision ?: 0L
-                        val result = withContext(Dispatchers.IO) {
-                            repository.getLineDetail(
-                                city = city,
-                                lineId = line.lineId,
-                                targetOrder = line.stopOrder,
-                                stationId = line.stopIdOnLine.ifBlank { target.stopId },
-                                source = line.source,
-                                lineNameHint = line.lineName,
-                                directionHint = line.direction
-                            )
-                        }
-                        if (!isCurrent(worker) || worker.generation != generation) return@withPermit
-                        val current = sessionOf(worker.sessionId) ?: return@withPermit
-                        if (current.watchTarget?.lines?.contains(line) != true || TrackingEngine.watchPollPlan(current) == null) return@withPermit
-                        val currentBinding = worker.pushBindings[line.lineId]
-                        if (currentBinding !== binding || (currentBinding?.revision ?: 0L) != revision) return@withPermit
-                        result.onSuccess { detail ->
-                            applyPushDetail(worker, detail, watch = true)
-                            if (isCurrent(worker) && worker.generation == generation) {
-                                startPush(worker, detail, line.stopOrder, line.stopIdOnLine.ifBlank { target.stopId }, watch = true)
-                            }
-                        }.onFailure { error ->
-                            officialFailures++
-                            // 补漏失败：这条线清出聚合缓冲，凑不齐就不做上车判定（数据用旧值等恢复）
-                            worker.watchBuffer.remove(line.lineId)
-                            Log.w(TAG, "Failed to refresh official watch line", error)
-                        }
-                    }
-                }
-            }.awaitAll()
-        }
-        if (!isCurrent(worker) || worker.generation != generation) return
-        worker.consecutiveFailures = if (officialFailures > 0) worker.consecutiveFailures + 1 else 0
-
-        val otherLines = lines.filterNot { it in official }
-        if (otherLines.isEmpty()) return
-        val otherPlan = when (plan) {
-            is WatchPollPlan.Stop -> WatchPollPlan.Stop(otherLines)
-            is WatchPollPlan.Lines -> WatchPollPlan.Lines(otherLines)
-        }
-        val result = withContext(Dispatchers.IO) { watchPoller.poll(target, otherPlan, city) }
-        if (!isCurrent(worker) || worker.generation != generation) return
-
-        result.onSuccess { poll ->
-            worker.consecutiveFailures = 0
-            // 站点接口没有线路运营状态：按运营中算，节奏只看最先到的那辆
-            worker.operatingState = LineOperatingState.RUNNING
-            trackingRepository.recordLineBuses(
-                worker.sessionId,
-                worker.generation,
-                poll.lines.mapValues { it.value.buses }
-            )
-
-            val locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission()
-            val nowMillis = clock.now().toEpochMilliseconds()
-            val nowElapsed = monotonicClock.elapsedMillis()
-            var effects: List<TrackingEngine.Effect> = emptyList()
-            val applied = trackingRepository.update(worker.sessionId, worker.generation) { current ->
-                val requested = current.watchTarget?.lines?.map { it.lineId }?.toSet().orEmpty()
-                if (worker.watchRequested != requested) {
-                    worker.watchRequested = requested
-                    worker.watchBuffer.clear()
-                }
-                // 其他线（非官方）这轮的数据入聚合缓冲；请求了却没拿到数据的线清出缓冲
-                poll.lines.forEach { (lineId, linePoll) -> worker.watchBuffer[lineId] = linePoll }
-                poll.requested.filterNot { it in poll.lines }.forEach { worker.watchBuffer.remove(it) }
-                // 缓冲凑齐计划内线路时用完整缓冲做一轮全量 reduce（含上车判定，与上游整轮对齐）；
-                // 否则维持原样只交其他线这轮的数据——引擎侧覆盖门禁挡住判定，官方线由推送帧/补漏凑齐
-                val reduced = if (requested.isNotEmpty() && worker.watchBuffer.keys.containsAll(requested)) {
-                    TrackingEngine.reduceWatchPoll(
-                        session = current,
-                        poll = WatchPoll(
-                            requested = requested,
-                            lines = requested.associateWith { worker.watchBuffer.getValue(it) },
-                            // 站点接口给的上车站坐标要带上：target 没存坐标时判定定位用
-                            stopLat = poll.stopLat,
-                            stopLng = poll.stopLng
-                        ),
-                        locationEnabled = locationEnabled,
-                        serviceFix = serviceFix,
-                        nowMillis = nowMillis,
-                        nowElapsedMillis = nowElapsed,
-                        stopAfterBoarding = stopAfterBoarding
-                    )
-                } else {
-                    TrackingEngine.reduceWatchPoll(
-                        session = current,
-                        poll = poll,
-                        locationEnabled = locationEnabled,
-                        serviceFix = serviceFix,
-                        nowMillis = nowMillis,
-                        nowElapsedMillis = nowElapsed,
-                        stopAfterBoarding = stopAfterBoarding
-                    )
-                }
-                effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
-            }
-            if (!applied) return
-            effects.forEach { runEffect(it, worker.sessionId) }
-            afterUpdate(worker)
-        }.onFailure { e ->
-            Log.w(TAG, "Failed to refresh watch-together stop", e)
-            worker.consecutiveFailures++
-            val nowMillis = clock.now().toEpochMilliseconds()
-            if (trackingRepository.update(worker.sessionId, worker.generation) {
-                    TrackingEngine.reduceFailure(it, nowMillis)
-                }
-            ) {
-                afterUpdate(worker)
-            }
-        }
-    }
+    private fun sessionOf(sessionId: String): TrackingSession? = trackingRepository.sessionById(sessionId)
 
     private fun startPush(
         worker: PollWorker,
@@ -843,7 +773,11 @@ class BusTrackingService : LifecycleService() {
                     )
                 }
                 effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
+                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session.copy(
+                    // 推送帧是实时数据：与 poller 成功路径同口径盖新鲜度戳，避免推送喂养的会话被误判陈旧
+                    lastRealtimeAtMillis = nowMillis,
+                    refreshFailed = false
+                )
             }
         } else {
             trackingRepository.recordBuses(worker.sessionId, worker.generation, detail.buses)
@@ -859,7 +793,11 @@ class BusTrackingService : LifecycleService() {
                     stopAfterBoarding = stopAfterBoarding
                 )
                 effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
+                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session.copy(
+                    // 推送帧是实时数据：与 poller 成功路径同口径盖新鲜度戳，避免推送喂养的会话被误判陈旧
+                    lastRealtimeAtMillis = nowMillis,
+                    refreshFailed = false
+                )
             }
         }
         if (!applied) return

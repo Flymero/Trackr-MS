@@ -16,7 +16,9 @@ import kotlin.test.assertTrue
  */
 class AmapKeyRepositoryTest {
 
-    private class MemoryStore(var android: String? = null, var web: String? = null) : AmapKeyStore {
+    private class MemoryStore(var android: String? = null, var web: String? = null, var ios: String? = null) : AmapKeyStore {
+        override suspend fun loadIosKey() = ios
+        override suspend fun saveIosKey(key: String?) { ios = key }
         override suspend fun loadAndroidKey(): String? = android
         override suspend fun loadWebKey(): String? = web
         override suspend fun saveAndroidKey(key: String?) { android = key }
@@ -138,4 +140,30 @@ class AmapKeyRepositoryTest {
         assertEquals("b", AmapKeyRules.effective("   ", "b"))
         assertEquals("", AmapKeyRules.effective(null, ""))
     }
+    @Test fun iosSlotIsIndependentAndSurvivesReopen() = runTest {
+        val store = MemoryStore(android = "android", web = "web")
+        val defaults = AmapKeyDefaults(hasAndroidMapSdk = false, hasIosMapSdk = true, iosKey = "built_ios")
+        val r = repo(store, defaults, this)
+        assertEquals("built_ios", r.effectiveIosKey.value)
+        assertEquals("", r.effectiveAndroidKey.value)
+        r.setIosKey(" user_ios ")
+        r.flush()
+        assertEquals("android", store.android)
+        assertEquals("web", store.web)
+        assertEquals("user_ios", repo(store, defaults, this).effectiveIosKey.value)
+        r.setIosKey(null)
+        assertEquals("built_ios", r.effectiveIosKey.value)
+        assertEquals("web", r.effectiveWebKey.value)
+        assertTrue(r.canShowMap.value)
+    }
+
+    @Test fun iosSlotNeverEnablesAndroidMapAndSimulatorDoesNotPretendToHaveSdk() {
+        val android = AmapKeyRules.status(null, null, AmapKeyDefaults(), "ios")
+        assertFalse(android.hasMapKey)
+        assertFalse(android.canShowMap)
+        val simulator = AmapKeyRules.status("android", "web", AmapKeyDefaults(hasAndroidMapSdk = false), "ios")
+        assertTrue(simulator.hasMapKey)
+        assertFalse(simulator.canShowMap)
+    }
+
 }

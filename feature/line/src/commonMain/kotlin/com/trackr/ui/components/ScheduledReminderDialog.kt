@@ -65,6 +65,7 @@ fun ScheduledReminderDialog(
     endStopName: String,
     targetStopName: String,
     initialReminder: ScheduledReminder? = null,
+    supportsAutoStart: Boolean = true,
     onDismissRequest: () -> Unit,
     onConfirm: (hour: Int, minute: Int, daysOfWeek: Set<Int>, autoStartTracking: Boolean) -> Unit
 ) {
@@ -213,8 +214,9 @@ fun ScheduledReminderDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 到点自动追踪选项
-                Surface(
+                // iOS reminders notify only; polling starts when the app is opened.
+                if (!supportsAutoStart) Text("到点发送通知，打开追客后可开始追踪")
+                if (supportsAutoStart) Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -255,7 +257,7 @@ fun ScheduledReminderDialog(
                         timePickerState.hour,
                         timePickerState.minute,
                         selectedDays,
-                        autoStartTracking
+                        autoStartTracking && supportsAutoStart
                     )
                 }
             ) {

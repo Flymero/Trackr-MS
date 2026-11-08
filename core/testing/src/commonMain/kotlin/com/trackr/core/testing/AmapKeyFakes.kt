@@ -14,16 +14,27 @@ import kotlinx.coroutines.flow.asStateFlow
 class FakeAmapKeyRepository(
     androidKey: String? = null,
     webKey: String? = null,
-    private val defaults: AmapKeyDefaults = AmapKeyDefaults.NONE
+    private val defaults: AmapKeyDefaults = AmapKeyDefaults.NONE,
+    iosKey: String? = null
 ) : AmapKeyRepository {
 
+    private val _iosKey = MutableStateFlow(iosKey)
+    override val iosKey = _iosKey.asStateFlow()
+    private val _effectiveIosKey = MutableStateFlow(AmapKeyRules.status(androidKey, webKey, defaults, iosKey).effectiveIosKey)
+    override val effectiveIosKey = _effectiveIosKey.asStateFlow()
+    val iosKeyWrites = mutableListOf<String?>()
+    override fun setIosKey(key: String?) {
+        iosKeyWrites += key
+        _iosKey.value = key?.trim()?.ifBlank { null }
+        refresh()
+    }
     private val _androidKey = MutableStateFlow(androidKey?.trim()?.ifBlank { null })
     override val androidKey: StateFlow<String?> = _androidKey.asStateFlow()
 
     private val _webKey = MutableStateFlow(webKey?.trim()?.ifBlank { null })
     override val webKey: StateFlow<String?> = _webKey.asStateFlow()
 
-    private val status get() = AmapKeyRules.status(_androidKey.value, _webKey.value, defaults)
+    private val status get() = AmapKeyRules.status(_androidKey.value, _webKey.value, defaults, _iosKey.value)
 
     private val _effectiveAndroidKey = MutableStateFlow(status.effectiveAndroidKey)
     override val effectiveAndroidKey: StateFlow<String> = _effectiveAndroidKey.asStateFlow()
@@ -59,6 +70,7 @@ class FakeAmapKeyRepository(
 
     private fun refresh() {
         val s = status
+        _effectiveIosKey.value = s.effectiveIosKey
         _effectiveAndroidKey.value = s.effectiveAndroidKey
         _effectiveWebKey.value = s.effectiveWebKey
         _hasMapKey.value = s.hasMapKey

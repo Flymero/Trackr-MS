@@ -184,6 +184,13 @@ interface SpeechInput {
  * 提醒数据存在仓库里，这里只管排 / 取消闹钟。
  */
 interface ReminderAlarms {
+    /** iOS requests notification permission on the user's scheduling action. */
+    suspend fun requestPermission(): Boolean = true
+    suspend fun scheduleAndAwait(reminder: ScheduledReminder) = schedule(reminder)
+    suspend fun cancelAndAwait(reminderId: String) = cancel(reminderId)
+    val supportsAutoStart: Boolean get() = true
+    val maxPendingRequests: Int get() = Int.MAX_VALUE
+
 
     /** 排一个提醒的下一次触发；提醒已关闭时等同 [cancel] */
     fun schedule(reminder: ScheduledReminder)

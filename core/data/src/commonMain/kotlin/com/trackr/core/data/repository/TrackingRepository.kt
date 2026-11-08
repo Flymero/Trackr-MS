@@ -143,6 +143,9 @@ interface TrackingRepository {
     /** 接续所有中断的会话（进程重建后服务起来时用）；按开始先后返回 */
     fun resumeAll(): List<TrackingSession>
 
+    /** Suspend work without losing targets; invalidate every in-flight result and cached fix. */
+    fun pauseAll()
+
     /** 等盘里的会话读完（服务被系统重建时先等它） */
     suspend fun awaitLoaded()
 
@@ -467,6 +470,16 @@ class DefaultTrackingRepository @OptIn(ExperimentalUuidApi::class) constructor(
                 lastLineBuses[sessionId] = lastLineBuses[sessionId].orEmpty() + lineBuses
             }
         }
+    }
+
+    override fun pauseAll() = synchronized(lock) {
+        userFix = null
+        lastBuses.clear()
+        lastLineBuses.clear()
+        val paused = _sessions.value.map {
+            if (it.interrupted) it else it.copy(interrupted = true, generation = nextGeneration())
+        }
+        if (paused != _sessions.value) publish(paused)
     }
 
     override fun resume(sessionId: String): TrackingSession? = synchronized(lock) {

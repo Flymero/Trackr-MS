@@ -16,6 +16,10 @@ import kotlinx.coroutines.flow.asStateFlow
  * 不并进 SettingsRepository：规则只依赖两个 Key 槽，和别的设置无关。规则见 [AmapKeyRules]。
  */
 interface AmapKeyRepository {
+    val iosKey: StateFlow<String?>
+    val effectiveIosKey: StateFlow<String>
+    fun setIosKey(key: String?)
+
     /** 用户填的 Android 槽（没填为 null）；「更多」页的输入框编辑的就是它 */
     val androidKey: StateFlow<String?>
 
@@ -52,7 +56,9 @@ interface AmapKeyRepository {
 data class AmapKeyDefaults(
     val androidKey: String = "",
     val webKey: String = "",
-    val hasAndroidMapSdk: Boolean = true
+    val hasAndroidMapSdk: Boolean = true,
+    val iosKey: String = "",
+    val hasIosMapSdk: Boolean = false
 ) {
     companion object {
         /** 没有内置 Key 的 Android（测试默认用它） */
@@ -65,7 +71,8 @@ data class MapKeyStatus(
     val effectiveAndroidKey: String,
     val effectiveWebKey: String,
     val hasMapKey: Boolean,
-    val canShowMap: Boolean
+    val canShowMap: Boolean,
+    val effectiveIosKey: String = ""
 )
 
 /** §2.5 两槽规则的纯函数：各槽只看自己（用户填的 > 构建时的），互不回落 */
@@ -74,14 +81,16 @@ object AmapKeyRules {
     fun effective(userKey: String?, buildKey: String): String =
         userKey?.trim().orEmpty().ifEmpty { buildKey.trim() }
 
-    fun status(userAndroidKey: String?, userWebKey: String?, defaults: AmapKeyDefaults): MapKeyStatus {
+    fun status(userAndroidKey: String?, userWebKey: String?, defaults: AmapKeyDefaults, userIosKey: String? = null): MapKeyStatus {
+        val ios = if (defaults.hasIosMapSdk) effective(userIosKey, defaults.iosKey) else ""
         val android = if (defaults.hasAndroidMapSdk) effective(userAndroidKey, defaults.androidKey) else ""
         val web = effective(userWebKey, defaults.webKey)
         return MapKeyStatus(
             effectiveAndroidKey = android,
             effectiveWebKey = web,
-            hasMapKey = android.isNotEmpty() || web.isNotEmpty(),
-            canShowMap = android.isNotEmpty()
+            hasMapKey = android.isNotEmpty() || ios.isNotEmpty() || web.isNotEmpty(),
+            canShowMap = android.isNotEmpty() || ios.isNotEmpty(),
+            effectiveIosKey = ios
         )
     }
 }
@@ -93,8 +102,20 @@ class DefaultAmapKeyRepository private constructor(
     private val defaults: AmapKeyDefaults,
     initialAndroidKey: String?,
     initialWebKey: String?,
-    initialPrivacyConsent: Boolean?
+    initialPrivacyConsent: Boolean?,
+    initialIosKey: String?
 ) : AmapKeyRepository {
+
+    private val _iosKey = MutableStateFlow(initialIosKey)
+    override val iosKey = _iosKey.asStateFlow()
+    private val _effectiveIosKey = MutableStateFlow(AmapKeyRules.status(initialAndroidKey, initialWebKey, defaults, initialIosKey).effectiveIosKey)
+    override val effectiveIosKey = _effectiveIosKey.asStateFlow()
+    override fun setIosKey(key: String?) {
+        val value = key?.trim()?.ifBlank { null }
+        _iosKey.value = value
+        refreshStatus()
+        writer.enqueue { store.saveIosKey(value) }
+    }
 
     private val _androidKey = MutableStateFlow(initialAndroidKey)
     override val androidKey: StateFlow<String?> = _androidKey.asStateFlow()
@@ -102,7 +123,7 @@ class DefaultAmapKeyRepository private constructor(
     private val _webKey = MutableStateFlow(initialWebKey)
     override val webKey: StateFlow<String?> = _webKey.asStateFlow()
 
-    private val initialStatus = AmapKeyRules.status(initialAndroidKey, initialWebKey, defaults)
+    private val initialStatus = AmapKeyRules.status(initialAndroidKey, initialWebKey, defaults, initialIosKey)
     private val _effectiveAndroidKey = MutableStateFlow(initialStatus.effectiveAndroidKey)
     override val effectiveAndroidKey: StateFlow<String> = _effectiveAndroidKey.asStateFlow()
     private val _effectiveWebKey = MutableStateFlow(initialStatus.effectiveWebKey)
@@ -135,7 +156,8 @@ class DefaultAmapKeyRepository private constructor(
 
     /** 同步算，调用 setter 后马上读到新值（不用另开协程收集） */
     private fun refreshStatus() {
-        val status = AmapKeyRules.status(_androidKey.value, _webKey.value, defaults)
+        val status = AmapKeyRules.status(_androidKey.value, _webKey.value, defaults, _iosKey.value)
+        _effectiveIosKey.value = status.effectiveIosKey
         _effectiveAndroidKey.value = status.effectiveAndroidKey
         _effectiveWebKey.value = status.effectiveWebKey
         _hasMapKey.value = status.hasMapKey
@@ -157,7 +179,8 @@ class DefaultAmapKeyRepository private constructor(
                 defaults,
                 store.loadAndroidKey(),
                 store.loadWebKey(),
-                store.loadPrivacyConsent()
+                store.loadPrivacyConsent(),
+                store.loadIosKey()
             )
     }
 }

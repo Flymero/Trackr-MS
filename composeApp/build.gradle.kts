@@ -52,6 +52,11 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
         }
+        iosMain.dependencies {
+            implementation(project(":core:network"))
+            implementation(project(":core:database"))
+            implementation(project(":core:datastore"))
+        }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(project(":core:testing"))
@@ -73,11 +78,12 @@ kotlin {
     }
 
     // iOS 侧：产出静态 framework 给 Xcode 宿主工程消费（build phase 调
-    // embedAndSignAppleFrameworkForXcode）。目前仓库里还没有 iosApp 工程。
+    // embedAndSignAppleFrameworkForXcode），由 iosApp/ 的 UIKit 宿主加载 TrackrRoot。
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
+            binaryOption("bundleId", "com.github.u5151561.trackr.compose")
         }
     }
 }

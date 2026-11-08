@@ -175,6 +175,12 @@ class RoomReminderScheduleStateStore(private val db: TrackrDatabase) : ReminderS
 
 /** 高德 Key 在单独的 `trackr_amap_keys`（备份排除）。空串按没填处理，存的时候也不写空串 */
 class DataStoreAmapKeyStore(private val keys: DataStore<Preferences>) : AmapKeyStore {
+    override suspend fun loadIosKey(): String? = keys.data.first()[AmapKeyKeys.IOS]?.trim()?.ifBlank { null }
+    override suspend fun saveIosKey(key: String?) {
+        val value = key?.trim()?.ifBlank { null }
+        keys.edit { if (value == null) it.remove(AmapKeyKeys.IOS) else it[AmapKeyKeys.IOS] = value }
+    }
+
 
     override suspend fun loadAndroidKey(): String? = keys.data.first()[AmapKeyKeys.ANDROID]?.trim()?.ifBlank { null }
 
