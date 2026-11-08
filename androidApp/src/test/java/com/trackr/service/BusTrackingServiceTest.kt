@@ -796,6 +796,31 @@ class BusTrackingServiceTest {
     }
 
     @Test
+    fun watchTogether_stoppingForegroundLinesOneByOne_removesEveryNotification() {
+        transit.realtime.stopDetailResult = Result.success(listOf(stopWithLines()))
+        val session = requireNotNull(trackingRepository.start(watchTarget()))
+        val service = startService(session.sessionId).get()
+        waitUntil("最快的 60 路排在第一条") {
+            trackingRepository.session.value?.watchedLines?.firstOrNull()?.line?.lineId == "L60"
+        }
+
+        val notifier: LiveProgressNotifier = GlobalContext.get().get()
+        listOf("L60", "L61", "L59").forEachIndexed { index, lineId ->
+            val id = notifier.notificationIdOf(LiveProgressNotifier.watchLineKey(session.sessionId, lineId))
+            assertEquals(id, shadowOf(service).lastForegroundNotificationId)
+            val notification = requireNotNull(shadowOf(notificationManager).getNotification(id))
+            notification.actions.first { it.title.toString().contains("结束") }.actionIntent.send()
+            waitUntil("$lineId 的通知撤掉") { shadowOf(notificationManager).getNotification(id) == null }
+            assertEquals(2 - index, trackingRepository.session.value?.watchedLines?.size ?: 0)
+            if (index < 2) assertFalse(shadowOf(service).isStoppedBySelf)
+        }
+        waitUntil("最后一条结束后服务停下") { shadowOf(service).isStoppedBySelf }
+        assertTrue(notificationManager.activeNotifications.none {
+            it.notification.channelId == LiveProgressNotifier.CHANNEL_ID_LIVE_PROGRESS
+        })
+    }
+
+    @Test
     fun watchTogether_afterBoarding_pollsOnlyThatLine() {
         transit.realtime.stopDetailResult = Result.success(listOf(stopWithLines()))
         transit.realtime.lineDetailsMap["L60"] = lineDetail(
@@ -873,6 +898,37 @@ class BusTrackingServiceTest {
     }
 
     // ---------------------------------------------------------------- 同时追多项（第 36 步）
+
+    @Test
+    fun completedForegroundRoute_cleansUpNotificationsAndKeepsOtherLineRunning() {
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 7, segmentProgress = 1f, isArrived = true)))
+        )
+        val first = requireNotNull(trackingRepository.start(singleTarget().copy(lineId = "L71", lineName = "71路")))
+        val service = startService(first.sessionId).get()
+        waitUntil("第一项写回") { trackingRepository.sessionById(first.sessionId)?.state?.currentBusId == "b1" }
+
+        val route = requireNotNull(trackingRepository.start(routeTarget()))
+        trackingRepository.update(route.sessionId, route.generation) {
+            it.copy(state = it.state.copy(legPhase = LegPhase.ON_BOARD, lockedBusId = "b1"))
+        }
+        service.onStartCommand(BusTrackingService.startIntent(app, route.sessionId), 0, 2)
+        waitUntil("路线到终点后自动结束") { trackingRepository.sessionById(route.sessionId) == null }
+
+        val notifier: LiveProgressNotifier = GlobalContext.get().get()
+        waitUntil("前台交回仍在追踪的线路") {
+            shadowOf(service).lastForegroundNotificationId == notifier.notificationIdOf(first.sessionId)
+        }
+        assertNotNull(shadowOf(notificationManager).getNotification(notifier.notificationIdOf(first.sessionId)))
+        assertNull(shadowOf(notificationManager).getNotification(notifier.notificationIdOf(route.sessionId)))
+        assertNull(
+            "自动结束也必须经过统一清理，不能在收集会话变化前丢掉 worker",
+            shadowOf(notificationManager).getNotification(
+                ArrivalAlertNotifier.alertNotificationId(ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED, route.sessionId)
+            )
+        )
+        assertFalse(shadowOf(service).isStoppedBySelf)
+    }
 
     @Test
     fun twoLines_arePolledTogether_eachHasItsOwnNotification() {

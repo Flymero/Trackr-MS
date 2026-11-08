@@ -331,6 +331,7 @@ class BusTrackingService : LifecycleService() {
                 ServiceCompat.startForeground(this, notificationId, notification, withLocation)
                 lastForegroundServiceType = withLocation
                 foregroundNotifyId = notificationId
+                postedNotifyIds += notificationId
                 return true
             } catch (e: SecurityException) {
                 Log.w(TAG, "Location FGS type not allowed, tracking without location", e)
@@ -341,6 +342,7 @@ class BusTrackingService : LifecycleService() {
         ServiceCompat.startForeground(this, notificationId, notification, baseType)
         lastForegroundServiceType = baseType
         foregroundNotifyId = notificationId
+        postedNotifyIds += notificationId
         return false
     }
 
@@ -903,9 +905,9 @@ class BusTrackingService : LifecycleService() {
         when {
             now == null -> {
                 worker.job?.cancel()
-                stopPush(worker)
-                workers.remove(worker.sessionId)
-                worker.notifyIds.values.forEach { liveProgressNotifier.cancelNotification(this, it) }
+                // 留给 onSessionsChanged 统一收尾：先把前台交给仍在追的项，再撤通知。
+                // 提前移除 worker 会使 collect 漏掉这份会话，前台通知撤不掉后也无人重试。
+                // （fork 注：眉山 TCP 订阅的 release 也在 onSessionsChanged 的 gone 路径里，不在此处）
             }
             now.generation != worker.generation -> attach(now)
             else -> render(now)
@@ -1190,6 +1192,7 @@ class BusTrackingService : LifecycleService() {
         // 会话没了，这些追踪留下的到站提醒也跟着撤（#28）
         active.forEach { ArrivalAlertNotifier.cancelSessionAlerts(this, it.sessionId) }
         foregroundSessionId = null
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         cancelPostedNotifications()
         super.onDestroy()
     }

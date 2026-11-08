@@ -618,6 +618,14 @@ class LiveProgressNotifier(
     ): PendingIntent {
         val intent = Intent(context, TrackingActionReceiver::class.java).apply {
             this.action = action
+            // PendingIntent 的身份不包含 extras；截断的 hash 请求码可能碰撞，导致按钮
+            // 被另一份会话覆盖。完整标识放进参与 filterEquals 的 data，刷新同一条仍可复用。
+            data = Uri.Builder()
+                .scheme("trackr")
+                .authority("tracking-action")
+                .appendPath(sessionId)
+                .appendPath(watchLineId)
+                .build()
             if (sessionId.isNotBlank()) putExtra(TrackingActionReceiver.EXTRA_SESSION_ID, sessionId)
             if (watchLineId.isNotBlank()) putExtra(TrackingActionReceiver.EXTRA_WATCH_LINE_ID, watchLineId)
         }
@@ -630,8 +638,8 @@ class LiveProgressNotifier(
     }
 
     /**
-     * 同一份会话的 PendingIntent 请求码。同时追多项时每项一条通知，请求码相同的话
-     * （PendingIntent 的身份不含 extras）后一条会把前一条的 sessionId 覆盖掉，按钮就都指向同一项了。
+     * 同一份会话的 PendingIntent 请求码。它只是稳定的分桶，不能保证唯一；
+     * 广播按钮的会话与线路身份由 Intent.data 保证，不能只依赖这个截断哈希。
      */
     private fun requestCodeOf(base: Int, sessionId: String, watchLineId: String = ""): Int {
         val key = if (watchLineId.isEmpty()) sessionId else "$sessionId#$watchLineId"

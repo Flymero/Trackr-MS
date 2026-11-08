@@ -13,6 +13,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -20,6 +21,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.koin.core.context.GlobalContext
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 
 @RunWith(RobolectricTestRunner::class)
 class LiveProgressNotificationHelperTest {
@@ -38,6 +40,39 @@ class LiveProgressNotificationHelperTest {
     @After
     fun tearDown() {
         liveNotifier.resetLiveNotificationEnabledProvider()
+    }
+
+    @Test
+    fun collidingSessionHashes_keepNotificationActionsSeparate() {
+        // 连完整 hash 都相同，不能靠扩大 requestCode 的位数解决。
+        assertEquals("Aa".hashCode(), "BB".hashCode())
+        val state = TrackingSessionState(isActive = true, lineName = "59路")
+        val first = liveNotifier.buildNotification(context, state, sessionId = "Aa")
+        val second = liveNotifier.buildNotification(context, state, sessionId = "BB")
+
+        first.actions.forEach { action ->
+            val intent = shadowOf(action.actionIntent).savedIntent
+            if (intent.component?.className != TrackingActionReceiver::class.java.name) return@forEach
+            val other = second.actions.first { it.title == action.title }
+            assertNotEquals(action.actionIntent, other.actionIntent)
+            assertEquals("Aa", intent.getStringExtra(TrackingActionReceiver.EXTRA_SESSION_ID))
+            assertEquals("BB", shadowOf(other.actionIntent).savedIntent.getStringExtra(TrackingActionReceiver.EXTRA_SESSION_ID))
+        }
+        val refreshed = liveNotifier.buildNotification(context, state, sessionId = "Aa")
+        assertEquals(first.actions.map { it.actionIntent }, refreshed.actions.map { it.actionIntent })
+    }
+
+    @Test
+    fun collidingWatchLineHashes_keepStopActionsSeparate() {
+        val state = watchWaitingState()
+        val first = liveNotifier.buildNotification(context, state, sessionId = "watch", watchLineId = "Aa")
+        val second = liveNotifier.buildNotification(context, state, sessionId = "watch", watchLineId = "BB")
+        val firstStop = first.actions.first { it.title.toString().contains("结束") }.actionIntent
+        val secondStop = second.actions.first { it.title.toString().contains("结束") }.actionIntent
+
+        assertNotEquals(firstStop, secondStop)
+        assertEquals("Aa", shadowOf(firstStop).savedIntent.getStringExtra(TrackingActionReceiver.EXTRA_WATCH_LINE_ID))
+        assertEquals("BB", shadowOf(secondStop).savedIntent.getStringExtra(TrackingActionReceiver.EXTRA_WATCH_LINE_ID))
     }
 
     @Test
