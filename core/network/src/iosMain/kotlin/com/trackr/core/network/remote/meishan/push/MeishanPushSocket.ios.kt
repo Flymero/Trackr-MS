@@ -1,7 +1,5 @@
 package com.trackr.core.network.remote.meishan.push
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
 
 /**
@@ -12,9 +10,7 @@ internal actual fun platformPushSocket(): MeishanPushSocket = IosPushSocket()
 
 internal class IosPushSocket : MeishanPushSocket {
     override suspend fun connect(host: String, port: Int, timeoutMs: Long): Unit =
-        withContext(Dispatchers.IO) {
-            throw IOException("iOS 推送通道未实现，走 HTTP 轮询降级")
-        }
+        throw IOException("iOS 推送通道未实现，走 HTTP 轮询降级")
 
     override suspend fun read(): String? = null
 

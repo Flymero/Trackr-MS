@@ -2,7 +2,10 @@ package com.trackr.core.network.remote.meishan.push
 
 import com.trackr.core.network.json.JSONArray
 import com.trackr.core.network.json.JSONObject
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -42,6 +45,12 @@ class MeishanPushClient(
     private val socketFactory: () -> MeishanPushSocket = ::platformPushSocket,
     private val wallClock: Clock = Clock.System,
     externalScope: CoroutineScope? = null,
+    /**
+     * 重连循环所在调度器：commonMain 不依赖 JVM-only 的 Dispatchers.IO，平台各自注入。
+     * 不要传 Unconfined（含测试里的 UnconfinedTestDispatcher）：startLoop 在锁内 launch，
+     * 新协程会在持锁线程上同步执行并再次申请 refsLock——JVM 锁可重入不报错，Native 锁不可重入，iOS 上死锁。
+     */
+    loopDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : MeishanPushClientApi {
 
     companion object {
@@ -56,7 +65,7 @@ class MeishanPushClient(
     }
 
     private val ownedScope = externalScope == null
-    private val scope = externalScope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = externalScope ?: CoroutineScope(SupervisorJob() + loopDispatcher)
     private val clientId: String = Uuid.random().toString()
 
     private val _state = MutableStateFlow(MeishanPushState.IDLE)
@@ -69,7 +78,8 @@ class MeishanPushClient(
     override val frames: SharedFlow<MeishanPushFrame> = _frames.asSharedFlow()
 
     private val tagRefs = HashMap<String, Int>()
-    private val refsLock = Any()
+    /** atomicfu 锁：commonMain 可用（JVM=ReentrantLock 语义，Native=pthread），替代 JVM-only 的 kotlin.synchronized */
+    private val refsLock = SynchronizedObject()
     private val wakeup = Channel<Unit>(Channel.CONFLATED)
 
     @Volatile
@@ -104,8 +114,9 @@ class MeishanPushClient(
 
     private fun startLoop() {
         synchronized(refsLock) {
-            if (loop?.isActive == true) return
-            loop = scope.launch { runForever() }
+            if (loop?.isActive != true) {
+                loop = scope.launch { runForever() }
+            }
         }
     }
 
@@ -256,11 +267,14 @@ class MeishanPushClient(
                 if (isStale(parsedTime)) return
                 // 新文档未确认增量协议，缺少 busInfos 的帧不是“空车全量帧”，直接隔离。
                 val busInfos: JSONArray = content.optJSONArray("busInfos") ?: return
-                synchronized(refsLock) {
+                // 时间新鲜度去重（锁内只做判断与登记，重复帧由锁外返回丢弃）
+                val duplicated = synchronized(refsLock) {
                     val previous = latestPushTimeByTag[tag]
-                    if (previous != null && parsedTime <= previous) return
-                    latestPushTimeByTag[tag] = parsedTime
+                    val isDuplicate = previous != null && parsedTime <= previous
+                    if (!isDuplicate) latestPushTimeByTag[tag] = parsedTime
+                    isDuplicate
                 }
+                if (duplicated) return
                 _frames.tryEmit(MeishanPushFrame(tag, pushTime, busInfos))
             }
             MeishanPushProtocol.MSG_HEARTBEAT,

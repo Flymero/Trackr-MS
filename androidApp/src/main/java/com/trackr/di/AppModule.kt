@@ -80,7 +80,7 @@ val appModule: Module = module {
     single { MygolbsApiClient(get()) }
     // 眉山官方后台（http 明文，域名在 network_security_config.xml 白名单）
     single { MeishanTransitClient(get()) }
-    single<MeishanPushClientApi> { MeishanPushClient() } onClose {
+    single<MeishanPushClientApi> { MeishanPushClient(loopDispatcher = Dispatchers.IO) } onClose {
         (it as? MeishanPushClient)?.cancel()
     }
     single { ChelaileTransitProvider(get()) }
