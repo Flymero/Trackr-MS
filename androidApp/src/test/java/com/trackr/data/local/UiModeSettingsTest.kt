@@ -11,6 +11,10 @@ import androidx.test.core.app.ApplicationProvider
 import com.trackr.core.data.provider.TransitProviderCoordinator
 import com.trackr.core.database.TrackrDatabase
 import com.trackr.core.datastore.TrackrDataStoreFiles
+import com.trackr.core.model.EngineMode
+import com.trackr.core.model.TransitCity
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import com.trackr.core.model.UiMode
 import com.trackr.core.model.ThemeMode
 import com.trackr.data.repository.RouteGroupRepository
@@ -75,6 +79,23 @@ class UiModeSettingsTest {
         context, TransitProviderCoordinator(emptyMap()), backend.transitStore,
         RouteGroupRepository.openFavorites(backend.favoritesStore), scope
     )
+
+    @Test
+    fun officialCityDefaultsAndExplicitSourceSurviveReopening() = runBlocking {
+        val backend = open()
+        backend.transitStore.saveSelectedCityJson(Json.encodeToString(TransitCity("ms", "\u7709\u5c71")))
+        val first = repo(backend)
+        assertEquals(EngineMode.MEISHAN, first.engineMode.value)
+        first.setEngineMode(EngineMode.MYGOLBS)
+        first.selectCity(first.selectedCity.value)
+        first.flushWrites()
+        assertEquals(EngineMode.MYGOLBS, repo(backend).engineMode.value)
+        first.selectCity(TransitCity("rs", "\u4ec1\u5bff"))
+        assertEquals(EngineMode.MEISHAN, first.engineMode.value)
+        first.selectCity(TransitCity("034", "\u4e0a\u6d77"))
+        first.flushWrites()
+        assertEquals(EngineMode.MYGOLBS, repo(backend).engineMode.value)
+    }
 
     @Test
     fun freshInstall_isStandard_andPromptNotDismissed() {

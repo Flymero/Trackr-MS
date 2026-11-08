@@ -493,7 +493,15 @@ class LineDetailViewModel(
                 _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
                 return false
             }
-            result.onSuccess { detail ->
+            result.onSuccess { fetched ->
+                val live = _uiState.value.live
+                val detail = if (pushOnline && fetched.line.source == DataSourceType.MEISHAN &&
+                    fetched.line == _uiState.value.static?.line && fetched.stops == _uiState.value.static?.stops &&
+                    fetched.buses.isEmpty() && fetched.idleBuses.isEmpty() && live != null &&
+                    (live.buses.isNotEmpty() || live.idleBuses.isNotEmpty())) {
+                    fetched.copy(buses = live.buses, idleBuses = live.idleBuses, operatingState = live.operatingState,
+                        updatedAtMillis = live.updatedAtMillis)
+                } else fetched
                 val selected = _uiState.value.selectedStop
                 // 初次加载或无选中站时，计算默认选中的候车站（首车前面一站）；用户已经在缓存的站表上点过站就保留。
                 // 找回选中站时站序和站 ID 一起核对：服务端重排站序后按站 ID 找，不落到另一站上

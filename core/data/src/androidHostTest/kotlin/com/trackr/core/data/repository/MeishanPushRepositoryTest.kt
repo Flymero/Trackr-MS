@@ -54,6 +54,33 @@ class MeishanPushRepositoryTest {
     )
 
     @Test
+    fun resolvedAreaIsCheckedForEmptyFrames() = runTest {
+        val http = HttpClient(MockEngine {
+            respond("""{"code":101,"result":[{"l_id":1,"l_name":"line-1","l_copy_id":11,"areaId":1}]}""")
+        })
+        val push = Push()
+        val provider = MeishanTransitProvider(MeishanTransitClient(http))
+        provider.pushTag("ms:1_1_0")
+        val repository = DefaultMeishanPushRepository(push, provider)
+        val updates = mutableListOf<MeishanPushUpdate>()
+        val job = backgroundScope.launch { repository.stream(base(), 1).collect { updates += it } }
+        try {
+            push.ready.await()
+            push.frames.emit(frame().copy(areaId = 1))
+            runCurrent()
+            assertEquals(1, updates.count { it.detail != null })
+            repeat(3) { index ->
+                push.frames.emit(frame().copy(
+                    areaId = 2, busInfos = JSONArray("[]"), pushTime = "2026-11-05 12:00:0${index + 1}"
+                ))
+            }
+            runCurrent()
+            assertEquals(1, updates.count { it.detail != null })
+            assertTrue(updates.last().detail?.buses?.isNotEmpty() == true)
+        } finally { job.cancelAndJoin(); http.close() }
+    }
+
+    @Test
     fun copyIdFiltering_timeoutRecovery_andCancellationRelease() = runTest {
         val http = HttpClient(MockEngine {
             respond("""{"code":101,"result":[{"l_id":1,"l_name":"1路","l_copy_id":11,"areaId":1}]}""")
@@ -93,6 +120,60 @@ class MeishanPushRepositoryTest {
             http.close()
         }
         assertEquals(push.acquired, push.released)
+    }
+
+    @Test
+    fun emptyPushBurstRequestsHttpConfirmationWithoutClearingThenRecovers() = runTest {
+        val http = HttpClient(MockEngine {
+            respond("""{"code":101,"result":[{"l_id":1,"l_name":"line-1","l_copy_id":11}]}""")
+        })
+        val push = Push()
+        val provider = MeishanTransitProvider(MeishanTransitClient(http))
+        provider.pushTag("ms:1_1_0")
+        val repository = DefaultMeishanPushRepository(push, provider)
+        val updates = mutableListOf<MeishanPushUpdate>()
+        val job = backgroundScope.launch { repository.stream(base(), 1).collect { updates += it } }
+        try {
+            push.ready.await()
+            push.frames.emit(frame())
+            runCurrent()
+            assertTrue(updates.last().detail?.buses?.isNotEmpty() == true)
+            repeat(4) { index ->
+                push.frames.emit(frame().copy(busInfos = JSONArray("[]"), pushTime = "2026-11-05 12:00:0${index + 1}"))
+                runCurrent()
+            }
+            assertEquals(MeishanPushAvailability.DISCONNECTED, updates.last().availability)
+            assertTrue(updates.filter { it.detail != null }.all { it.detail!!.buses.isNotEmpty() })
+            assertEquals(2, updates.count { it.availability == MeishanPushAvailability.DISCONNECTED })
+            push.frames.emit(frame().copy(pushTime = "2026-11-05 12:00:07"))
+            runCurrent()
+            assertEquals(MeishanPushAvailability.ONLINE, updates.last().availability)
+            assertTrue(updates.last().detail!!.buses.isNotEmpty())
+        } finally { job.cancelAndJoin(); http.close() }
+    }
+
+    @Test
+    fun initiallyEmptyLineCanAcceptConfirmedEmptyPushFrames() = runTest {
+        val http = HttpClient(MockEngine {
+            respond("""{"code":101,"result":[{"l_id":1,"l_name":"line-1","l_copy_id":11}]}""")
+        })
+        val push = Push()
+        val provider = MeishanTransitProvider(MeishanTransitClient(http))
+        provider.pushTag("ms:1_1_0")
+        val repository = DefaultMeishanPushRepository(push, provider)
+        val updates = mutableListOf<MeishanPushUpdate>()
+        val job = backgroundScope.launch { repository.stream(base(), 1).collect { updates += it } }
+        try {
+            push.ready.await()
+            repeat(3) { index ->
+                push.frames.emit(frame().copy(busInfos = JSONArray("[]"), pushTime = "2026-11-05 12:00:0${index + 1}"))
+                runCurrent()
+            }
+            assertEquals(MeishanPushAvailability.ONLINE, updates.last().availability)
+            assertTrue(updates.last().detail != null)
+            assertTrue(updates.last().detail!!.buses.isEmpty())
+            assertTrue(updates.last().detail!!.idleBuses.isEmpty())
+        } finally { job.cancelAndJoin(); http.close() }
     }
 
     @Test

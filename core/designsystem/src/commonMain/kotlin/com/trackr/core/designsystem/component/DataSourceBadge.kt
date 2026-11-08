@@ -60,7 +60,10 @@ fun DataSourceBadge(
     ) {
         Text(
             text = text,
+            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
             fontSize = fontSize,
+            lineHeight = fontSize * 1.2f,
+            maxLines = 1,
             fontWeight = fontWeight,
             color = contentColor,
             modifier = Modifier.padding(contentPadding)

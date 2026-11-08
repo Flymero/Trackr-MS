@@ -64,6 +64,7 @@ kotlin {
         }
         getByName("androidHostTest").dependencies {
             implementation(kotlin("test-junit"))
+            implementation(libs.ktor.client.mock)
             implementation(libs.junit)
             implementation(libs.robolectric)
             implementation(project(":core:testing"))

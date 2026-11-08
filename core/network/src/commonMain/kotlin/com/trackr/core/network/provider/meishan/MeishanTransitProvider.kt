@@ -381,35 +381,37 @@ class MeishanTransitProvider(
         expectedTag: String? = null
     ): BusLineDetail? {
         val ref = MeishanIds.parse(base.line.lineId) ?: return null
+        if (frame.areaId != null && frame.areaId != ref.areaId) return null
         if (expectedTag.isNullOrBlank() || frame.tag != expectedTag) return null
         val copyId = expectedTag.substringBefore('_').toIntOrNull()
         val key = PushFrameKey(base.line.lineId, frame.tag, frame.pushTime, base.stops)
+        val counterKey = "${ref.areaId}:${frame.tag}"
         // 单锁段内完成「解析缓存读写 + 空帧计数」，多订阅并发时口径一致；
-        // 计数按 (tag, pushTime) 去重：copyId 撞号时同 tag 的两份订阅（缓存键不同）收到的是
+        // 计数按 (areaId, tag, pushTime) 去重：copyId 撞号时同 tag 的两份订阅（缓存键不同）收到的是
         // 同一个物理帧，只能计 1 次，否则阈值 3 会被两个订阅在 2 个时间戳里凑满。
         val (parsed, emptyRun) = synchronized(pushFrameLock) {
             val cached = parsedPushFrames[key]
             if (cached != null) {
-                cached to (emptyFrameRuns[frame.tag] ?: 0)
+                cached to (emptyFrameRuns[counterKey] ?: 0)
             } else {
                 val parsed = parseBuses(ref, frame.busInfos, base.stops, copyId)
                 if (parsedPushFrames.size >= MAX_CACHED_PUSH_FRAMES) {
                     parsedPushFrames.remove(parsedPushFrames.keys.first())
                 }
                 parsedPushFrames[key] = parsed
-                val isNewPhysicalFrame = countedPushTimes[frame.tag] != frame.pushTime
-                countedPushTimes[frame.tag] = frame.pushTime
+                val isNewPhysicalFrame = countedPushTimes[counterKey] != frame.pushTime
+                countedPushTimes[counterKey] = frame.pushTime
                 val run = when {
                     !parsed.isEmpty -> {
-                        emptyFrameRuns.remove(frame.tag)
+                        emptyFrameRuns.remove(counterKey)
                         0
                     }
                     isNewPhysicalFrame -> {
-                        val next = (emptyFrameRuns[frame.tag] ?: 0) + 1
-                        emptyFrameRuns[frame.tag] = next
+                        val next = (emptyFrameRuns[counterKey] ?: 0) + 1
+                        emptyFrameRuns[counterKey] = next
                         next
                     }
-                    else -> emptyFrameRuns[frame.tag] ?: 0
+                    else -> emptyFrameRuns[counterKey] ?: 0
                 }
                 parsed to run
             }

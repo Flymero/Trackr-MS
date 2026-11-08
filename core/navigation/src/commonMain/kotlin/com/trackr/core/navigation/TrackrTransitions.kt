@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.scene.Scene
 
@@ -42,9 +43,14 @@ object TrackrTransitions {
     private fun AnimatedContentTransitionScope<Scene<NavKey>>.isTabRootSwitch(): Boolean {
         val from = initialState.entries.lastOrNull()?.contentKey
         val to = targetState.entries.lastOrNull()?.contentKey
-        return from is ScreenKey && to is ScreenKey && from != to &&
-            from in TopLevel.tabs && to in TopLevel.tabs
+        return isTabRootSwitch(from, to)
     }
+
+    // Navigation 3 derives contentKey from the key; it is not the ScreenKey itself.
+    private val tabContentKeys = TopLevel.tabs.map { NavEntry<NavKey>(it) {}.contentKey }.toSet()
+
+    internal fun isTabRootSwitch(from: Any?, to: Any?): Boolean =
+        from != to && from in tabContentKeys && to in tabContentKeys
 
     private fun tabFade(): ContentTransform =
         fadeIn(animationSpec = tween(TAB_FADE_MILLIS)) togetherWith

@@ -139,8 +139,9 @@ class DefaultSettingsRepository private constructor(
     }
 
     private fun loadInitialEngineMode(): EngineMode {
-        val modeStr = initial.engineMode ?: EngineMode.CHELAILE.name
-        return runCatching { EngineMode.valueOf(modeStr) }.getOrDefault(EngineMode.CHELAILE)
+        val defaultMode = if (_selectedCity.value.isMeishanLocal) EngineMode.MEISHAN else EngineMode.CHELAILE
+        val modeStr = initial.engineMode ?: defaultMode.name
+        return runCatching { EngineMode.valueOf(modeStr) }.getOrDefault(defaultMode)
     }
 
     override fun setEngineMode(mode: EngineMode) {
@@ -154,8 +155,14 @@ class DefaultSettingsRepository private constructor(
         } else {
             city
         }
+        val previousCity = _selectedCity.value
         _selectedCity.value = effectiveCity
         _hasSavedCity.value = true
+        if (effectiveCity.isMeishanLocal && effectiveCity.cityName != previousCity.cityName) {
+            setEngineMode(EngineMode.MEISHAN)
+        } else if (_engineMode.value == EngineMode.MEISHAN && !effectiveCity.isMeishanLocal) {
+            setEngineMode(EngineMode.MYGOLBS)
+        }
         val str = json.encodeToString(effectiveCity)
         writer.enqueue { store.saveSelectedCityJson(str) }.join()
     }

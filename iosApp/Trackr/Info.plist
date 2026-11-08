@@ -5,6 +5,16 @@
     <key>AmapIosKey</key><string>$(AMAP_IOS_KEY)</string>
     <key>AmapWebKey</key><string>$(AMAP_WEB_KEY)</string>
     <key>TrackrAppGroup</key><string>$(TRACKR_APP_GROUP)</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>busapp.superms.cn</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+            </dict>
+        </dict>
+    </dict>
     <key>NSSupportsLiveActivities</key><true/>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>

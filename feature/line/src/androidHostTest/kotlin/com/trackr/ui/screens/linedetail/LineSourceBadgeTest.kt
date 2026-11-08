@@ -1,6 +1,10 @@
 package com.trackr.ui.screens.linedetail
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import org.junit.Assert.assertTrue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -11,8 +15,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class LineSourceBadgeTest {
     @get:Rule
     val compose = createComposeRule()
@@ -31,6 +37,19 @@ class LineSourceBadgeTest {
         compose.waitUntil(timeoutMillis = 2_000) {
             compose.onAllNodesWithText("TCP").fetchSemanticsNodes().isEmpty()
         }
+    }
+
+    @Test
+    fun badgeStaysHorizontalInsideLargeAppBarTypography() {
+        compose.setContent {
+            TrackrTheme {
+                ProvideTextStyle(MaterialTheme.typography.headlineLarge) {
+                    LineSourceBadge(DataSourceType.MEISHAN, true)
+                }
+            }
+        }
+        val bounds = compose.onNodeWithText("TCP").getUnclippedBoundsInRoot()
+        assertTrue("TCP badge must be wider than it is tall: $bounds", bounds.right - bounds.left > bounds.bottom - bounds.top)
     }
 
     @Test

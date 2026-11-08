@@ -260,12 +260,13 @@ class GithubUpdateCheckerTest {
         val requested = java.util.concurrent.atomic.AtomicInteger(0)
         val cancelled = java.util.concurrent.atomic.AtomicInteger(0)
         val entered = CompletableDeferred<Unit>()
+        val allCancelled = CompletableDeferred<Unit>()
         val client = HttpClient(MockEngine { _ ->
             if (requested.incrementAndGet() == 2) entered.complete(Unit)
             try {
                 awaitCancellation()
             } finally {
-                cancelled.incrementAndGet()
+                if (cancelled.incrementAndGet() == 2) allCancelled.complete(Unit)
             }
         })
         try {
@@ -280,6 +281,10 @@ class GithubUpdateCheckerTest {
 
             assertTrue(job.isCancelled)
             assertEquals(2, requested.get())
+            // Ktor cancels engine calls asynchronously; joining the checker does not join
+            // MockEngine handlers. Await their cleanup before checking, without closing
+            // the client first: a request left running must still fail this test.
+            withTimeout(2_000L) { allCancelled.await() }
             assertEquals(2, cancelled.get())
         } finally {
             client.close()

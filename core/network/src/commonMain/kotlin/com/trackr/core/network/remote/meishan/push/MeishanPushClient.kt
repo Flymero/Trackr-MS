@@ -2,6 +2,7 @@ package com.trackr.core.network.remote.meishan.push
 
 import com.trackr.core.network.json.JSONArray
 import com.trackr.core.network.json.JSONObject
+import com.trackr.core.network.remote.meishan.intOrNull
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
@@ -89,7 +90,8 @@ class MeishanPushClient(
     private var lastSendMs: Long = 0L
     private var subscribedSnapshot: Set<String> = emptySet()
     private val subscriptionWakeup = Channel<Unit>(Channel.CONFLATED)
-    private val latestPushTimeByTag = HashMap<String, Long>()
+    private data class PushFrameSource(val tag: String, val areaId: Int)
+    private val latestPushTimeByTag = HashMap<PushFrameSource, Long>()
 
     override suspend fun acquire(tag: String) {
         synchronized(refsLock) { tagRefs[tag] = (tagRefs[tag] ?: 0) + 1 }
@@ -171,7 +173,7 @@ class MeishanPushClient(
         awaitChannelAck(socket)
         socket.setReadTimeoutMs(45_000L)
         // 新通道的服务端订阅状态是空的：即使快照相同也必须重发
-        writeSubscribe(socket, activeTags(), force = true)
+        writeSubscribe(socket, force = true)
     }
 
     private enum class OnlineExit { REBUILD, DISCONNECTED, NO_SUBSCRIPTIONS }
@@ -181,8 +183,7 @@ class MeishanPushClient(
         val subscriptionWatcher = launch {
             while (true) {
                 subscriptionWakeup.receive()
-                val want = activeTags()
-                writeSubscribe(socket, want)
+                val want = writeSubscribe(socket)
                 if (want.isEmpty()) {
                     socket.close()
                     return@launch
@@ -192,7 +193,7 @@ class MeishanPushClient(
         try {
             while (true) {
                 if (activeTags().isEmpty()) {
-                    writeSubscribe(socket, emptySet())
+                    writeSubscribe(socket)
                     return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
                 }
                 val text = socket.read() ?: return@coroutineScope OnlineExit.DISCONNECTED
@@ -202,12 +203,8 @@ class MeishanPushClient(
                 } catch (_: MeishanPushRebuildSignal) {
                     return@coroutineScope OnlineExit.REBUILD
                 }
-                writeSubscribe(socket, activeTags())
                 if (activeTags().isEmpty()) return@coroutineScope OnlineExit.NO_SUBSCRIPTIONS
-                // 消费 acquire/release 发出的唤醒；真正的写入在下一轮读完后完成，避免并发写 socket。
-                while (subscriptionWakeup.tryReceive().isSuccess) {
-                    // Drain coalesced subscription wakeups before the next socket read.
-                }
+                // Only subscriptionWatcher consumes subscription changes.
             }
         } finally {
             heartbeat.cancel()
@@ -267,20 +264,43 @@ class MeishanPushClient(
                 if (isStale(parsedTime)) return
                 // 新文档未确认增量协议，缺少 busInfos 的帧不是“空车全量帧”，直接隔离。
                 val busInfos: JSONArray = content.optJSONArray("busInfos") ?: return
+                val areaId = frameArea(tag, busInfos) ?: return
+                val source = PushFrameSource(tag, areaId)
                 // 时间新鲜度去重（锁内只做判断与登记，重复帧由锁外返回丢弃）
                 val duplicated = synchronized(refsLock) {
-                    val previous = latestPushTimeByTag[tag]
+                    val previous = latestPushTimeByTag[source]
                     val isDuplicate = previous != null && parsedTime <= previous
-                    if (!isDuplicate) latestPushTimeByTag[tag] = parsedTime
+                    if (!isDuplicate) latestPushTimeByTag[source] = parsedTime
                     isDuplicate
                 }
                 if (duplicated) return
-                _frames.tryEmit(MeishanPushFrame(tag, pushTime, busInfos))
+                _frames.tryEmit(MeishanPushFrame(tag, pushTime, busInfos, areaId))
             }
             MeishanPushProtocol.MSG_HEARTBEAT,
             MeishanPushProtocol.MSG_CHANNEL_ACK -> Unit
             MeishanPushProtocol.MSG_REBUILD -> throw MeishanPushRebuildSignal()
         }
+    }
+
+    private fun frameArea(tag: String, buses: JSONArray): Int? {
+        val subscribedAreas = activeTags()
+            .filter { it.substringBeforeLast('_') == tag }
+            .mapNotNull { it.substringAfterLast('_').toIntOrNull() }
+            .toSet()
+        if (subscribedAreas.isEmpty()) return null
+        val explicitAreas = mutableSetOf<Int>()
+        for (index in 0 until buses.length()) {
+            val bus = buses.optJSONObject(index) ?: return null
+            bus.intOrNull("areaId")?.let { explicitAreas += it }
+        }
+        val area = when {
+            explicitAreas.size == 1 -> explicitAreas.single()
+            explicitAreas.isEmpty() -> subscribedAreas.singleOrNull()
+            else -> null
+        }
+        // Empty/missing-area frames for a colliding tag cannot be assigned safely.
+        // Ignore them; business freshness times out and existing HTTP polling takes over.
+        return area?.takeIf { it in subscribedAreas }
     }
 
     private fun parsePushTime(pushTime: String): Long? = runCatching {
@@ -310,13 +330,16 @@ class MeishanPushClient(
      * 旧实现先在锁外改快照再落写，watcher 与主读循环交错时会把滞留的旧集合
      * 覆盖到新集合之后，服务端订阅集合与客户端快照永久背离（直到重连）。
      */
-    private suspend fun writeSubscribe(socket: MeishanPushSocket, tags: Set<String>, force: Boolean = false) {
+    private suspend fun writeSubscribe(socket: MeishanPushSocket, force: Boolean = false): Set<String> =
         writeMutex.withLock {
-            if (!force && tags == subscribedSnapshot) return
-            socket.write(buildSubscribeFrame(tags))
-            subscribedSnapshot = tags
+            // Read references after obtaining the write lock, so queued writers cannot restore an old set.
+            val tags = activeTags()
+            if (force || tags != subscribedSnapshot) {
+                socket.write(buildSubscribeFrame(tags))
+                subscribedSnapshot = tags
+            }
+            tags
         }
-    }
 
     private fun buildSubscribeFrame(tags: Set<String>): String {
         val data = buildJsonArray { tags.forEach { add(JsonPrimitive(it)) } }.toString()

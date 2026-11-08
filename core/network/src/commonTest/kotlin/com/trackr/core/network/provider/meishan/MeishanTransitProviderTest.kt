@@ -310,6 +310,19 @@ class MeishanTransitProviderTest {
     }
 
     @Test
+    fun emptyFrameRunsAreIndependentForCollidingTagsInDifferentAreas() = runBlocking {
+        val provider = newProvider(MockBackend())
+        val first = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))
+        val second = first.copy(line = first.line.copy(lineId = "ms:2_1_0"))
+        assertNull(provider.applyPushFrame(first, pushFrame(time = "2026-11-04 18:00:00").copy(areaId = 1), expectedTag = "11_0"))
+        assertNull(provider.applyPushFrame(second, pushFrame(time = "2026-11-04 18:00:03").copy(areaId = 2), expectedTag = "11_0"))
+        assertNull(provider.applyPushFrame(first, pushFrame(time = "2026-11-04 18:00:06").copy(areaId = 1), expectedTag = "11_0"))
+        assertNull(provider.applyPushFrame(second, pushFrame(time = "2026-11-04 18:00:09").copy(areaId = 2), expectedTag = "11_0"))
+        assertNotNull(provider.applyPushFrame(first, pushFrame(time = "2026-11-04 18:00:12").copy(areaId = 1), expectedTag = "11_0"))
+        assertNull(provider.applyPushFrame(first, pushFrame(time = "2026-11-04 18:00:15").copy(areaId = 2), expectedTag = "11_0"))
+    }
+
+    @Test
     fun pushFrame_dropsBusesFromMismatchedArea() = runBlocking {
         val provider = newProvider(MockBackend())
         val base = provider.getLineDetail(city, LineDetailRequest(lineId = "ms:1_1_0"))

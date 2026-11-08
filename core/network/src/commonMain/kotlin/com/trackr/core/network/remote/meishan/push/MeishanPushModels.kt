@@ -13,7 +13,9 @@ data class MeishanPushFrame(
     val tag: String,
     /** 服务端推送时间 "yyyy-MM-dd HH:mm:ss"（北京时间），超 300 秒的帧被丢弃 */
     val pushTime: String,
-    val busInfos: JSONArray
+    val busInfos: JSONArray,
+    /** Region resolved from bus payloads or an unambiguous active subscription. */
+    val areaId: Int? = null
 )
 
 /** 连接状态。[ONLINE] 才有推送；[DISCONNECTED] 表示订阅还在但连不上（调用方应回退 HTTP 轮询） */

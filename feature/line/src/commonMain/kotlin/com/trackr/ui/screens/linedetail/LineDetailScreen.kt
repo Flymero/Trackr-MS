@@ -10,6 +10,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import com.trackr.core.designsystem.component.DataSourceBadge
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -842,16 +844,19 @@ internal fun LineSourceBadge(source: DataSourceType, isPushOnline: Boolean) {
     if (source != DataSourceType.MEISHAN) return
     // 出现/消失淡入淡出，与到站大字动画同款（§4.4：只包标签本身）
     AnimatedVisibility(
+        modifier = Modifier.wrapContentHeight(),
         visible = isPushOnline,
         enter = fadeIn(tween(durationMillis = 180)),
         exit = fadeOut(tween(durationMillis = 120))
     ) {
         DataSourceBadge(
             text = "TCP",
+            modifier = Modifier.widthIn(min = 38.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
             containerColor = DataSourceBadgeStyle.MEISHAN.contentColor,
             contentColor = DataSourceBadgeStyle.MEISHAN.containerColor,
-            shape = RoundedCornerShape(3.dp),
-            fontSize = 9.sp
+            shape = RoundedCornerShape(6.dp),
+            fontSize = 10.sp
         )
     }
 }

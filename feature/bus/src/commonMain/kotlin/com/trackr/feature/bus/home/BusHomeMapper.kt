@@ -5,6 +5,7 @@ import com.trackr.core.domain.arrival.ArrivalState
 import com.trackr.core.domain.arrival.ArrivalText
 import com.trackr.core.domain.arrival.ArrivalTone
 import com.trackr.core.domain.math.RouteProjectionMath
+import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LegPhase
@@ -261,7 +262,13 @@ internal object BusHomeMapper {
 
     fun nearbyCards(state: BusHomeUiState): List<NearbyStopUi> {
         val cityId = state.currentCity.cityId
-        return state.nearbyStops.map { stop ->
+        val stops = if (state.nearbyStops.any { it.source == DataSourceType.MEISHAN }) {
+            state.nearbyStops.sortedWith(
+                compareBy<NearbyStop> { it.source == DataSourceType.MEISHAN && it.lines.isEmpty() }
+                    .thenBy { it.distanceMeters ?: Int.MAX_VALUE }
+            )
+        } else state.nearbyStops
+        return stops.map { stop ->
             NearbyStopUi(
                 key = nearbyKey(stop),
                 name = stop.name,

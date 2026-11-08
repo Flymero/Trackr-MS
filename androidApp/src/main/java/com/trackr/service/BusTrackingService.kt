@@ -164,7 +164,9 @@ class BusTrackingService : LifecycleService() {
         onOperating: (LineOperatingState) -> Unit
     ): Result<(TrackingSession) -> TrackingEngine.Result> {
         val worker = workers[sessionId]
-        if (worker?.pushBindings[leg.lineId]?.online == true) {
+        val binding = worker?.pushBindings?.get(leg.lineId)
+        val revision = binding?.revision ?: 0L
+        if (binding?.online == true) {
             // 推送在线：本轮 HTTP 让位。恒等 reduce 走成功路径——不计失败、盖新鲜度戳、节奏不变。
             return Result.success { latest -> TrackingEngine.Result(latest) }
         }
@@ -184,6 +186,11 @@ class BusTrackingService : LifecycleService() {
                 lineNameHint = state.lineName,
                 directionHint = leg.direction
             )
+        }
+        val currentBinding = workers[sessionId]?.pushBindings?.get(leg.lineId)
+        if (currentBinding !== binding || (currentBinding?.revision ?: 0L) != revision) {
+            // Ignore HTTP snapshots, including failures, superseded by a push frame.
+            return Result.success { latest -> TrackingEngine.Result(latest) }
         }
         return detailResult.map { detail ->
             val fetchedWorker = workers[sessionId]
@@ -230,11 +237,14 @@ class BusTrackingService : LifecycleService() {
         val fetchGeneration = worker.generation
         var officialFailures = 0
         val fetched = mutableMapOf<String, LinePoll>()
+        val fetchedPushVersions = mutableMapOf<String, Pair<PushBinding?, Long>>()
         coroutineScope {
             val semaphore = Semaphore(4)
             missing.map { line ->
                 async {
                     semaphore.withPermit {
+                        val binding = worker.pushBindings[line.lineId]
+                        val revision = binding?.revision ?: 0L
                         val result = repository.getLineDetail(
                             city = city,
                             lineId = line.lineId,
@@ -245,12 +255,17 @@ class BusTrackingService : LifecycleService() {
                             directionHint = line.direction
                         )
                         if (!isCurrent(worker) || worker.generation != fetchGeneration) return@withPermit
+                        val currentBinding = worker.pushBindings[line.lineId]
+                        if (currentBinding !== binding || (currentBinding?.revision ?: 0L) != revision) return@withPermit
                         result.onSuccess { detail ->
                             // 补漏成功即接上推送订阅（TCP 恢复路径）
                             startPush(worker, detail, line.stopOrder, line.stopIdOnLine.ifBlank { target.stopId }, watch = true)
                             fetched[line.lineId] = LinePoll(detail.buses, fromLineDetail = true, stops = detail.stops)
+                            val fetchedBinding = worker.pushBindings[line.lineId]
+                            fetchedPushVersions[line.lineId] = fetchedBinding to (fetchedBinding?.revision ?: 0L)
                         }.onFailure { error ->
                             officialFailures++
+                            worker.watchBuffer.remove(line.lineId)
                             Log.w(TAG, "Failed to refresh official watch line", error)
                         }
                     }
@@ -268,11 +283,24 @@ class BusTrackingService : LifecycleService() {
             }
             watchPoller.poll(target, otherPlan, city).onSuccess { poll ->
                 fetched.putAll(poll.lines)
+                poll.requested.filterNot { it in poll.lines }.forEach { worker.watchBuffer.remove(it) }
                 onOperating(LineOperatingState.RUNNING)
-            }.onFailure { officialFailures++ }
+            }.onFailure {
+                officialFailures++
+                otherLines.forEach { worker.watchBuffer.remove(it.lineId) }
+            }
         } else {
             onOperating(LineOperatingState.RUNNING)
         }
+        if (!isCurrent(worker) || worker.generation != fetchGeneration) {
+            return Result.failure(CancellationException("watch round superseded"))
+        }
+        // Pushes may also arrive while fetching other lines; check again before recording HTTP data.
+        fetchedPushVersions.forEach { (lineId, version) ->
+            val binding = worker.pushBindings[lineId]
+            if (binding !== version.first || (binding?.revision ?: 0L) != version.second) fetched.remove(lineId)
+        }
+        trackingRepository.recordLineBuses(sessionId, generation, fetched.mapValues { it.value.buses })
         if (officialFailures > 0 && fetched.isEmpty()) {
             // 全部线都取不到才算失败：部分成功仍走成功路径更新数据（失败线由缓冲移除）
             return Result.failure(IllegalStateException("watch fetch failed for all lines"))
@@ -692,6 +720,7 @@ class BusTrackingService : LifecycleService() {
                             applyPushDetail(worker, fresh, binding.watch)
                         } else if (binding.online) {
                             binding.online = false
+                            if (binding.watch) worker.watchBuffer.remove(line.lineId)
                             trackingRepository.setPushOnline(worker.sessionId, binding.generation, line.lineId, false)
                             worker.refreshWakeup.trySend(Unit)
                         }
@@ -707,6 +736,7 @@ class BusTrackingService : LifecycleService() {
                         worker.refreshWakeup.trySend(Unit)
                     }
                     binding.online = false
+                    if (binding.watch && worker.pushBindings[line.lineId] === binding) worker.watchBuffer.remove(line.lineId)
                     trackingRepository.setPushOnline(worker.sessionId, binding.generation, line.lineId, false)
                 }
                 if (!isActive || !isCurrent(worker) || worker.pushBindings[line.lineId] !== binding) break

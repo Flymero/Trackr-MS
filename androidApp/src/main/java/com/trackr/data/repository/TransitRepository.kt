@@ -228,9 +228,10 @@ class TransitRepository(
     }
 
     private fun loadInitialEngineMode(): EngineMode {
-        // 眉山特化：默认掌上公交（小城市覆盖比车来了好）
-        val modeStr = initial.engineMode ?: EngineMode.MYGOLBS.name
-        return runCatching { EngineMode.valueOf(modeStr) }.getOrDefault(EngineMode.MYGOLBS)
+        // 未保存来源时，眉山 / 仁寿默认官方源；其他城市沿用掌上公交默认值。
+        val defaultMode = if (_selectedCity.value.isMeishanLocal) EngineMode.MEISHAN else EngineMode.MYGOLBS
+        val modeStr = initial.engineMode ?: defaultMode.name
+        return runCatching { EngineMode.valueOf(modeStr) }.getOrDefault(defaultMode)
     }
 
     override fun setEngineMode(mode: EngineMode) {
@@ -255,10 +256,13 @@ class TransitRepository(
         } else {
             city
         }
+        val previousCity = _selectedCity.value
         _selectedCity.value = effectiveCity
         _hasSavedCity.value = true
         // 眉山特化：官方源只覆盖眉山 / 仁寿，切到别的城市自动回退掌上公交
-        if (_engineMode.value == EngineMode.MEISHAN && !effectiveCity.isMeishanLocal) {
+        if (effectiveCity.isMeishanLocal && effectiveCity.cityName != previousCity.cityName) {
+            setEngineMode(EngineMode.MEISHAN)
+        } else if (_engineMode.value == EngineMode.MEISHAN && !effectiveCity.isMeishanLocal) {
             setEngineMode(EngineMode.MYGOLBS)
         }
         val str = json.encodeToString(effectiveCity)

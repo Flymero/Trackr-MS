@@ -315,6 +315,89 @@ class BusTrackingServiceTest {
     }
 
     @Test
+    fun officialWatchTogether_failedLineDoesNotConsumeAnotherLinesFreshFix() {
+        transit.settings.setAutoStopAfterBoarding(false)
+        val lines = listOf(
+            WatchLine("ms:1_1_0", "line-1", 5, source = DataSourceType.MEISHAN),
+            WatchLine("ms:1_2_0", "line-2", 5, source = DataSourceType.MEISHAN)
+        )
+        lines.forEachIndexed { index, line ->
+            val detail = officialAtStop("b$index")
+            transit.realtime.lineDetailsMap[line.lineId] = detail.copy(line = detail.line.copy(lineId = line.lineId))
+        }
+        val session = requireNotNull(trackingRepository.start(watchTarget().copy(
+            lines = lines, stopLat = 25.005, stopLng = 119.0
+        )))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("two official subscriptions") { push.subscriptions.size == 2 }
+            waitUntil("location collector") { location.activeCollectors > 0 }
+            location.emit(fixAtStop(20.0))
+            push.subscriptions.forEach { sub ->
+                sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, sub.base))
+            }
+            waitUntil("two boarding candidates") {
+                trackingRepository.session.value?.watchedLines?.all { it.candidateBusId != null } == true
+            }
+            val failed = push.subscriptions.first()
+            val healthy = push.subscriptions.last()
+            transit.realtime.lineDetailsMap.remove(failed.base.line.lineId)
+            transit.realtime.lineDetailResult = Result.failure(IllegalStateException("offline"))
+            failed.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            waitUntil("HTTP fallback failure") { trackingRepository.session.value?.refreshFailed == true }
+            val previousFix = requireNotNull(trackingRepository.session.value).watchedLines
+                .single { it.line.lineId == failed.base.line.lineId }.lastFixElapsedMillis
+
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+            val freshFix = fixAtStop(30.0)
+            location.emit(freshFix)
+            healthy.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, healthy.base))
+            waitUntil("healthy line consumes fresh fix") {
+                trackingRepository.session.value?.watchedLines?.single { it.line.lineId == healthy.base.line.lineId }
+                    ?.lastFixElapsedMillis == freshFix.elapsedMillis
+            }
+            assertEquals(previousFix, requireNotNull(trackingRepository.session.value).watchedLines
+                .single { it.line.lineId == failed.base.line.lineId }.lastFixElapsedMillis)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun officialWatchTogether_lateFallbackHttpDoesNotOverwriteRecoveredTcp() {
+        val lines = listOf(
+            WatchLine("ms:1_1_0", "line-1", 7, source = DataSourceType.MEISHAN),
+            WatchLine("ms:1_2_0", "line-2", 7, source = DataSourceType.MEISHAN)
+        )
+        lines.forEach { line ->
+            val detail = officialDetail()
+            transit.realtime.lineDetailsMap[line.lineId] = detail.copy(line = detail.line.copy(lineId = line.lineId))
+        }
+        val session = requireNotNull(trackingRepository.start(watchTarget().copy(lines = lines)))
+        val controller = startService(session.sessionId)
+        val releaseHttp = CompletableDeferred<Unit>()
+        try {
+            waitUntil("two subscriptions") { push.subscriptions.size == 2 }
+            push.subscriptions.forEach { sub ->
+                sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE,
+                    sub.base.copy(buses = listOf(LiveBus("http", "http", 5, segmentProgress = 0.4f)))))
+            }
+            waitUntil("two lines online") { trackingRepository.session.value?.watchedLines?.all { it.busOrder == 5 } == true }
+            val sub = push.subscriptions.first()
+            var fallbackStarted = false
+            transit.realtime.lineDetailHook = { id ->
+                if (id == sub.base.line.lineId) { fallbackStarted = true; releaseHttp.await() }
+            }
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            waitUntil("HTTP fallback suspended") { fallbackStarted }
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE,
+                sub.base.copy(buses = listOf(LiveBus("http", "http", 6, segmentProgress = 0.4f)))))
+            waitUntil("push recovered") { trackingRepository.session.value?.watchedLines?.single { it.line.lineId == sub.base.line.lineId }?.busOrder == 6 }
+            releaseHttp.complete(Unit)
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(500))
+            assertEquals(6, requireNotNull(trackingRepository.session.value).watchedLines.single { it.line.lineId == sub.base.line.lineId }.busOrder)
+        } finally { releaseHttp.complete(Unit); controller.destroy() }
+    }
+
+    @Test
     fun officialSessions_sameLineDifferentStops_stopOnlyReleasesSelectedSession() {
         transit.realtime.lineDetailResult = Result.success(officialDetail())
         val first = requireNotNull(trackingRepository.start(officialTarget()))
@@ -818,6 +901,54 @@ class BusTrackingServiceTest {
         assertTrue(notificationManager.activeNotifications.none {
             it.notification.channelId == LiveProgressNotifier.CHANNEL_ID_LIVE_PROGRESS
         })
+    }
+
+    @Test
+    fun watchTogether_httpOnly_manualBoardingOffersBothArrivedBuses() {
+        location.precisePermission = false
+        val target = watchTarget().copy(lines = watchTarget().lines.take(2))
+        transit.realtime.stopDetailResult = Result.success(listOf(stopWithLines().copy(lines = listOf(
+            stopStatus("L59", listOf(LiveBus("b1", "plate-1", 5, isArrived = true))),
+            stopStatus("L60", listOf(LiveBus("b2", "plate-2", 5, isArrived = true)))
+        ))))
+        val session = requireNotNull(trackingRepository.start(target))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("HTTP buses recorded") {
+                trackingRepository.session.value?.watchedLines?.all { it.isArrived } == true
+            }
+            trackingRepository.confirmBoarded(session.sessionId)
+            val choice = requireNotNull(trackingRepository.session.value?.boardChoice)
+            assertEquals(setOf("b1", "b2"), choice.options.map { it.busId }.toSet())
+            assertEquals(setOf("plate-1", "plate-2"), choice.options.map { it.plate }.toSet())
+            trackingRepository.chooseBoardedBus(busId = "b2", sessionId = session.sessionId)
+            assertEquals("L60", trackingRepository.session.value?.state?.lineId)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun officialWatchTogether_httpFallback_manualBoardingOffersBothArrivedBuses() {
+        location.precisePermission = false
+        val lines = listOf(
+            WatchLine("ms:1_1_0", "line-1", 7, source = DataSourceType.MEISHAN),
+            WatchLine("ms:1_2_0", "line-2", 7, source = DataSourceType.MEISHAN)
+        )
+        lines.forEachIndexed { index, line ->
+            val detail = officialDetail("b$index", 7)
+            transit.realtime.lineDetailsMap[line.lineId] = detail.copy(
+                line = detail.line.copy(lineId = line.lineId),
+                buses = detail.buses.map { it.copy(isArrived = true, hasAuthoritativeArrival = true) }
+            )
+        }
+        val session = requireNotNull(trackingRepository.start(watchTarget().copy(lines = lines)))
+        val controller = startService(session.sessionId)
+        try {
+            waitUntil("HTTP-only official arrivals") {
+                trackingRepository.session.value?.watchedLines?.all { it.isArrived } == true
+            }
+            trackingRepository.confirmBoarded(session.sessionId)
+            assertEquals(setOf("b0", "b1"), requireNotNull(trackingRepository.session.value?.boardChoice).options.map { it.busId }.toSet())
+        } finally { controller.destroy() }
     }
 
     @Test

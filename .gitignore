@@ -57,14 +57,15 @@ captures/
 ehthumbs.db
 Thumbs.db
 
-<<<<<<< HEAD
 # ZCode session tooling
 .zcode/
-=======
 # Xcode local state and build products
 xcuserdata/
 *.xcuserstate
 iosApp/DerivedData/
 iosApp/Configuration/Local.xcconfig
 iosApp/Pods/
->>>>>>> upstream/main
+
+# Local review and investigation notes
+/docs/fork-bug-fixes-20261109.md
+/docs/meishan-followup-20261109.md

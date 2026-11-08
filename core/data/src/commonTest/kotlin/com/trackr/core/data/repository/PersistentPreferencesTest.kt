@@ -35,6 +35,22 @@ class PersistentPreferencesTest {
     }
 
     @Test
+    fun officialModeSurvivesLocalCityChangesButDowngradesOutsideItsArea() = runTest {
+        val store = MemoryPreferencesStore()
+        val writer = SerialWriter(backgroundScope)
+        val settings = DefaultSettingsRepository.create(store, writer)
+        settings.selectCity(TransitCity(cityId = "ms", cityName = "\u7709\u5c71"))
+        settings.setEngineMode(EngineMode.MEISHAN)
+        settings.selectCity(TransitCity(cityId = "rs", cityName = "\u4ec1\u5bff"))
+        assertEquals(EngineMode.MEISHAN, settings.engineMode.value)
+
+        settings.selectCity(TransitCity(cityId = "001", cityName = "\u5317\u4eac"))
+        assertEquals(EngineMode.MYGOLBS, settings.engineMode.value)
+        settings.flushWrites()
+        assertEquals(EngineMode.MYGOLBS, DefaultSettingsRepository.create(store, writer).engineMode.value)
+    }
+
+    @Test
     fun malformedValuesFallBackToUsableDefaults() = runTest {
         val store = MemoryPreferencesStore(TransitLocalSnapshot(
             selectedCityJson = "{broken", engineMode = "unknown", themeColorsJson = "not json",
@@ -46,6 +62,29 @@ class PersistentPreferencesTest {
         assertEquals(ThemeMode.System, settings.themeMode.value)
         assertEquals(1, settings.nearbyStopsCount.value)
         assertEquals(AlertThreshold.MAX_STOPS, settings.alertThresholdStops.value)
+    }
+
+    @Test
+    fun localCitiesDefaultToOfficialAndRetainExplicitChoices() = runTest {
+        val writer = SerialWriter(backgroundScope)
+        for (name in listOf("\u7709\u5c71", "\u4ec1\u5bff")) {
+            val city = TransitCity(cityId = "", cityName = name)
+            val store = MemoryPreferencesStore(TransitLocalSnapshot(
+                selectedCityJson = kotlinx.serialization.json.Json.encodeToString(city)
+            ))
+            val settings = DefaultSettingsRepository.create(store, writer)
+            assertEquals(EngineMode.MEISHAN, settings.engineMode.value)
+            settings.setEngineMode(EngineMode.MYGOLBS)
+            settings.selectCity(city)
+            settings.flushWrites()
+            assertEquals(EngineMode.MYGOLBS, DefaultSettingsRepository.create(store, writer).engineMode.value)
+        }
+        val settings = DefaultSettingsRepository.create(MemoryPreferencesStore(), writer)
+        assertEquals(EngineMode.CHELAILE, settings.engineMode.value)
+        settings.selectCity(TransitCity("", "\u7709\u5c71"))
+        assertEquals(EngineMode.MEISHAN, settings.engineMode.value)
+        settings.selectCity(TransitCity("", "\u4ec1\u5bff"))
+        assertEquals(EngineMode.MEISHAN, settings.engineMode.value)
     }
 
     @Test

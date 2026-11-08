@@ -136,6 +136,7 @@ class DefaultMeishanPushRepository(
             client.acquire(tag)
             acquired = true
             var businessOnline = false
+            var lastDetail = base
             var lastValidAt = monotonicClock.elapsedMillis()
             while (true) {
                 val elapsed = (monotonicClock.elapsedMillis() - lastValidAt).coerceAtLeast(0L)
@@ -156,6 +157,7 @@ class DefaultMeishanPushRepository(
                     }
                     is MeishanPushEvent.Frame -> {
                         if (event.value.tag != expectedTag || client.state.value != MeishanPushState.ONLINE) continue
+                        if (event.value.areaId != null && event.value.areaId != areaId) continue
                         if ((0 until event.value.busInfos.length()).any { index ->
                             event.value.busInfos.optJSONObject(index)?.optInt("areaId", areaId) != areaId
                         }) continue
@@ -173,6 +175,17 @@ class DefaultMeishanPushRepository(
                             null
                         }
                         if (detail != null) {
+                            if (detail.buses.isEmpty() && detail.idleBuses.isEmpty() &&
+                                (lastDetail.buses.isNotEmpty() || lastDetail.idleBuses.isNotEmpty())) {
+                                // Empty push snapshots are not reliable evidence that all buses vanished.
+                                // Resume HTTP immediately to confirm; keep the visible snapshot meanwhile.
+                                if (businessOnline) {
+                                    businessOnline = false
+                                    trySend(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+                                }
+                                continue
+                            }
+                            lastDetail = detail
                             lastValidAt = monotonicClock.elapsedMillis()
                             businessOnline = true
                             trySend(MeishanPushUpdate(MeishanPushAvailability.ONLINE, detail))

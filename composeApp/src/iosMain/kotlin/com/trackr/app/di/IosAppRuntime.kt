@@ -11,6 +11,8 @@ import com.trackr.core.datastore.*
 import com.trackr.core.domain.platform.*
 import com.trackr.core.network.provider.chelaile.ChelaileTransitProvider
 import com.trackr.core.network.provider.mygolbs.MygolbsTransitProvider
+import com.trackr.core.network.provider.meishan.MeishanTransitProvider
+import com.trackr.core.network.remote.meishan.MeishanTransitClient
 import com.trackr.core.network.remote.amap.AmapTransitApiClient
 import com.trackr.core.network.remote.chelaile.ChelaileApiClient
 import com.trackr.core.network.remote.mygolbs.MygolbsApiClient
@@ -71,9 +73,12 @@ internal class IosAppRuntime(val module: Module, val resolveFavorite: (String) -
                             DataStoreAmapKeyStore(createPreferencesDataStore("$privateDir/trackr_amap_keys.preferences_pb", scope)), writer, defaults
                         )
                         val locationStore = IosUserLocationStore()
+                        val meishanClient = MeishanTransitClient(http, IosMonotonicClock)
+                        val meishanProvider = MeishanTransitProvider(meishanClient, monotonicClock = IosMonotonicClock)
                         val coordinator = TransitProviderCoordinator(
                             ChelaileTransitProvider(ChelaileApiClient(http, monotonicClock = IosMonotonicClock), IosMonotonicClock),
-                            MygolbsTransitProvider(MygolbsApiClient(http, clock = IosMonotonicClock))
+                            MygolbsTransitProvider(MygolbsApiClient(http, clock = IosMonotonicClock)),
+                            meishanProvider = meishanProvider
                         )
                         val tracking = DefaultTrackingRepository(
                             DataStoreTrackingSessionStore(createTrackingSessionDataStore("$privateDir/tracking_session.json", scope)),
@@ -126,6 +131,7 @@ internal class IosAppRuntime(val module: Module, val resolveFavorite: (String) -
                             error("Injected startup failure after opening stores")
                         }
                         IosAppRuntime(module {
+                            includes(meishanHttpOnlyModule(meishanClient, meishanProvider))
                             single<SettingsRepository> { settings }
                             single<SearchHistoryRepository> { history }
                             single<FavoritesRepository> { favorites }

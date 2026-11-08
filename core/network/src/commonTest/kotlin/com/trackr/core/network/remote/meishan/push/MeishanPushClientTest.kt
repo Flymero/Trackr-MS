@@ -1,5 +1,8 @@
 package com.trackr.core.network.remote.meishan.push
 
+import com.trackr.core.network.json.JSONArray
+import com.trackr.core.network.json.JSONObject
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -43,6 +46,7 @@ class MeishanPushClientTest {
         var connectFailures = 0
         var autoAck = true
         var failHeartbeat = false
+        var subscribeHook: (suspend (String) -> Unit)? = null
         val readTimeouts = mutableListOf<Long>()
         @Volatile var closed = false
 
@@ -59,6 +63,7 @@ class MeishanPushClientTest {
 
         override suspend fun write(text: String) {
             if (failHeartbeat && text.contains("\"msgType\":1")) throw IOException("heartbeat failed")
+            if (text.contains("\"msgType\":2")) subscribeHook?.invoke(text)
             synchronized(sentLock) { sent += text }
             if (autoAck && text.contains("\"msgType\":3")) {
                 channel.trySend("""{"msgType":4,"sourceType":0,"clientId":"server"}""")
@@ -74,12 +79,12 @@ class MeishanPushClientTest {
         fun simulateDisconnect() = close()
     }
 
-    private fun serverPush(tag: String, pushTime: String, plate: String = "川Z10091D"): String {
+    private fun serverPush(tag: String, pushTime: String, areaId: Int = 1, empty: Boolean = false, plate: String = "川Z10091D"): String {
         val content = buildJsonObject {
             put("tag", JsonPrimitive(tag))
             put("pushTime", JsonPrimitive(pushTime))
             put("busInfos", buildJsonArray {
-                add(buildJsonObject {
+                if (!empty) add(buildJsonObject {
                     put("b_id", JsonPrimitive(0))
                     put("l_copy_id", JsonPrimitive(11))
                     put("b_plate_num", JsonPrimitive(plate))
@@ -89,7 +94,7 @@ class MeishanPushClientTest {
                     put("b_latitude", JsonPrimitive(30.065))
                     put("b_longitude", JsonPrimitive(103.825))
                     put("b_sd", JsonPrimitive(25.0))
-                    put("areaId", JsonPrimitive(1))
+                    put("areaId", JsonPrimitive(areaId))
                 })
             })
         }.toString()
@@ -152,6 +157,56 @@ class MeishanPushClientTest {
             external.cancel()
             runCurrent()
         }
+    }
+
+    @Test
+    fun sameTimestampForCollidingAreaTags_emitsBothRegions() = runTest {
+        val fake = FakePushSocket()
+        val (client, scope, _) = newClient(fake)
+        try {
+            client.acquire("11_0_1")
+            client.acquire("11_0_2")
+            runCurrent()
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:00", areaId = 1))
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:00", areaId = 2))
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:00", areaId = 1))
+            runCurrent()
+            assertEquals(listOf(1, 2), client.frames.replayCache.map { it.areaId })
+        } finally { client.cancel(); scope.cancel() }
+    }
+
+    @Test
+    fun wrongRegionDoesNotPoisonValidFrameAtSameTimestamp() = runTest {
+        val fake = FakePushSocket()
+        val (client, scope, _) = newClient(fake)
+        try {
+            client.acquire("11_0_1")
+            runCurrent()
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:00", areaId = 2))
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:00", areaId = 1))
+            runCurrent()
+            assertEquals(listOf(1), client.frames.replayCache.map { it.areaId })
+        } finally { client.cancel(); scope.cancel() }
+    }
+
+    @Test
+    fun emptyCollidingTagIsIgnoredButSingleRegionEmptyFrameIsAccepted() = runTest {
+        val fake = FakePushSocket()
+        val (client, scope, _) = newClient(fake)
+        try {
+            client.acquire("11_0_1")
+            client.acquire("11_0_2")
+            runCurrent()
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:00", empty = true))
+            runCurrent()
+            assertTrue(client.frames.replayCache.isEmpty())
+            client.release("11_0_2")
+            runCurrent()
+            fake.serverSend(serverPush("11_0", "2026-11-05 18:00:00", empty = true))
+            runCurrent()
+            assertEquals(1, client.frames.replayCache.single().areaId)
+            assertEquals(0, client.frames.replayCache.single().busInfos.length())
+        } finally { client.cancel(); scope.cancel() }
     }
 
     @Test
@@ -286,6 +341,47 @@ class MeishanPushClientTest {
             client.cancel()
             external.cancel()
             runCurrent()
+        }
+    }
+
+    private fun subscriptionTags(text: String): Set<String> {
+        val data = JSONArray(JSONObject(text.removeSuffix(MeishanPushProtocol.DELIMITER)).optString("data"))
+        return (0 until data.length()).map { data.optString(it) }.toSet()
+    }
+
+    @Test
+    fun subscriptionChangesDuringBlockedWrite_areNotLostByReader() = runTest {
+        val fake = FakePushSocket()
+        val (client, scope, _) = newClient(fake)
+        val releaseSubscribe = CompletableDeferred<Unit>()
+        try {
+            client.acquire("11_0_1")
+            runCurrent()
+            var blocked = false
+            fake.subscribeHook = { text ->
+                when (subscriptionTags(text)) {
+                    setOf("11_0_1", "12_0_1") -> {
+                        blocked = true
+                        releaseSubscribe.await()
+                    }
+                    setOf("12_0_1") -> client.acquire("13_0_1")
+                }
+            }
+            client.acquire("12_0_1")
+            runCurrent()
+            assertTrue(blocked)
+            client.release("11_0_1")
+            fake.serverSend("{\"msgType\":1}")
+            runCurrent()
+            releaseSubscribe.complete(Unit)
+            runCurrent()
+
+            val lastSubscription = fake.sent.last { it.contains("\"msgType\":2") }
+            assertEquals(setOf("12_0_1", "13_0_1"), subscriptionTags(lastSubscription))
+        } finally {
+            releaseSubscribe.complete(Unit)
+            client.cancel()
+            scope.cancel()
         }
     }
 

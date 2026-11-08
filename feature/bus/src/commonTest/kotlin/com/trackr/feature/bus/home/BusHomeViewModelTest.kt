@@ -166,6 +166,37 @@ class BusHomeViewModelTest {
     }
 
     @Test
+    fun reselectCity_nearbyFailureKeepsExistingStops() = runTest(main.dispatcher) {
+        val stops = listOf(NearbyStop(stopId = "old-stop", name = "旧站"))
+        fakeRepository.nearbyStopsResult = Result.success(stops)
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals(stops, viewModel.uiState.value.nearbyStops)
+
+        fakeRepository.nearbyStopsResult = Result.failure(IllegalStateException("offline"))
+        viewModel.selectCity(shanghai)
+        testScheduler.runCurrent()
+
+        assertEquals(stops, viewModel.uiState.value.nearbyStops)
+    }
+
+    @Test
+    fun changeCity_nearbyFailureClearsPreviousCityStops() = runTest(main.dispatcher) {
+        val stops = listOf(NearbyStop(stopId = "old-stop", name = "旧站"))
+        fakeRepository.nearbyStopsResult = Result.success(stops)
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals(stops, viewModel.uiState.value.nearbyStops)
+
+        fakeRepository.nearbyStopsResult = Result.failure(IllegalStateException("offline"))
+        viewModel.selectCity(beijing)
+        testScheduler.runCurrent()
+
+        assertEquals(beijing, viewModel.uiState.value.currentCity)
+        assertTrue(viewModel.uiState.value.nearbyStops.isEmpty())
+    }
+
+    @Test
     fun testFilterCities_queryMatchesCityNameAndPinyin() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
@@ -557,6 +588,39 @@ class BusHomeViewModelTest {
 
         assertEquals(callsBefore, fakeRepository.nearbyStopsCalls.size)
         viewModel.setPollingActive(false)
+    }
+
+    @Test
+    fun failedLocationReusesLastGpsWithinOfficialCity() = runTest(main.dispatcher) {
+        val city = TransitCity("ms", "\u7709\u5c71")
+        fakeRepository = HomeFakes(city)
+        fakeRepository.settings.setEngineMode(EngineMode.MEISHAN)
+        fakeRepository.resolveCityResult = Result.success(city)
+        fakeRepository.userLocationStore.updateUserLocation(30.063, 103.836)
+        fakeRepository.nearbyStopsResult = Result.success(listOf(NearbyStop("previous", "previous")))
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals(30.063, viewModel.uiState.value.currentLat)
+        assertEquals(103.836, viewModel.uiState.value.currentLng)
+        assertEquals(LocationIssue.Unavailable, viewModel.uiState.value.locationIssue)
+        viewModel.selectCity(city)
+        testScheduler.runCurrent()
+        assertEquals(30.063, viewModel.uiState.value.currentLat)
+        assertEquals(103.836, viewModel.uiState.value.currentLng)
+    }
+
+    @Test
+    fun failedLocationOutsideOfficialCityFallsBackToSelectedCityCenter() = runTest(main.dispatcher) {
+        val city = TransitCity("rs", "\u4ec1\u5bff")
+        fakeRepository = HomeFakes(city)
+        fakeRepository.settings.setEngineMode(EngineMode.MEISHAN)
+        fakeRepository.userLocationStore.updateUserLocation(31.2, 121.4)
+        fakeRepository.resolveCityResult = Result.success(shanghai)
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        val center = ProvinceCityCatalog.getCityCenterCoordinates(city.cityName)
+        assertEquals(center.first, viewModel.uiState.value.currentLat)
+        assertEquals(center.second, viewModel.uiState.value.currentLng)
     }
 
     @Test

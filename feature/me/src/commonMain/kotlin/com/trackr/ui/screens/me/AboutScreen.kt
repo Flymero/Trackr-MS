@@ -197,7 +197,7 @@ fun AboutScreen(
                     }
 
                     LinkRow(
-                        title = "GitHub",
+                        title = "上游 GitHub",
                         value = "5151561/Trackr",
                         onClick = { uriHandler.openUri(PROJECT_URL) }
                     )

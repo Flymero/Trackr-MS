@@ -686,6 +686,49 @@ class LineDetailViewModelTest {
     }
 
     @Test
+    fun meishanPush_emptyManualHttpKeepsOnlineVehiclesButConfirmedOfflineEmptyClears() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, realtime, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            val session = push.subscriptions.single()
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, session.base))
+            testScheduler.runCurrent()
+            fakeRepository.lineDetailResult = Result.success(session.base.copy(buses = emptyList(), idleBuses = emptyList()))
+            viewModel.refreshNow(fromPull = true)
+            testScheduler.runCurrent()
+            assertTrue(viewModel.uiState.value.isPushOnline)
+            assertEquals(session.base.buses, viewModel.uiState.value.live?.buses)
+            assertEquals(2, realtime.lineDetailTargetOrders.size)
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.DISCONNECTED))
+            testScheduler.runCurrent()
+            assertFalse(viewModel.uiState.value.isPushOnline)
+            assertTrue(viewModel.uiState.value.live!!.buses.isEmpty())
+        }
+    }
+
+    @Test
+    fun meishanPush_changedHttpStopTableDoesNotReuseOldOnlineVehicles() = runTest(main.dispatcher) {
+        withPushViewModel { viewModel, _, push ->
+            viewModel.onScreenResumed()
+            testScheduler.runCurrent()
+            val session = push.subscriptions.single()
+            session.updates.emit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, session.base))
+            testScheduler.runCurrent()
+            val changed = session.base.copy(
+                buses = emptyList(), idleBuses = emptyList(),
+                stops = session.base.stops.map { if (it.order == 2) it.copy(name = "updated-stop") else it }
+            )
+            fakeRepository.lineDetailResult = Result.success(changed)
+            viewModel.refreshNow(fromPull = true)
+            testScheduler.runCurrent()
+            assertEquals(changed.stops, viewModel.uiState.value.static?.stops)
+            assertTrue(viewModel.uiState.value.live!!.buses.isEmpty())
+            assertFalse(viewModel.uiState.value.isPushOnline)
+            assertEquals(2, push.subscriptions.size)
+        }
+    }
+
+    @Test
     fun meishanPush_newTcpDetail_isNotOverwrittenByLateHttpResponse() = runTest(main.dispatcher) {
         withPushViewModel { viewModel, realtime, push ->
             viewModel.onScreenResumed()
