@@ -29,6 +29,18 @@ class SettingsMigrationTest {
     }
 
     @Test
+    fun settings_lastHomeGpsImportsWithoutDeletingLegacyLocation() = runBlocking {
+        val saved = """{"first":30.063,"second":103.836}"""
+        val legacy = LegacyFixtures.prefs(context, LegacyPrefs.TRANSIT)
+        legacy.edit().putString("last_user_location_json", saved).commit()
+        val migration = LegacySettingsMigration(context, generation = 0)
+        val result = migration.migrate(emptyPreferences())
+        migration.cleanUp()
+        assertEquals(saved, result[SettingsKeys.LAST_USER_LOCATION_JSON])
+        assertEquals(saved, legacy.getString("last_user_location_json", null))
+    }
+
+    @Test
     fun settings_copiedWithTypes_andLegacyKept() = runBlocking {
         LegacyFixtures.writeAll(context)
         val before = LegacyFixtures.snapshot(context)

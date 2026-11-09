@@ -355,7 +355,7 @@ class FakeRealtimeRepository(
     val nearbyStopsLimits: MutableList<Int> = mutableListOf()
 
     /** 可按查询坐标返回不同结果；为 null 时统一返回 [nearbyStopsResult] */
-    var nearbyStopsResultProvider: ((TransitCity, Double, Double) -> Result<List<NearbyStop>>)? = null
+    var nearbyStopsResultProvider: (suspend (TransitCity, Double, Double) -> Result<List<NearbyStop>>)? = null
 
     override suspend fun getSupportedCities(forceRefresh: Boolean): Result<List<TransitCity>> = supportedCitiesResult
 
@@ -449,9 +449,13 @@ class FakeLocationRepository(
     /** 每次 [bestFix] 调用时传的 forceFresh */
     val bestFixCalls: MutableList<Boolean> = mutableListOf()
 
+    var bestFixResponder: (suspend (Boolean) -> UserFix?)? = null
+
     override suspend fun bestFix(forceFresh: Boolean): UserFix? {
         bestFixCalls += forceFresh
-        return bestFixResult?.also { _latest.value = it }
+        val responder = bestFixResponder
+        val fix = if (responder != null) responder(forceFresh) else bestFixResult
+        return fix?.also { _latest.value = it }
     }
 
     override fun lastKnown(maxAgeMillis: Long): UserFix? = lastKnownResult

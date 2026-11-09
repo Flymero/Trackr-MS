@@ -52,6 +52,7 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
         // 旧版 hasSavedCity = prefs.contains(...)；存的是空串时也算存过
         selectedCityJson = if (prefs.contains(KEY_SELECTED_CITY)) prefs.getString(KEY_SELECTED_CITY, null).orEmpty() else null,
         // D1：旧的聚合配置按和新存储导入同样的规则落成主数据源（只读，不改旧文件）
+        lastUserLocationJson = prefs.getString(KEY_LAST_USER_LOCATION, null),
         engineMode = LegacyDataSource.resolve(
             engineMode = prefs.getString(KEY_ENGINE_MODE, null),
             aggregatedPriority = prefs.getString(KEY_AGGREGATED_PRIORITY, null)
@@ -70,6 +71,10 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
         fontScalePromptDismissed = if (prefs.contains(KEY_FONT_SCALE_PROMPT_DISMISSED)) prefs.getBoolean(KEY_FONT_SCALE_PROMPT_DISMISSED, false) else null,
         searchHistory = decodeOrEmpty(prefs.getString(KEY_SEARCH_HISTORY, null))
     )
+
+    override suspend fun saveLastUserLocationJson(json: String) {
+        prefs.edit().putString(KEY_LAST_USER_LOCATION, json).apply()
+    }
 
     override suspend fun saveSelectedCityJson(json: String) {
         prefs.edit().putString(KEY_SELECTED_CITY, json).apply()
@@ -144,6 +149,7 @@ class SharedPrefsTransitStore(private val prefs: SharedPreferences) : TransitLoc
     companion object {
         const val PREFS_NAME = "trackr_prefs"
         private const val KEY_SELECTED_CITY = "selected_city_json"
+        private const val KEY_LAST_USER_LOCATION = "last_user_location_json"
         private const val KEY_ENGINE_MODE = "engine_mode"
         private const val KEY_AGGREGATED_PRIORITY = "aggregated_source_priority"
         private const val KEY_TRANSIT_CODE_PROVIDER = "preferred_transit_code_provider"

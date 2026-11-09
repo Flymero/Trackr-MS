@@ -75,7 +75,7 @@ class FakeTransitRepository private constructor(
     val nearbyStopsCalls: MutableList<Triple<TransitCity, Double, Double>> get() = realtime.nearbyStopsCalls
 
     /** 可按查询坐标返回不同结果；为 null 时统一返回 [nearbyStopsResult] */
-    var nearbyStopsResultProvider: ((TransitCity, Double, Double) -> Result<List<NearbyStop>>)? by realtime::nearbyStopsResultProvider
+    var nearbyStopsResultProvider: (suspend (TransitCity, Double, Double) -> Result<List<NearbyStop>>)? by realtime::nearbyStopsResultProvider
 
     private val _userLocation = MutableStateFlow<Pair<Double, Double>?>(null)
     override val userLocation: StateFlow<Pair<Double, Double>?> = _userLocation.asStateFlow()

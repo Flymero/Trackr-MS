@@ -135,14 +135,23 @@ class TransitRepository(
     private val _fontScalePromptDismissed = MutableStateFlow(initial.fontScalePromptDismissed ?: false)
     override val fontScalePromptDismissed: StateFlow<Boolean> = _fontScalePromptDismissed.asStateFlow()
 
-    private val _userLocation = MutableStateFlow<Pair<Double, Double>?>(null)
+    private val _userLocation = MutableStateFlow(
+        initial.lastUserLocationJson?.let { saved ->
+            runCatching { json.decodeFromString<Pair<Double, Double>>(saved) }.getOrNull()
+                ?.takeIf { validUserLocation(it.first, it.second) }
+        }
+    )
     override val userLocation: StateFlow<Pair<Double, Double>?> = _userLocation.asStateFlow()
 
     override fun updateUserLocation(lat: Double, lng: Double) {
-        if (lat > 0.0 && lng > 0.0) {
+        if (validUserLocation(lat, lng)) {
             _userLocation.value = Pair(lat, lng)
+            writer.enqueue { store.saveLastUserLocationJson(json.encodeToString(lat to lng)) }
         }
     }
+
+    private fun validUserLocation(lat: Double, lng: Double): Boolean =
+        lat > 0.0 && lat <= 90.0 && lng > 0.0 && lng <= 180.0
 
     /** 实时查询部分（commonMain） */
     private val realtime = DefaultRealtimeRepository(

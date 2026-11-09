@@ -38,6 +38,7 @@ object TrackrDataStoreFiles {
  */
 object SettingsKeys {
     val SELECTED_CITY_JSON = stringPreferencesKey("selected_city_json")
+    val LAST_USER_LOCATION_JSON = stringPreferencesKey("last_user_location_json")
     val ENGINE_MODE = stringPreferencesKey("engine_mode")
     val PREFERRED_TRANSIT_CODE_PROVIDER = stringPreferencesKey("preferred_transit_code_provider")
 

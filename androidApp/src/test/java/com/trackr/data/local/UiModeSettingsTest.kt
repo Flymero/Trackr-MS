@@ -81,6 +81,36 @@ class UiModeSettingsTest {
     )
 
     @Test
+    fun corruptOrInvalidSavedGpsIsIgnored() = runBlocking {
+        for (legacy in listOf(false, true)) {
+            val backend = open(forceLegacy = legacy)
+            for (saved in listOf("broken-json", """{"first":120.0,"second":103.836}""")) {
+                backend.transitStore.saveLastUserLocationJson(saved)
+                assertEquals(null, repo(backend).userLocation.value)
+            }
+            closeAll()
+        }
+    }
+
+    @Test
+    fun lastGpsSurvivesProcessRecreationWithBothStores() = runBlocking {
+        for (legacy in listOf(false, true)) {
+            val first = repo(open(forceLegacy = legacy))
+            first.updateUserLocation(30.063, 103.836)
+            first.flushWrites()
+            closeAll()
+            val recreated = repo(open(forceLegacy = legacy))
+            assertEquals(30.063 to 103.836, recreated.userLocation.value)
+            recreated.updateUserLocation(Double.NaN, 103.836)
+            recreated.updateUserLocation(120.0, 103.836)
+            recreated.flushWrites()
+            closeAll()
+            assertEquals(30.063 to 103.836, repo(open(forceLegacy = legacy)).userLocation.value)
+            closeAll()
+        }
+    }
+
+    @Test
     fun officialCityDefaultsAndExplicitSourceSurviveReopening() = runBlocking {
         val backend = open()
         backend.transitStore.saveSelectedCityJson(Json.encodeToString(TransitCity("ms", "\u7709\u5c71")))

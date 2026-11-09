@@ -110,6 +110,7 @@ class PersistentPreferencesTest {
 private class MemoryPreferencesStore(var snapshot: TransitLocalSnapshot = TransitLocalSnapshot()) : TransitLocalStore {
     private var migrationVersion = 0
     override suspend fun load() = snapshot
+    override suspend fun saveLastUserLocationJson(json: String) { snapshot = snapshot.copy(lastUserLocationJson = json) }
     override suspend fun saveSelectedCityJson(json: String) { snapshot = snapshot.copy(selectedCityJson = json) }
     override suspend fun saveEngineMode(name: String) { snapshot = snapshot.copy(engineMode = name) }
     override suspend fun saveTransitCodeProvider(id: String) { snapshot = snapshot.copy(transitCodeProvider = id) }

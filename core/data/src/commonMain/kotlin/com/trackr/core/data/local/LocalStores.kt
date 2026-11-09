@@ -29,6 +29,8 @@ import kotlinx.coroutines.sync.withLock
 data class TransitLocalSnapshot(
     /** 当前城市（TransitCity 的 JSON）；为 null 表示从没选过城市 */
     val selectedCityJson: String? = null,
+    /** Last successful home GPS (Pair JSON); never a city-center fallback. */
+    val lastUserLocationJson: String? = null,
     /** 数据源（`EngineMode` 的名字）；旧的聚合配置在读出时已换成主数据源 */
     val engineMode: String? = null,
     val transitCodeProvider: String? = null,
@@ -55,6 +57,7 @@ data class TransitLocalSnapshot(
 /** TransitRepository 的存储：设置（旧 `trackr_prefs` / 新 `trackr_settings`）、搜索历史 */
 interface TransitLocalStore {
     suspend fun load(): TransitLocalSnapshot
+    suspend fun saveLastUserLocationJson(json: String)
     suspend fun saveSelectedCityJson(json: String)
     suspend fun saveEngineMode(name: String)
     suspend fun saveTransitCodeProvider(id: String)

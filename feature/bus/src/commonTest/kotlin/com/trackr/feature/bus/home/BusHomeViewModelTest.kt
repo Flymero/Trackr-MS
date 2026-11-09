@@ -67,7 +67,7 @@ private class HomeFakes(city: TransitCity, val favoritesRepo: FakeFavoritesRepos
     var nearbyStopsResult: Result<List<NearbyStop>> by realtime::nearbyStopsResult
     var resolveCityResult: Result<TransitCity?>? by realtime::resolveCityResult
     val nearbyStopsCalls get() = realtime.nearbyStopsCalls
-    var nearbyStopsResultProvider: ((TransitCity, Double, Double) -> Result<List<NearbyStop>>)? by realtime::nearbyStopsResultProvider
+    var nearbyStopsResultProvider: (suspend (TransitCity, Double, Double) -> Result<List<NearbyStop>>)? by realtime::nearbyStopsResultProvider
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -588,6 +588,88 @@ class BusHomeViewModelTest {
 
         assertEquals(callsBefore, fakeRepository.nearbyStopsCalls.size)
         viewModel.setPollingActive(false)
+    }
+
+
+
+    @Test
+    fun officialStartupUsesSavedGpsWhileLocationAttemptIsPending() = runTest(main.dispatcher) {
+        val city = TransitCity("ms", "\u7709\u5c71")
+        fakeRepository = HomeFakes(city)
+        fakeRepository.settings.setEngineMode(EngineMode.MEISHAN)
+        fakeRepository.userLocationStore.updateUserLocation(30.063, 103.836)
+        fakeRepository.location.systemLocationEnabled = false
+        fakeRepository.resolveCityResult = Result.failure(IllegalStateException("offline"))
+        val locationAttempt = kotlinx.coroutines.CompletableDeferred<Unit>()
+        fakeRepository.location.bestFixResponder = { locationAttempt.await(); null }
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertTrue(fakeRepository.nearbyStopsCalls.isNotEmpty())
+        assertTrue(fakeRepository.nearbyStopsCalls.all { it.second == 30.063 && it.third == 103.836 })
+        locationAttempt.complete(Unit)
+        testScheduler.runCurrent()
+        assertTrue(fakeRepository.nearbyStopsCalls.all { it.second == 30.063 && it.third == 103.836 })
+        assertEquals(LocationIssue.ServiceDisabled, viewModel.uiState.value.locationIssue)
+    }
+
+    @Test
+    fun failedCityResolutionDoesNotReplaceSavedGpsWithCenter() = runTest(main.dispatcher) {
+        val city = TransitCity("ms", "\u7709\u5c71")
+        fakeRepository = HomeFakes(city)
+        fakeRepository.settings.setEngineMode(EngineMode.MEISHAN)
+        fakeRepository.userLocationStore.updateUserLocation(30.063, 103.836)
+        fakeRepository.resolveCityResult = Result.failure(IllegalStateException("offline geocoder"))
+        fakeRepository.nearbyStopsResult = Result.success(emptyList())
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals(30.063, viewModel.uiState.value.currentLat)
+        assertEquals(103.836, viewModel.uiState.value.currentLng)
+        assertEquals(30.063, fakeRepository.nearbyStopsCalls.last().second)
+        assertEquals(LocationIssue.Unavailable, viewModel.uiState.value.locationIssue)
+        viewModel.selectCity(city)
+        testScheduler.runCurrent()
+        assertEquals(30.063, viewModel.uiState.value.currentLat)
+        assertEquals(103.836, viewModel.uiState.value.currentLng)
+    }
+
+    @Test
+    fun disabledLocationKeepsSavedGpsDespiteApproximateOfficialAreaMismatch() = runTest(main.dispatcher) {
+        val city = TransitCity("ms", "\u7709\u5c71")
+        fakeRepository = HomeFakes(city)
+        fakeRepository.settings.setEngineMode(EngineMode.MEISHAN)
+        fakeRepository.location.systemLocationEnabled = false
+        fakeRepository.userLocationStore.updateUserLocation(30.063, 103.836)
+        fakeRepository.resolveCityResult = Result.success(TransitCity("rs", "\u4ec1\u5bff"))
+        fakeRepository.nearbyStopsResult = Result.success(emptyList())
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals(30.063, viewModel.uiState.value.currentLat)
+        assertEquals(103.836, viewModel.uiState.value.currentLng)
+        assertEquals(LocationIssue.ServiceDisabled, viewModel.uiState.value.locationIssue)
+    }
+
+    @Test
+    fun lateCenterRequestCannotOverwriteGpsNearbyStops() = runTest(main.dispatcher) {
+        val city = TransitCity("ms", "\u7709\u5c71")
+        fakeRepository = HomeFakes(city)
+        fakeRepository.settings.setEngineMode(EngineMode.MEISHAN)
+        fakeRepository.resolveCityResult = Result.success(city)
+        grantFreshGpsLocation(30.063, 103.836)
+        val centerResponse = kotlinx.coroutines.CompletableDeferred<Unit>()
+        fakeRepository.nearbyStopsResultProvider = { _, lat, _ ->
+            if (lat == 30.063) Result.success(listOf(NearbyStop("near-gps", "near-gps")))
+            else {
+                centerResponse.await()
+                Result.success(listOf(NearbyStop("far-center", "far-center")))
+            }
+        }
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals("near-gps", viewModel.uiState.value.nearbyStops.single().stopId)
+        assertTrue(fakeRepository.nearbyStopsCalls.any { it.second != 30.063 })
+        centerResponse.complete(Unit)
+        testScheduler.runCurrent()
+        assertEquals("near-gps", viewModel.uiState.value.nearbyStops.single().stopId)
     }
 
     @Test

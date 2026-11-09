@@ -106,7 +106,8 @@ class BusHomeViewModel(
             val favResult = realtime.refreshFavoritesRealtime()
             edit {
                 it.copy(
-                    nearbyStops = nearbyResult.getOrNull() ?: it.nearbyStops,
+                    nearbyStops = if (isCurrentNearbyQuery(state.currentCity, state.currentLat, state.currentLng, state.engineMode))
+                        nearbyResult.getOrNull() ?: it.nearbyStops else it.nearbyStops,
                     favoritesRealtime = favResult.getOrNull() ?: it.favoritesRealtime
                 )
             }
@@ -131,7 +132,10 @@ class BusHomeViewModel(
 
         // 观察数据仓库中选中的城市
         viewModelScope.launch {
+            var initializingCity = true
             settings.selectedCity.collect { city ->
+                val initialCity = initializingCity
+                initializingCity = false
                 val state = _uiState.value
                 if (state.currentCity.cityId == city.cityId && state.currentCity.cityName == city.cityName) {
                     return@collect
@@ -145,7 +149,10 @@ class BusHomeViewModel(
                         )
                     }
                 } else {
-                    val coords = ProvinceCityCatalog.getCityCenterCoordinates(city.cityName)
+                    val savedGps = userLocationStore.userLocation.value.takeIf {
+                        initialCity && city.isMeishanLocal && settings.engineMode.value == EngineMode.MEISHAN
+                    }
+                    val coords = savedGps ?: ProvinceCityCatalog.getCityCenterCoordinates(city.cityName)
                     edit {
                         it.copy(
                             currentCity = city,
@@ -314,6 +321,12 @@ class BusHomeViewModel(
         else -> LocationIssue.Unavailable
     }
 
+    private fun isCurrentNearbyQuery(city: TransitCity, lat: Double, lng: Double, engine: EngineMode): Boolean {
+        val state = _uiState.value
+        return state.currentCity.matchesCity(city) && state.currentLat == lat && state.currentLng == lng &&
+            state.engineMode == engine
+    }
+
     private fun loadNearbyStops(
         lat: Double,
         lng: Double,
@@ -322,11 +335,14 @@ class BusHomeViewModel(
         keepOnFailure: Boolean = true
     ) {
         viewModelScope.launch {
+            val targetCity = cityOverride ?: _uiState.value.currentCity
+            val engine = _uiState.value.engineMode
+            if (!isCurrentNearbyQuery(targetCity, lat, lng, engine)) return@launch
             if (showLoading) {
                 edit { it.copy(isLoadingNearby = true) }
             }
-            val targetCity = cityOverride ?: _uiState.value.currentCity
             val result = realtime.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
+            if (!isCurrentNearbyQuery(targetCity, lat, lng, engine)) return@launch
             edit {
                 it.copy(
                     // 失败保留上一份结果，不显示成「附近没有站」；真换了城市就不能留旧城的站
@@ -420,7 +436,10 @@ class BusHomeViewModel(
                         realtime.resolveCityByLocation(previousLat, previousLng).getOrNull()
                     }
                     val coords = when {
-                        previousGps != null && currentCity.matchesCity(previousCity) -> previousGps
+                        // Official city resolution is only a nearest-center estimate. Missing city metadata
+                        // or an estimate of the neighboring local area must not discard real saved GPS.
+                        previousGps != null && (previousCity == null || currentCity.matchesCity(previousCity) ||
+                            (currentCity.isMeishanLocal && previousCity.isMeishanLocal)) -> previousGps
                         previousCity != null && !currentCity.matchesCity(previousCity) ->
                             ProvinceCityCatalog.getCityCenterCoordinates(currentCity.cityName)
                         else -> state.currentLat to state.currentLng
@@ -438,21 +457,29 @@ class BusHomeViewModel(
                     Triple(lat, lng, currentCity)
                 }
 
-                val firstResult = realtime.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
+                val engine = _uiState.value.engineMode
+                if (!isCurrentNearbyQuery(targetCity, lat, lng, engine)) return@launch
+                var queryLat = lat
+                var queryLng = lng
+                val firstResult = realtime.getNearbyStops(targetCity, queryLat, queryLng, limit = NEARBY_STOPS_LIMIT)
+                if (!isCurrentNearbyQuery(targetCity, queryLat, queryLng, engine)) return@launch
                 var stops = firstResult.getOrNull()
 
                 // 人不在已选城市（如出差在外）时，GPS 坐标查不到该城市的站点：改用已选城市中心点再查一次。
                 // 官方源把「请求失败」上抛成 null（区别于「附近没有站」的空列表），失败也值得再试一次中心点
-                if ((stops == null || stops.isEmpty()) && (gpsLocation != null || targetCity.isMeishanLocal) &&
+                if ((stops == null || stops.isEmpty()) && gpsLocation != null &&
                     !targetCity.matchesCity(_uiState.value.locatedCity)) {
                     val center = ProvinceCityCatalog.findCityCenterCoordinates(targetCity.cityName)
                     if (center != null && (center.first != lat || center.second != lng)) {
-                        stops = realtime.getNearbyStops(targetCity, center.first, center.second, limit = NEARBY_STOPS_LIMIT)
+                        queryLat = center.first
+                        queryLng = center.second
+                        edit { it.copy(currentLat = queryLat, currentLng = queryLng) }
+                        stops = realtime.getNearbyStops(targetCity, queryLat, queryLng, limit = NEARBY_STOPS_LIMIT)
                             .getOrNull()
-                        edit { it.copy(currentLat = center.first, currentLng = center.second) }
                     }
                 }
 
+                if (!isCurrentNearbyQuery(targetCity, queryLat, queryLng, engine)) return@launch
                 edit {
                     it.copy(
                         // 同城刷新失败保留上一份结果，不显示成「附近没有站」；换了城市就不留旧城的站
@@ -532,7 +559,10 @@ class BusHomeViewModel(
             val state = _uiState.value
             val cityBefore = state.currentCity
             val isLocated = city.matchesCity(state.locatedCity)
-            val coords = if (isLocated) {
+            val savedGps = userLocationStore.userLocation.value
+            val isSameGpsQuery = city.matchesCity(state.currentCity) && savedGps != null &&
+                state.currentLat == savedGps.first && state.currentLng == savedGps.second
+            val coords = if (isLocated || isSameGpsQuery) {
                 // 优先用真实 GPS 坐标：当前坐标可能已回退为其他城市的中心点
                 userLocationStore.userLocation.value ?: Pair(state.currentLat, state.currentLng)
             } else {

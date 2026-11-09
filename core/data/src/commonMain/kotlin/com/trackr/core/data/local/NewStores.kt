@@ -24,6 +24,7 @@ class RoomDataStoreTransitStore(
         val prefs = settings.data.first()
         return TransitLocalSnapshot(
             selectedCityJson = prefs[SettingsKeys.SELECTED_CITY_JSON],
+            lastUserLocationJson = prefs[SettingsKeys.LAST_USER_LOCATION_JSON],
             engineMode = prefs[SettingsKeys.ENGINE_MODE],
             transitCodeProvider = prefs[SettingsKeys.PREFERRED_TRANSIT_CODE_PROVIDER],
             showTransitCodeButton = prefs[SettingsKeys.SHOW_TRANSIT_CODE_BUTTON],
@@ -39,6 +40,10 @@ class RoomDataStoreTransitStore(
             fontScalePromptDismissed = prefs[SettingsKeys.FONT_SCALE_PROMPT_DISMISSED],
             searchHistory = db.searchHistory().getAll().map { it.query }
         )
+    }
+
+    override suspend fun saveLastUserLocationJson(json: String) {
+        settings.edit { it[SettingsKeys.LAST_USER_LOCATION_JSON] = json }
     }
 
     override suspend fun saveSelectedCityJson(json: String) {
