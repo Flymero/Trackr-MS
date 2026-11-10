@@ -24,6 +24,7 @@ import com.trackr.core.model.UserFix
 import com.trackr.core.network.remote.mygolbs.MygolbsIds
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 /*
  * 原来的上帝接口 ITransitRepository 按职责拆成下面几个（重构计划 §2.5）。
@@ -221,7 +222,21 @@ interface RealtimeRepository {
 
     /** 收藏的每条线各查一次线路详情（命中 6 秒合并缓存），返回 收藏 id -> 站点 */
     suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>>
+
+    /**
+     * 每一份真正从上游拿到的线路详情（命中缓存的不算）。追踪服务等下一轮时订阅它：
+     * 页面刚查过同一条线、同一个候车站，就直接拿这份刷新追踪和通知。默认没有（Fake 不用改）。
+     */
+    val lineDetailUpdates: Flow<LineDetailUpdate> get() = emptyFlow()
 }
+
+/** [RealtimeRepository.lineDetailUpdates] 的一项：哪个数据源、哪条线、按哪个候车站查的 */
+data class LineDetailUpdate(
+    val source: DataSourceType,
+    val lineId: String,
+    val targetOrder: Int?,
+    val detail: BusLineDetail
+)
 
 /**
  * 手机定位（WGS-84），都带精度和单调时刻（[UserFix]）。实现经 `LocationSource`（Android / iOS 各一份）。

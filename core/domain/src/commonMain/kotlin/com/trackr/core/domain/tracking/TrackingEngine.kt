@@ -42,6 +42,12 @@ object TrackingEngine {
     /** 定位判上车：只用精度不差于这个的定位（米） */
     const val BOARDING_FIX_MAX_ACCURACY_METERS = 50f
 
+    /**
+     * 定位判上车的粗定位精度上限（米）：只用于「人在不在站附近」「人是不是已经走远了」这类容得下误差的判断
+     * （见 [BoardingDetector.Input.coarseUser]，issue #41）
+     */
+    const val BOARDING_COARSE_FIX_MAX_ACCURACY_METERS = 100f
+
     /** 多个定位来源同时回调时，手上的好定位在这段时间内不被差的顶掉 */
     const val KEEP_GOOD_FIX_MILLIS = 15_000L
 
@@ -315,12 +321,13 @@ object TrackingEngine {
     ): Result {
         val previous = session.state
         val boardingFix = bestBoardingFix(serviceFix, dropFix, nowElapsedMillis)
+        val coarseFix = bestFix(serviceFix, dropFix, nowElapsedMillis, BOARDING_COARSE_FIX_MAX_ACCURACY_METERS)
         if (session.watchTarget != null) {
             return reduceWatchOnBoard(session, detail, locationEnabled, boardingFix, nowMillis, nowElapsedMillis)
         }
         if (previous.legPhase == LegPhase.SINGLE) {
             // 单线路本来不用定位；开着「上车后自动结束追踪」时只在车临近 / 车上有人时取定位，判人有没有跟着车走
-            val boarding = singleBoardingInput(previous, detail, stopAfterBoarding, locationEnabled, boardingFix, nowMillis, nowElapsedMillis)
+            val boarding = singleBoardingInput(previous, detail, stopAfterBoarding, locationEnabled, boardingFix, coarseFix, nowMillis, nowElapsedMillis)
             val update = SingleLegTracker.processPoll(
                 session = previous,
                 buses = detail.buses,
@@ -346,7 +353,7 @@ object TrackingEngine {
         }
 
         // 路线：两阶段（等车站 A / 锁定车 -> 下车站 B）
-        val boarding = boardingInput(previous, detail, locationEnabled, boardingFix, nowMillis, nowElapsedMillis)
+        val boarding = boardingInput(previous, detail, locationEnabled, boardingFix, nowMillis, nowElapsedMillis, coarseFix)
         val update = GroupLegTracker.processPoll(previous, detail.buses, boarding, nowMillis)
         // 提醒编排按“轮询前”的阶段判断：先发上车站到站提醒，再重置标志进入 ON_BOARD
         val decision = GroupLegTracker.planAlerts(previous, update)
@@ -490,21 +497,37 @@ object TrackingEngine {
         locationEnabled: Boolean,
         serviceFix: UserFix?,
         nowMillis: Long,
-        nowElapsedMillis: Long
+        nowElapsedMillis: Long,
+        coarseFix: UserFix? = null
     ): BoardingDetector.Input? {
         if (!locationEnabled) return null
         val boardStop = detail.stops.firstOrNull { it.order == state.boardStopOrder } ?: return null
         if (boardStop.wgsLat <= 0.0 || boardStop.wgsLng <= 0.0) return null
-        val fix = usableBoardingFix(serviceFix, nowElapsedMillis)
+        return boardingInputAt(boardStop.wgsLat, boardStop.wgsLng, serviceFix, coarseFix, nowMillis, nowElapsedMillis)
+    }
+
+    private fun boardingInputAt(
+        stopLat: Double,
+        stopLng: Double,
+        fix: UserFix?,
+        coarseFix: UserFix?,
+        nowMillis: Long,
+        nowElapsedMillis: Long
+    ): BoardingDetector.Input {
+        val user = usableBoardingFix(fix, nowElapsedMillis)?.toPosition()
+        val coarse = usableFix(coarseFix, nowElapsedMillis, BOARDING_COARSE_FIX_MAX_ACCURACY_METERS)?.toPosition()
         return BoardingDetector.Input(
-            user = fix?.let {
-                BoardingDetector.UserPosition(it.lat, it.lng, requireNotNull(it.accuracyMeters), it.elapsedMillis)
-            },
-            boardStopLat = boardStop.wgsLat,
-            boardStopLng = boardStop.wgsLng,
-            nowMillis = nowMillis
+            user = user,
+            boardStopLat = stopLat,
+            boardStopLng = stopLng,
+            nowMillis = nowMillis,
+            // 精定位比粗定位新或一样新时就用精定位
+            coarseUser = if (user != null && (coarse == null || user.elapsedMillis >= coarse.elapsedMillis)) user else coarse ?: user
         )
     }
+
+    private fun UserFix.toPosition() =
+        BoardingDetector.UserPosition(lat, lng, requireNotNull(accuracyMeters), elapsedMillis)
 
     /**
      * 单线路判上车的定位上下文（issue #32）：候车站就是 [TrackingSessionState.targetOrder] 那站。
@@ -516,21 +539,14 @@ object TrackingEngine {
         stopAfterBoarding: Boolean,
         locationEnabled: Boolean,
         serviceFix: UserFix?,
+        coarseFix: UserFix?,
         nowMillis: Long,
         nowElapsedMillis: Long
     ): BoardingDetector.Input? {
         if (!stopAfterBoarding || !locationEnabled) return null
         val waitStop = detail.stops.firstOrNull { it.order == state.targetOrder } ?: return null
         if (waitStop.wgsLat <= 0.0 || waitStop.wgsLng <= 0.0) return null
-        val fix = usableBoardingFix(serviceFix, nowElapsedMillis)
-        return BoardingDetector.Input(
-            user = fix?.let {
-                BoardingDetector.UserPosition(it.lat, it.lng, requireNotNull(it.accuracyMeters), it.elapsedMillis)
-            },
-            boardStopLat = waitStop.wgsLat,
-            boardStopLng = waitStop.wgsLng,
-            nowMillis = nowMillis
-        )
+        return boardingInputAt(waitStop.wgsLat, waitStop.wgsLng, serviceFix, coarseFix, nowMillis, nowElapsedMillis)
     }
 
     // ---------------------------------------------------------------- 用户操作
@@ -653,10 +669,13 @@ object TrackingEngine {
     }
 
     /** 判上车用的定位：≤30 秒、精度 ≤50 m，否则 null */
-    fun usableBoardingFix(fix: UserFix?, nowElapsedMillis: Long): UserFix? {
+    fun usableBoardingFix(fix: UserFix?, nowElapsedMillis: Long): UserFix? =
+        usableFix(fix, nowElapsedMillis, BOARDING_FIX_MAX_ACCURACY_METERS)
+
+    private fun usableFix(fix: UserFix?, nowElapsedMillis: Long, maxAccuracyMeters: Float): UserFix? {
         if (fix == null) return null
         val accuracy = fix.accuracyMeters ?: return null
-        if (accuracy > BOARDING_FIX_MAX_ACCURACY_METERS) return null
+        if (accuracy > maxAccuracyMeters) return null
         val age = nowElapsedMillis - fix.elapsedMillis
         return fix.takeIf { age in 0..BOARDING_FIX_MAX_AGE_MILLIS }
     }
@@ -666,9 +685,16 @@ object TrackingEngine {
         serviceFix: UserFix?,
         dropFix: UserFix?,
         nowElapsedMillis: Long
+    ): UserFix? = bestFix(serviceFix, dropFix, nowElapsedMillis, BOARDING_FIX_MAX_ACCURACY_METERS)
+
+    private fun bestFix(
+        serviceFix: UserFix?,
+        dropFix: UserFix?,
+        nowElapsedMillis: Long,
+        maxAccuracyMeters: Float
     ): UserFix? {
-        val usableService = usableBoardingFix(serviceFix, nowElapsedMillis)
-        val usableDrop = usableBoardingFix(dropFix, nowElapsedMillis)
+        val usableService = usableFix(serviceFix, nowElapsedMillis, maxAccuracyMeters)
+        val usableDrop = usableFix(dropFix, nowElapsedMillis, maxAccuracyMeters)
         return when {
             usableService != null && usableDrop != null ->
                 if (usableDrop.elapsedMillis > usableService.elapsedMillis) usableDrop else usableService

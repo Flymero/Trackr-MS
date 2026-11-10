@@ -1,10 +1,12 @@
 package com.trackr.core.data.repository
 
+import com.trackr.core.domain.arrival.StopOrderResolver
 import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.model.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.firstOrNull
 import kotlin.time.Clock
 
 /** One generation of one session. Platforms own jobs, lifecycle, location and presentation. */
@@ -26,6 +28,8 @@ class TrackingPoller(
     suspend fun run(sessionId: String, generation: Int, onUpdate: () -> Unit = {}) {
         var failures = 0
         var operating = LineOperatingState.RUNNING
+        /** 等下一轮时别处（线路页、收藏卡）刚拿到的同一份线路数据，这一轮直接用，不再请求 */
+        var shared: LineDetailUpdate? = null
         fun current() = tracking.sessionById(sessionId)?.takeIf {
             it.generation == generation && !it.interrupted && it.state.isActive
         }
@@ -53,16 +57,23 @@ class TrackingPoller(
                 } else {
                     val leg = session.leg
                     val state = session.state
-                    withContext(requestDispatcher) { realtime.getLineDetail(
+                    val sharedDetail = shared?.takeIf { matchesRequest(it, session) }?.detail
+                    shared = null
+                    val fetched = if (sharedDetail != null) Result.success(sharedDetail) else withContext(requestDispatcher) { realtime.getLineDetail(
                         city = cityFor(leg.cityId, leg.mygolbsCityCode), lineId = leg.lineId,
-                        targetOrder = when {
-                            state.legPhase == LegPhase.WAITING_BOARD && state.boardStopOrder > 0 -> state.boardStopOrder
-                            state.targetOrder > 0 -> state.targetOrder
-                            else -> leg.targetOrder
-                        },
+                        targetOrder = requestOrder(session),
                         stationId = state.targetStopId.ifBlank { leg.targetStopId }, source = leg.source,
                         lineNameHint = state.lineName, directionHint = leg.direction
-                    ) }.map { detail ->
+                    ) }
+                    // 站序是错推的（issue #41「900 站」）：按站名找回真站序，改好会话后马上按新站序重查
+                    val corrected = fetched.getOrNull()?.let { correctedTargetOrder(session, it) }
+                    if (corrected != null) {
+                        currentCoroutineContext().ensureActive()
+                        val applied = tracking.update(sessionId, generation) { latest -> latest.reanchoredTo(corrected, fetched.getOrNull()?.stops?.maxOfOrNull { it.order } ?: corrected) }
+                        if (!applied) return
+                        continue
+                    }
+                    fetched.map { detail ->
                         currentCoroutineContext().ensureActive()
                         if (current() != null) tracking.recordBuses(sessionId, generation, detail.buses)
                         operating = detail.operatingState
@@ -103,9 +114,71 @@ class TrackingPoller(
             effects.forEach { onEffect(it, sessionId) }
             onUpdate()
             val next = current() ?: return
-            delay(TrackingEngine.pollingIntervalMillis(next.state, failures, operating))
+            val interval = TrackingEngine.pollingIntervalMillis(next.state, failures, operating)
+            shared = if (next.watchTarget == null) awaitSharedDetail(next, interval) else {
+                delay(interval)
+                null
+            }
         }
     }
+
+    /** 这一轮按哪一站请求：等车时是上车站，其余是目标站 */
+    private fun requestOrder(session: TrackingSession): Int {
+        val state = session.state
+        return when {
+            state.legPhase == LegPhase.WAITING_BOARD && state.boardStopOrder > 0 -> state.boardStopOrder
+            state.targetOrder > 0 -> state.targetOrder
+            else -> session.leg.targetOrder
+        }
+    }
+
+    private fun matchesRequest(update: LineDetailUpdate, session: TrackingSession): Boolean =
+        update.source == session.leg.source &&
+            update.lineId == session.leg.lineId &&
+            update.targetOrder == requestOrder(session)
+
+    /**
+     * 等下一轮（最多 [interval]）。等的时候别处请求了同一条线、同一个候车站（线路页 10 秒一轮、收藏卡 15 秒一轮），
+     * 就提前用那一份刷新：通知和页面看到的是同一份数据，也不多打请求（issue #41「通知和应用内数据不一致」）。
+     * 离上一轮不到 [MIN_SHARED_GAP_MS] 的不要，免得几个页面一起刷时通知跳得太勤。
+     */
+    private suspend fun awaitSharedDetail(session: TrackingSession, interval: Long): LineDetailUpdate? {
+        val startedAt = monotonicClock.elapsedMillis()
+        return withTimeoutOrNull(interval) {
+            realtime.lineDetailUpdates.firstOrNull {
+                matchesRequest(it, session) && monotonicClock.elapsedMillis() - startedAt >= MIN_SHARED_GAP_MS
+            } ?: awaitCancellation() // 没有可共享的数据（流结束了）：照常等满这一轮
+        }
+    }
+
+    /** 单线路的目标站序对不上站表时，按站名找到的真站序；不用改时为 null */
+    private fun correctedTargetOrder(session: TrackingSession, detail: BusLineDetail): Int? {
+        val state = session.state
+        if (state.legPhase != LegPhase.SINGLE) return null
+        return StopOrderResolver.correctedOrder(
+            stops = detail.stops,
+            order = state.targetOrder,
+            stopName = state.targetStopName,
+            lat = state.targetStopLat,
+            lng = state.targetStopLng,
+            nameMismatchIsSuspect = session.leg.source == DataSourceType.MYGOLBS
+        )
+    }
+
+    private fun TrackingSession.reanchoredTo(order: Int, lastOrder: Int): TrackingSession = copy(
+        state = state.copy(
+            targetOrder = order,
+            // 原来的总站数是按错站序记的（单线路默认等于目标站序），超出站表就按新站序记
+            totalStops = state.totalStops.takeIf { it in order..lastOrder } ?: order,
+            startTrackingOrder = (order - 1).coerceAtLeast(1),
+            currentBusId = null,
+            stopsRemaining = -1,
+            etaSeconds = -1,
+            isBusArrivedAtStop = false,
+            hasTriggeredApproachingAlert = false,
+            hasTriggeredArrivedAlert = false
+        )
+    )
 
     /** 同站同时追多条候车线时，确认上了其中一趟并离开该站后，同站其余候车单线路/一起等一并结束 */
     private fun sameStopWaiting(finished: TrackingSession, other: TrackingSession): Boolean {
@@ -150,5 +223,8 @@ class TrackingPoller(
     private companion object {
         /** 同名站相距不超过这么远才算同一站；对向站一般隔着马路，比这远 */
         const val SAME_STOP_MAX_METERS = 30
+
+        /** 用别处数据提前刷新时，离上一轮至少隔这么久 */
+        const val MIN_SHARED_GAP_MS = 5_000L
     }
 }

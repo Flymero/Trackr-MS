@@ -49,12 +49,16 @@ internal object BoardingDetector {
      * 一次轮询的定位上下文。
      * @param user 新鲜且精确的用户位置；null 表示本轮没有可用定位（不改变任何连续计数）
      * @param boardStopLat 上车站 A 坐标（WGS-84），无效时为 0
+     * @param coarseUser 精度放宽（≤100 m）的用户位置；默认同 [user]。issue #41：街上、车里定位常常只有 60–100 m 精度，
+     *   只认 ≤50 m 时车到站那一轮经常拿不到定位，待确认根本建不起来。粗定位只用在容得下误差的判断上：
+     *   「人在站附近（300 m 内）」和「人离站已经很远（≥400 m + 精度）」；「贴着车」「人还在站上」仍只认精定位
      */
     data class Input(
         val user: UserPosition?,
         val boardStopLat: Double,
         val boardStopLng: Double,
-        val nowMillis: Long
+        val nowMillis: Long,
+        val coarseUser: UserPosition? = user
     ) {
         val hasBoardStop: Boolean get() = boardStopLat > 0.0 && boardStopLng > 0.0
     }
@@ -78,7 +82,7 @@ internal object BoardingDetector {
     fun shouldStartCandidate(input: Input): Boolean {
         // 没有可用定位时不能创建待确认状态。否则候选车离站后的超时
         // 会把用户没有上车误判成已上车。
-        val user = input.user ?: return false
+        val user = input.user ?: input.coarseUser ?: return false
         if (!input.hasBoardStop) return true
         val toStop = distance(user.lat, user.lng, input.boardStopLat, input.boardStopLng) ?: return true
         return toStop <= CANDIDATE_RADIUS_METERS
@@ -123,34 +127,40 @@ internal object BoardingDetector {
     ): CandidateResult {
         val boardOrder = session.boardStopOrder
         val user = input.user
+        // 没有精定位时退而用粗定位，但只认「人离站已经很远」这一条
+        val probe = user ?: input.coarseUser
+        val precise = user != null
         var confirm = session.boardingConfirmStreak
         var miss = session.boardingMissStreak
 
         // 定位服务可能在同一轮回调同一个快照多次。连续计数只消费新定位，
         // 否则一条定位会把“连续两次”误算成两次。
         // 测试/旧调用方可能没有单调时刻（-1）；这种定位无法去重，按新快照处理。
-        val isNewFix = user != null &&
-            (user.elapsedMillis < 0L || user.elapsedMillis != session.boardingLastFixElapsedMillis)
+        val isNewFix = probe != null &&
+            (probe.elapsedMillis < 0L || probe.elapsedMillis != session.boardingLastFixElapsedMillis)
         if (isNewFix && input.hasBoardStop) {
-            val userToStop = distance(user.lat, user.lng, input.boardStopLat, input.boardStopLng)
-            val userToBus = candidate?.let { distance(user.lat, user.lng, it.wgsLat, it.wgsLng) }
+            val fix = probe!!
+            val userToStop = distance(fix.lat, fix.lng, input.boardStopLat, input.boardStopLng)
+            val userToBus = candidate?.let { distance(fix.lat, fix.lng, it.wgsLat, it.wgsLng) }
             val busToStop = candidate?.let { distance(it.wgsLat, it.wgsLng, input.boardStopLat, input.boardStopLng) }
             val busLeftStop = candidate == null ||
                 candidate.order > boardOrder ||
                 (busToStop != null && busToStop >= LEFT_BOARD_STOP_METERS)
 
-            val baseNearLimit = max(NEAR_BUS_MIN_METERS, (user.accuracyMeters * 2).toInt())
+            val baseNearLimit = max(NEAR_BUS_MIN_METERS, (fix.accuracyMeters * 2).toInt())
             // 车已离站、人也已离站时，车载 GPS 上报往往比手机实时定位慢 10–15 秒，放宽人车距离上限
             val nearBusLimit = if (busLeftStop && (busToStop == null || busToStop >= LEFT_BOARD_STOP_METERS)) {
                 max(NEAR_BUS_MOVING_METERS, baseNearLimit)
             } else {
                 baseNearLimit
             }
+            // 粗定位离站要再多出一个精度半径，才算真的走远了
+            val farLimit = if (precise) FAR_FROM_BOARD_STOP_METERS else FAR_FROM_BOARD_STOP_METERS + fix.accuracyMeters.toInt()
             val boardedSignal = userToStop != null && (
-                (userToBus != null && userToBus <= nearBusLimit && userToStop >= LEFT_BOARD_STOP_METERS) ||
-                    (userToStop >= FAR_FROM_BOARD_STOP_METERS && busLeftStop)
+                (precise && userToBus != null && userToBus <= nearBusLimit && userToStop >= LEFT_BOARD_STOP_METERS) ||
+                    (userToStop >= farLimit && busLeftStop)
                 )
-            val missedSignal = userToStop != null && userToStop <= STILL_AT_BOARD_STOP_METERS && (
+            val missedSignal = precise && userToStop != null && userToStop <= STILL_AT_BOARD_STOP_METERS && (
                 candidate == null ||
                     (busToStop != null && busToStop >= BUS_GONE_FROM_BOARD_STOP_METERS) ||
                     (busToStop == null && candidate.order >= boardOrder + 2)
@@ -161,13 +171,18 @@ internal object BoardingDetector {
                 confirm > 0 && !missedSignal && userToStop != null && userToStop >= LEFT_BOARD_STOP_METERS -> confirm
                 else -> 0
             }
-            miss = if (missedSignal) miss + 1 else 0
+            miss = when {
+                missedSignal -> miss + 1
+                // 粗定位判不了「人还在站上」，不打断没赶上的连续计数
+                precise -> 0
+                else -> miss
+            }
         }
 
         val updated = session.copy(
             boardingConfirmStreak = confirm,
             boardingMissStreak = miss,
-            boardingLastFixElapsedMillis = if (isNewFix) user!!.elapsedMillis else session.boardingLastFixElapsedMillis
+            boardingLastFixElapsedMillis = if (isNewFix) probe!!.elapsedMillis else session.boardingLastFixElapsedMillis
         )
         val verdict = when {
             confirm >= CONFIRM_STREAK -> Verdict.BOARDED

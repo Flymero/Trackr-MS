@@ -568,6 +568,60 @@ class TrackingEngineTest {
     }
 
     @Test
+    fun engine_single_coarseFixAtStop_startsCandidate() {
+        // issue #41：街上定位常常只有 60–100 m 精度，车到站那一轮也要建得起待确认
+        val arrived = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(60, accuracy = 90f))
+        assertEquals("b1", arrived.session.state.boardingCandidateBusId)
+        assertTrue(arrived.effects.none { it is TrackingEngine.Effect.Finished })
+    }
+
+    @Test
+    fun engine_single_coarseFixesFarFromStop_confirmBoarding() {
+        val arrived = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)), serviceFixNorth(20))
+        // 粗定位：不算「贴着车」，但离站超过 400 m + 精度、车也开走了，连续两次就是上车了
+        val near = singlePoll(arrived.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 150)),
+            serviceFixNorth(150, ageMillis = 6_000, accuracy = 90f))
+        assertEquals(0, near.session.state.boardingConfirmStreak)
+        val far1 = singlePoll(near.session,
+            listOf(boardingBus("b1", order = 12, metersNorth = 600)),
+            serviceFixNorth(600, ageMillis = 5_000, accuracy = 90f))
+        assertEquals(1, far1.session.state.boardingConfirmStreak)
+        val far2 = singlePoll(far1.session,
+            listOf(boardingBus("b1", order = 12, metersNorth = 700)),
+            serviceFixNorth(700, ageMillis = 4_000, accuracy = 90f))
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(far2.effects.single())
+    }
+
+    @Test
+    fun engine_single_coarseFixAtStop_neverCountsAsMissed() {
+        val arrived = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)), serviceFixNorth(20))
+        var session = arrived.session
+        repeat(3) { index ->
+            // 粗定位判不了「人还在站上」：既不算上车，也不算没赶上，待确认留着
+            val result = singlePoll(session,
+                listOf(boardingBus("b1", order = 12, metersNorth = 600)),
+                serviceFixNorth(0, ageMillis = 6_000L - index * 1_000, accuracy = 90f))
+            session = result.session
+        }
+        assertEquals("b1", session.state.boardingCandidateBusId)
+        assertEquals(0, session.state.boardingMissStreak)
+    }
+
+    @Test
+    fun engine_single_autoStop_recoversWhenPollSkipsTwoStops() {
+        val approaching = singlePoll(beginSingle(),
+            listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0))
+        val departed = singlePoll(approaching.session,
+            listOf(boardingBus("b1", order = 12, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
+        assertEquals("b1", departed.session.state.boardingCandidateBusId)
+    }
+
+    @Test
     fun engine_single_skippedArrival_userStaysAtStop_doesNotFinish() {
         var session = singlePoll(beginSingle(),
             listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0)).session
@@ -587,7 +641,8 @@ class TrackingEngineTest {
             listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0)).session
         val cases = listOf(
             approaching to boardingBus("other", order = 11, metersNorth = 150),
-            approaching to boardingBus("b1", order = 12, metersNorth = 150),
+            // 一跳两站还认（issue #41），三站就不是「刚开走」了
+            approaching to boardingBus("b1", order = 13, metersNorth = 150),
             approaching.copy(state = approaching.state.copy(updatedAtMillis = NOW_MILLIS - 61_000)) to
                 boardingBus("b1", order = 11, metersNorth = 150)
         )
@@ -603,7 +658,7 @@ class TrackingEngineTest {
         val approaching = singlePoll(beginSingle(),
             listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0)).session
         val fixes = listOf(null, serviceFixNorth(500), serviceFixNorth(150, ageMillis = 31_000),
-            serviceFixNorth(150).copy(accuracyMeters = 100f))
+            serviceFixNorth(150).copy(accuracyMeters = 120f))
         fixes.forEach { fix ->
             val result = singlePoll(approaching,
                 listOf(boardingBus("b1", order = 11, metersNorth = 150)), fix)

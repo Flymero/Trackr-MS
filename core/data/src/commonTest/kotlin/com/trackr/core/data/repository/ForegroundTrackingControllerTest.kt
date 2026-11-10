@@ -234,4 +234,65 @@ class ForegroundTrackingControllerTest {
 
         assertEquals(setOf("OPPOSITE", "COLLIDE"), f.repo.sessions.value.map { it.leg.lineId }.toSet())
     }
+
+    private fun lineWithStops(lineId: String, source: DataSourceType, busOrder: Int) = BusLineDetail(
+        line = BusLineDirection(lineId = lineId, name = "1路", startStop = "站1", endStop = "站8", source = source),
+        stops = (1..8).map { BusStop(stopId = "$it", name = "站$it", order = it) },
+        buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "b1", order = busOrder, etaSeconds = 600))
+    )
+
+    // issue #41：通知和页面数据不一致。等下一轮时页面刚查过同一条线、同一个候车站，就直接用那一份刷新
+    @Test fun sharedLineDetailRefreshesSessionWithoutExtraRequest() = runTest {
+        val f = Fixture(this)
+        f.realtime.lineDetailsMap["L1"] = lineWithStops("L1", DataSourceType.CHELAILE, busOrder = 1)
+        f.controller.setActive(true); runCurrent()
+        assertTrue(f.controller.start(target)); runCurrent()
+        assertEquals(1, f.realtime.lineDetailCalls.size)
+        assertEquals(4, f.repo.sessions.value.single().state.stopsRemaining)
+
+        // 别的候车站的数据不能用
+        f.clock.advanceBy(6.seconds)
+        f.realtime.lineDetailUpdateFlow.emit(
+            LineDetailUpdate(DataSourceType.CHELAILE, "L1", 3, lineWithStops("L1", DataSourceType.CHELAILE, busOrder = 2))
+        )
+        runCurrent()
+        assertEquals(4, f.repo.sessions.value.single().state.stopsRemaining)
+
+        // 同一条线、同一个候车站：马上刷新，不再请求
+        f.realtime.lineDetailUpdateFlow.emit(
+            LineDetailUpdate(DataSourceType.CHELAILE, "L1", 5, lineWithStops("L1", DataSourceType.CHELAILE, busOrder = 4))
+        )
+        runCurrent()
+        assertEquals(1, f.repo.sessions.value.single().state.stopsRemaining)
+        assertEquals(1, f.realtime.lineDetailCalls.size)
+    }
+
+    @Test fun sharedLineDetailTooSoonAfterPollIsIgnored() = runTest {
+        val f = Fixture(this)
+        f.realtime.lineDetailsMap["L1"] = lineWithStops("L1", DataSourceType.CHELAILE, busOrder = 1)
+        f.controller.setActive(true); runCurrent()
+        f.controller.start(target); runCurrent()
+        f.clock.advanceBy(1.seconds)
+        f.realtime.lineDetailUpdateFlow.emit(
+            LineDetailUpdate(DataSourceType.CHELAILE, "L1", 5, lineWithStops("L1", DataSourceType.CHELAILE, busOrder = 4))
+        )
+        runCurrent()
+        assertEquals(4, f.repo.sessions.value.single().state.stopsRemaining)
+    }
+
+    // issue #41「900 站」：掌上公交错推的站序，拿到站表后按站名改回来，马上按真站序重查
+    @Test fun mygolbsBogusTargetOrderIsCorrectedByStopName() = runTest {
+        val f = Fixture(this)
+        val lineId = "mg:0:玉林市:1路:1"
+        f.realtime.lineDetailsMap[lineId] = lineWithStops(lineId, DataSourceType.MYGOLBS, busOrder = 3)
+        f.controller.setActive(true); runCurrent()
+        assertTrue(f.controller.start(target.copy(lineId = lineId, targetOrder = 900, totalStops = 900,
+            targetStopName = "站5", source = DataSourceType.MYGOLBS)))
+        runCurrent()
+        assertEquals(listOf<Int?>(900, 5), f.realtime.lineDetailTargetOrders)
+        val state = f.repo.sessions.value.single().state
+        assertEquals(5, state.targetOrder)
+        assertEquals(5, state.totalStops)
+        assertEquals(2, state.stopsRemaining)
+    }
 }
