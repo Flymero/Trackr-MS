@@ -25,7 +25,7 @@
     <string name="me_about_publish_time">发布时间: %1$s</string>
     <string name="me_about_changelog">更新内容：</string>
     <string name="me_about_download">下载并安装</string>
-    <string name="me_about_downloading">正在下载… %1$d%%</string>
+    <string name="me_about_downloading">正在下载… %1$d%</string>
     <string name="me_about_downloading_bytes">正在下载… %1$d MB</string>
     <string name="me_about_cancel_download">取消下载</string>
     <string name="me_about_install_permission">系统还没允许追客安装应用。去设置里打开「允许安装未知应用」，回来会自动继续。</string>

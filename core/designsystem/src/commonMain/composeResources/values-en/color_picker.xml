@@ -11,7 +11,7 @@
     <string name="color_picker_rgb_error">Enter a whole number from 0 to 255 for each RGB channel</string>
     <string name="color_picker_use_color">Use this color</string>
     <string name="color_picker_color_area">Color selection area</string>
-    <string name="color_picker_color_area_state">Saturation %1$d%%, brightness %2$d%%</string>
+    <string name="color_picker_color_area_state">Saturation %1$d%, brightness %2$d%</string>
     <string name="color_picker_increase_saturation">Increase saturation</string>
     <string name="color_picker_decrease_saturation">Decrease saturation</string>
     <string name="color_picker_increase_brightness">Increase brightness</string>

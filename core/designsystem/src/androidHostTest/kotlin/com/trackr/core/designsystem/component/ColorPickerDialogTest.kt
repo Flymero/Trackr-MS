@@ -47,6 +47,16 @@ class ColorPickerDialogTest {
     }
 
     @Test
+    fun paletteStateDescriptionShowsSinglePercentSign() {
+        show()
+        val state = rule.onNodeWithTag("color_picker_palette").fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription]
+        // Compose 资源的格式化不认 %% 转义，写成 %% 会原样显示两个百分号（#40）
+        assertFalse(state, state.contains("%%"))
+        assertTrue(state, Regex("""\d+%""").containsMatchIn(state))
+    }
+
+    @Test
     fun tappingAndDraggingPaletteUpdateRgbAndHex() {
         show()
         rule.onNodeWithTag("color_picker_hex").performTextReplacement("#00FF00")
