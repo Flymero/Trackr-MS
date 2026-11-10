@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalMaterial3Api::class)
 
-package com.trackr.ui.screens.me
+package com.trackr.core.designsystem.component
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -32,16 +32,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.trackr.core.designsystem.resources.Res as DsRes
-import com.trackr.core.designsystem.resources.action_cancel
+import com.trackr.core.designsystem.resources.*
 import com.trackr.core.designsystem.theme.TrackrTheme
-import com.trackr.feature.me.resources.*
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.roundToInt
 
-/** RGB fields, HEX and the graphical controls share one draft; cancel never changes the applied seed. */
+/**
+ * 通用选色面板（主题色、收藏分组的自定义颜色共用）：色板 + 色相条 + HEX + RGB。
+ *
+ * RGB fields, HEX and the graphical controls share one draft; cancel never changes the applied color.
+ * [rgb] / [onColor] 都是不带透明度的 0xRRGGBB。
+ */
 @Composable
-internal fun ThemeColorPickerDialog(rgb: Int, onDismiss: () -> Unit, onColor: (Int) -> Unit) {
+fun ColorPickerDialog(rgb: Int, onDismiss: () -> Unit, onColor: (Int) -> Unit) {
     val initial = remember(rgb) { rgbToHsv(rgb) }
     var hue by rememberSaveable { mutableStateOf(initial[0]) }
     var saturation by rememberSaveable { mutableStateOf(initial[1]) }
@@ -51,7 +54,7 @@ internal fun ThemeColorPickerDialog(rgb: Int, onDismiss: () -> Unit, onColor: (I
     var green by rememberSaveable { mutableStateOf((rgb shr 8 and 255).toString()) }
     var blue by rememberSaveable { mutableStateOf((rgb and 255).toString()) }
     val chosen = Color.hsv(hue, saturation, brightness)
-    val valid = parseThemeHex(hex) != null && listOf(red, green, blue).all { parseRgbChannel(it) != null }
+    val valid = parseRgbHex(hex) != null && listOf(red, green, blue).all { parseRgbChannel(it) != null }
 
     fun updateFromHsv(h: Float, s: Float, v: Float) {
         hue = h
@@ -83,21 +86,21 @@ internal fun ThemeColorPickerDialog(rgb: Int, onDismiss: () -> Unit, onColor: (I
     }
 
     AlertDialog(
-        modifier = Modifier.testTag("theme_color_picker"),
+        modifier = Modifier.testTag("color_picker"),
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.theme_pick_color)) },
+        title = { Text(stringResource(Res.string.color_picker_pick_color)) },
         text = {
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(TrackrTheme.dimens.spaceM),
             ) {
                 SaturationValuePalette(hue, saturation, brightness) { s, v -> updateFromHsv(hue, s, v) }
-                val hueLabel = stringResource(Res.string.theme_hue)
+                val hueLabel = stringResource(Res.string.color_picker_hue)
                 Slider(
                     value = hue,
                     onValueChange = { updateFromHsv(it, saturation, brightness) },
                     valueRange = 0f..359.99f,
-                    modifier = Modifier.fillMaxWidth().testTag("theme_picker_hue").semantics { contentDescription = hueLabel },
+                    modifier = Modifier.fillMaxWidth().testTag("color_picker_hue").semantics { contentDescription = hueLabel },
                     track = {
                         Box(Modifier.fillMaxWidth().height(16.dp).background(
                             Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f, 1f, 1f) }),
@@ -109,31 +112,31 @@ internal fun ThemeColorPickerDialog(rgb: Int, onDismiss: () -> Unit, onColor: (I
                 Row(horizontalArrangement = Arrangement.spacedBy(TrackrTheme.dimens.spaceM)) {
                     Surface(
                         color = chosen, shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.size(56.dp).testTag("theme_picker_preview").semantics { stateDescription = hex },
+                        modifier = Modifier.size(56.dp).testTag("color_picker_preview").semantics { stateDescription = hex },
                     ) {}
                     OutlinedTextField(
                         value = hex,
                         onValueChange = { text ->
                             hex = text
-                            parseThemeHex(text)?.let { value ->
+                            parseRgbHex(text)?.let { value ->
                                 updateFromRgb(value)
                                 red = (value shr 16 and 255).toString()
                                 green = (value shr 8 and 255).toString()
                                 blue = (value and 255).toString()
                             }
                         },
-                        label = { Text(stringResource(Res.string.theme_hex)) },
+                        label = { Text(stringResource(Res.string.color_picker_hex)) },
                         singleLine = true,
-                        isError = parseThemeHex(hex) == null,
+                        isError = parseRgbHex(hex) == null,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                        modifier = Modifier.width(160.dp).testTag("theme_picker_hex"),
+                        modifier = Modifier.width(160.dp).testTag("color_picker_hex"),
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(TrackrTheme.dimens.spaceS)) {
                     val descriptions = listOf(
-                        stringResource(Res.string.theme_red_channel),
-                        stringResource(Res.string.theme_green_channel),
-                        stringResource(Res.string.theme_blue_channel),
+                        stringResource(Res.string.color_picker_red_channel),
+                        stringResource(Res.string.color_picker_green_channel),
+                        stringResource(Res.string.color_picker_blue_channel),
                     )
                     listOf(red, green, blue).forEachIndexed { channel, text ->
                         val name = listOf("R", "G", "B")[channel]
@@ -143,27 +146,27 @@ internal fun ThemeColorPickerDialog(rgb: Int, onDismiss: () -> Unit, onColor: (I
                             label = { Text(name) }, singleLine = true,
                             isError = parseRgbChannel(text) == null,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.width(72.dp).testTag("theme_picker_$name").semantics { contentDescription = description },
+                            modifier = Modifier.width(72.dp).testTag("color_picker_$name").semantics { contentDescription = description },
                         )
                     }
                 }
-                if (parseThemeHex(hex) == null) {
-                    Text(stringResource(Res.string.theme_hex_error), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (parseRgbHex(hex) == null) {
+                    Text(stringResource(Res.string.color_picker_hex_error), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
                 if (listOf(red, green, blue).any { parseRgbChannel(it) == null }) {
-                    Text(stringResource(Res.string.theme_rgb_error), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(Res.string.color_picker_rgb_error), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { parseThemeHex(hex)?.let(onColor) }, enabled = valid,
-                modifier = Modifier.testTag("theme_picker_confirm"),
-            ) { Text(stringResource(Res.string.theme_use_color)) }
+                onClick = { parseRgbHex(hex)?.let(onColor) }, enabled = valid,
+                modifier = Modifier.testTag("color_picker_confirm"),
+            ) { Text(stringResource(Res.string.color_picker_use_color)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("theme_picker_cancel")) {
-                Text(stringResource(DsRes.string.action_cancel))
+            TextButton(onClick = onDismiss, modifier = Modifier.testTag("color_picker_cancel")) {
+                Text(stringResource(Res.string.action_cancel))
             }
         },
     )
@@ -173,14 +176,14 @@ internal fun ThemeColorPickerDialog(rgb: Int, onDismiss: () -> Unit, onColor: (I
 @Composable
 private fun SaturationValuePalette(hue: Float, saturation: Float, brightness: Float, onChange: (Float, Float) -> Unit) {
     val latestChange by rememberUpdatedState(onChange)
-    val label = stringResource(Res.string.theme_color_area)
-    val description = stringResource(Res.string.theme_color_area_state, (saturation * 100).roundToInt(), (brightness * 100).roundToInt())
-    val moreSaturation = stringResource(Res.string.theme_increase_saturation)
-    val lessSaturation = stringResource(Res.string.theme_decrease_saturation)
-    val moreBrightness = stringResource(Res.string.theme_increase_brightness)
-    val lessBrightness = stringResource(Res.string.theme_decrease_brightness)
+    val label = stringResource(Res.string.color_picker_color_area)
+    val description = stringResource(Res.string.color_picker_color_area_state, (saturation * 100).roundToInt(), (brightness * 100).roundToInt())
+    val moreSaturation = stringResource(Res.string.color_picker_increase_saturation)
+    val lessSaturation = stringResource(Res.string.color_picker_decrease_saturation)
+    val moreBrightness = stringResource(Res.string.color_picker_increase_brightness)
+    val lessBrightness = stringResource(Res.string.color_picker_decrease_brightness)
     Surface(shape = MaterialTheme.shapes.medium) {
-        Canvas(Modifier.fillMaxWidth().aspectRatio(1.35f).testTag("theme_picker_palette")
+        Canvas(Modifier.fillMaxWidth().aspectRatio(1.35f).testTag("color_picker_palette")
             .semantics {
                 contentDescription = label
                 stateDescription = description
@@ -239,3 +242,9 @@ private fun rgbToHsv(rgb: Int): FloatArray {
     }.let { (it + 360f) % 360f }
     return floatArrayOf(hue, if (max == 0f) 0f else delta / max, max)
 }
+
+/** 0xRRGGBB -> `#RRGGBB` */
+fun rgbHex(rgb: Int): String = "#" + rgb.toString(16).padStart(6, '0').uppercase()
+
+/** `#RRGGBB` / `RRGGBB` -> 0xRRGGBB；格式不对给 null */
+fun parseRgbHex(text: String): Int? = text.removePrefix("#").takeIf { it.length == 6 && it.all { c -> c in '0'..'9' || c.lowercaseChar() in 'a'..'f' } }?.toIntOrNull(16)?.takeIf { it in 0..0xFFFFFF }

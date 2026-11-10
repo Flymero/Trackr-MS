@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通用选色面板（主题色、收藏分组颜色共用） -->
+<resources>
+    <string name="color_picker_pick_color">选择颜色</string>
+    <string name="color_picker_hue">色相</string>
+    <string name="color_picker_hex">HEX 色值</string>
+    <string name="color_picker_red_channel">红色（0–255）</string>
+    <string name="color_picker_green_channel">绿色（0–255）</string>
+    <string name="color_picker_blue_channel">蓝色（0–255）</string>
+    <string name="color_picker_hex_error">请输入六位 HEX 色值，例如 #1F5FD6</string>
+    <string name="color_picker_rgb_error">RGB 各通道请输入 0–255 的整数</string>
+    <string name="color_picker_use_color">使用此颜色</string>
+    <string name="color_picker_color_area">颜色选择区域</string>
+    <string name="color_picker_color_area_state">饱和度 %1$d%%，明度 %2$d%%</string>
+    <string name="color_picker_increase_saturation">增加饱和度</string>
+    <string name="color_picker_decrease_saturation">减少饱和度</string>
+    <string name="color_picker_increase_brightness">增加明度</string>
+    <string name="color_picker_decrease_brightness">减少明度</string>
+    <string name="group_color_custom">自定义颜色</string>
+</resources>

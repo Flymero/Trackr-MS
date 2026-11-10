@@ -341,23 +341,23 @@ class FavoritesRepositoryTest {
     @Test
     fun groupColor_createAndChange_persists_otherGroupsUntouched() = runBlocking {
         val repo = seeded()
-        val gym = repo.createGroup("健身", GroupColor.GREEN)
+        val gym = repo.createGroup("健身", GroupColor.Preset.GREEN)
         val school = repo.createGroup("学校")
-        assertEquals(GroupColor.GREEN, gym.color)
+        assertEquals(GroupColor.Preset.GREEN, gym.color)
         assertNull(school.color)
 
-        repo.setGroupColor(school.id, GroupColor.PINK)
-        repo.setGroupColor(FavoriteItemOrder.HOME_GROUP_ID, GroupColor.BLUE)
+        repo.setGroupColor(school.id, GroupColor.Preset.PINK)
+        repo.setGroupColor(FavoriteItemOrder.HOME_GROUP_ID, GroupColor.Preset.BLUE)
         repo.setGroupColor(gym.id, null)
         // 不存在的分组：什么都不做
-        repo.setGroupColor("missing", GroupColor.RED)
+        repo.setGroupColor("missing", GroupColor.Preset.RED)
 
         fun check(r: DefaultFavoritesRepository) {
             assertEquals(
                 listOf(FavoriteItemOrder.COMMUTE_GROUP_ID, FavoriteItemOrder.HOME_GROUP_ID, gym.id, school.id),
                 r.favoriteGroups.value.map { it.id }
             )
-            assertEquals(listOf(null, GroupColor.BLUE, null, GroupColor.PINK), r.favoriteGroups.value.map { it.color })
+            assertEquals(listOf(null, GroupColor.Preset.BLUE, null, GroupColor.Preset.PINK), r.favoriteGroups.value.map { it.color })
             assertEquals(listOf("上班通勤", "回家线路", "健身", "学校"), r.favoriteGroups.value.map { it.name })
         }
         check(repo)
@@ -368,7 +368,7 @@ class FavoritesRepositoryTest {
     @Test
     fun groupColor_survivesRenameAndReorder() = runBlocking {
         val repo = seeded()
-        val gym = repo.createGroup("健身", GroupColor.ORANGE)
+        val gym = repo.createGroup("健身", GroupColor.Preset.ORANGE)
         repo.renameGroup(gym.id, "游泳")
         repo.reorderGroups(listOf(gym.id))
 
@@ -376,13 +376,13 @@ class FavoritesRepositoryTest {
         val group = reopened.favoriteGroups.value.first()
         assertEquals(gym.id, group.id)
         assertEquals("游泳", group.name)
-        assertEquals(GroupColor.ORANGE, group.color)
+        assertEquals(GroupColor.Preset.ORANGE, group.color)
     }
 
     @Test
     fun groupColor_unknownStoredValue_readsAsNoColor() = runBlocking {
         val repo = seeded()
-        val gym = repo.createGroup("健身", GroupColor.RED)
+        val gym = repo.createGroup("健身", GroupColor.Preset.RED)
         // 以后的版本加了新颜色、又装回这个版本：认不出的名字按不设颜色读，分组本身照常
         val rows = db.favoriteGroups().getAll().map { if (it.id == gym.id) it.copy(color = "ULTRAVIOLET") else it }
         db.favoriteGroups().replaceAll(rows)
@@ -393,12 +393,43 @@ class FavoritesRepositoryTest {
     }
 
     @Test
+    fun groupColor_custom_storedAsHex_andReadBack() = runBlocking {
+        val repo = seeded()
+        val gym = repo.createGroup("健身", GroupColor.Custom(0x12AB9F))
+        repo.setGroupColor(FavoriteItemOrder.HOME_GROUP_ID, GroupColor.Custom(0x000000))
+
+        assertEquals("#12AB9F", db.favoriteGroups().getAll().single { it.id == gym.id }.color)
+        val reopened = open()
+        assertEquals(GroupColor.Custom(0x12AB9F), reopened.favoriteGroups.value.single { it.id == gym.id }.color)
+        assertEquals(GroupColor.Custom(0), reopened.favoriteGroups.value.single { it.id == FavoriteItemOrder.HOME_GROUP_ID }.color)
+
+        // 自定义换回色板颜色
+        reopened.setGroupColor(gym.id, GroupColor.Preset.TEAL)
+        assertEquals("TEAL", db.favoriteGroups().getAll().single { it.id == gym.id }.color)
+    }
+
+    @Test
+    fun groupColor_keys() {
+        assertEquals("BLUE", GroupColor.Preset.BLUE.key)
+        assertEquals("#0A0B0C", GroupColor.Custom(0x0A0B0C).key)
+        assertEquals(GroupColor.Preset.PINK, GroupColor.fromKey("PINK"))
+        assertEquals(GroupColor.Custom(0xABCDEF), GroupColor.fromKey("#abcdef"))
+        listOf(null, "", "pink", "#12345", "#1234567", "12AB9F", "#GGGGGG").forEach { assertNull(it, GroupColor.fromKey(it)) }
+        // JSON 里仍然是 color 字段、字符串值（和第一版存的格式一样）
+        val encoded = json.encodeToString(FavoriteGroup("g", "健身", color = GroupColor.Custom(0x12AB9F)))
+        assertTrue(encoded, encoded.contains("\"color\":\"#12AB9F\""))
+        assertEquals(GroupColor.Preset.RED, json.decodeFromString<FavoriteGroup>("""{"id":"g","name":"n","color":"RED"}""").color)
+        // 认不出的值：整份照样读出来，只是没颜色
+        assertNull(json.decodeFromString<FavoriteGroup>("""{"id":"g","name":"n","color":"ULTRAVIOLET"}""").color)
+    }
+
+    @Test
     fun legacyImport_keepsGroupColor() = runBlocking {
-        val groups = listOf(FavoriteGroup("gym", "健身", sortOrder = 0, color = GroupColor.TEAL))
+        val groups = listOf(FavoriteGroup("gym", "健身", sortOrder = 0, color = GroupColor.Preset.TEAL))
         writeLegacy(groups)
         assertTrue(runLegacyMigration().ran)
 
-        assertEquals(GroupColor.TEAL, open().favoriteGroups.value.single().color)
+        assertEquals(GroupColor.Preset.TEAL, open().favoriteGroups.value.single().color)
     }
 
     // ---- 旧数据迁入后顺序不变 ----

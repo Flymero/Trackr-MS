@@ -276,7 +276,7 @@ class FakeFavoritesRepository(
     }
 
     override suspend fun setGroupColor(groupId: String, color: GroupColor?) {
-        _favoriteGroups.update { list -> list.map { if (it.id == groupId) it.copy(color = color) else it } }
+        _favoriteGroups.update { list -> list.map { if (it.id == groupId) it.withColor(color) else it } }
     }
 
     override suspend fun deleteGroup(groupId: String) {
