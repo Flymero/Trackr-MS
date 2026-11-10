@@ -23,6 +23,7 @@ import com.trackr.core.model.FavoriteItemRecord
 import com.trackr.core.model.FavoriteItemType
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.GroupCategory
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitLeg
 import kotlinx.coroutines.CoroutineScope
@@ -333,6 +334,71 @@ class FavoritesRepositoryTest {
         check(open())
         assertTrue(db.favorites().getItems().none { it.groupId == gym.id })
         assertTrue(db.routes().getRoutes().none { it.customGroupId == gym.id })
+    }
+
+    // ---- 分组颜色（issue #38） ----
+
+    @Test
+    fun groupColor_createAndChange_persists_otherGroupsUntouched() = runBlocking {
+        val repo = seeded()
+        val gym = repo.createGroup("健身", GroupColor.GREEN)
+        val school = repo.createGroup("学校")
+        assertEquals(GroupColor.GREEN, gym.color)
+        assertNull(school.color)
+
+        repo.setGroupColor(school.id, GroupColor.PINK)
+        repo.setGroupColor(FavoriteItemOrder.HOME_GROUP_ID, GroupColor.BLUE)
+        repo.setGroupColor(gym.id, null)
+        // 不存在的分组：什么都不做
+        repo.setGroupColor("missing", GroupColor.RED)
+
+        fun check(r: DefaultFavoritesRepository) {
+            assertEquals(
+                listOf(FavoriteItemOrder.COMMUTE_GROUP_ID, FavoriteItemOrder.HOME_GROUP_ID, gym.id, school.id),
+                r.favoriteGroups.value.map { it.id }
+            )
+            assertEquals(listOf(null, GroupColor.BLUE, null, GroupColor.PINK), r.favoriteGroups.value.map { it.color })
+            assertEquals(listOf("上班通勤", "回家线路", "健身", "学校"), r.favoriteGroups.value.map { it.name })
+        }
+        check(repo)
+        check(open())
+        assertEquals(listOf(null, "BLUE", null, "PINK"), db.favoriteGroups().getAll().map { it.color })
+    }
+
+    @Test
+    fun groupColor_survivesRenameAndReorder() = runBlocking {
+        val repo = seeded()
+        val gym = repo.createGroup("健身", GroupColor.ORANGE)
+        repo.renameGroup(gym.id, "游泳")
+        repo.reorderGroups(listOf(gym.id))
+
+        val reopened = open()
+        val group = reopened.favoriteGroups.value.first()
+        assertEquals(gym.id, group.id)
+        assertEquals("游泳", group.name)
+        assertEquals(GroupColor.ORANGE, group.color)
+    }
+
+    @Test
+    fun groupColor_unknownStoredValue_readsAsNoColor() = runBlocking {
+        val repo = seeded()
+        val gym = repo.createGroup("健身", GroupColor.RED)
+        // 以后的版本加了新颜色、又装回这个版本：认不出的名字按不设颜色读，分组本身照常
+        val rows = db.favoriteGroups().getAll().map { if (it.id == gym.id) it.copy(color = "ULTRAVIOLET") else it }
+        db.favoriteGroups().replaceAll(rows)
+
+        val group = open().favoriteGroups.value.single { it.id == gym.id }
+        assertEquals("健身", group.name)
+        assertNull(group.color)
+    }
+
+    @Test
+    fun legacyImport_keepsGroupColor() = runBlocking {
+        val groups = listOf(FavoriteGroup("gym", "健身", sortOrder = 0, color = GroupColor.TEAL))
+        writeLegacy(groups)
+        assertTrue(runLegacyMigration().ran)
+
+        assertEquals(GroupColor.TEAL, open().favoriteGroups.value.single().color)
     }
 
     // ---- 旧数据迁入后顺序不变 ----

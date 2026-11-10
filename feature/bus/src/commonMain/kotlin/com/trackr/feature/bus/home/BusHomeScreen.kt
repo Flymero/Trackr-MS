@@ -72,6 +72,12 @@ internal object BusHomeTags {
     const val NEARBY_HEADER = "bus_home_nearby_header"
     fun favoriteRow(key: String) = "bus_home_fav_$key"
     fun groupChip(id: String?) = "bus_home_group_${id ?: "all"}"
+
+    /** 分组 chip 前的色点（分组设了颜色才有） */
+    fun groupChipDot(id: String) = "bus_home_group_dot_$id"
+
+    /** 卡片左边的分组色条，[cardTag] 是那张卡的 testTag */
+    fun accentStripe(cardTag: String) = "${cardTag}_accent"
     fun nearbyStop(key: String) = "bus_home_nearby_$key"
 }
 

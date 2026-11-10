@@ -31,6 +31,8 @@ import com.trackr.data.remote.amap.AmapKeyStorage as LegacyAmapKeyStore
 private val legacyJson = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
+    // 认不出的枚举值（例如以后加的分组颜色）退回字段默认值，不把整份收藏当成损坏
+    coerceInputValues = true
 }
 
 /** 宽松解析：没存过、空串或解析失败都给空列表（旧版收藏的车、搜索历史都是这样读的） */

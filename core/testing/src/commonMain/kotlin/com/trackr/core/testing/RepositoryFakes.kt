@@ -13,6 +13,7 @@ import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
@@ -259,14 +260,23 @@ class FakeFavoritesRepository(
         refresh()
     }
 
-    override suspend fun createGroup(name: String): FavoriteGroup {
-        val group = FavoriteGroup(id = "fake_group_${nextGroupId++}", name = name.trim(), sortOrder = _favoriteGroups.value.size)
+    override suspend fun createGroup(name: String, color: GroupColor?): FavoriteGroup {
+        val group = FavoriteGroup(
+            id = "fake_group_${nextGroupId++}",
+            name = name.trim(),
+            sortOrder = _favoriteGroups.value.size,
+            color = color
+        )
         _favoriteGroups.update { it + group }
         return group
     }
 
     override suspend fun renameGroup(groupId: String, newName: String) {
         _favoriteGroups.update { list -> list.map { if (it.id == groupId) it.copy(name = newName.trim()) else it } }
+    }
+
+    override suspend fun setGroupColor(groupId: String, color: GroupColor?) {
+        _favoriteGroups.update { list -> list.map { if (it.id == groupId) it.copy(color = color) else it } }
     }
 
     override suspend fun deleteGroup(groupId: String) {

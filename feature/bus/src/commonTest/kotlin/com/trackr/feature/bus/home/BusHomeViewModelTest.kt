@@ -8,6 +8,7 @@ import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.NearbyStopLineStatus
 import com.trackr.core.model.TransitCodeProvider
@@ -751,6 +752,26 @@ class BusHomeViewModelTest {
         testScheduler.runCurrent()
         assertNull(viewModel.uiState.value.selectedGroupId)
         assertEquals(3, viewModel.uiState.value.favoriteRows.size)
+    }
+
+    @Test
+    fun testFavorites_groupColorChange_updatesRows() = runTest(main.dispatcher) {
+        val repo = FakeFavoritesRepository(
+            initialFavorites = listOf(fav("f1", "325", "科技园站"), fav("f2", "M194", "深大北门")),
+            initialGroups = listOf(FavoriteGroup(id = "g_work", name = "上班"))
+        )
+        repo.setGroup(FavoriteItem.stopKey("f2"), "g_work")
+        fakeRepository = HomeFakes(shanghai, repo)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals(listOf<GroupColor?>(null, null), viewModel.uiState.value.favoriteRows.map { it.groupColor })
+
+        // 编辑页给分组设了颜色：首页卡片跟着有色条
+        repo.setGroupColor("g_work", GroupColor.GREEN)
+        testScheduler.runCurrent()
+        assertEquals(listOf(null, GroupColor.GREEN), viewModel.uiState.value.favoriteRows.map { it.groupColor })
+        assertEquals(GroupColor.GREEN, viewModel.uiState.value.favoriteGroups.single().color)
     }
 
     @Test

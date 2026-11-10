@@ -9,6 +9,7 @@ import com.trackr.core.model.FavoriteItemRecord
 import com.trackr.core.model.FavoriteItemType
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.GroupCategory
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.TransitGroup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -231,9 +232,9 @@ class DefaultFavoritesRepository private constructor(
 
     // ---- 收藏分组 ----
 
-    override suspend fun createGroup(name: String): FavoriteGroup = locked {
+    override suspend fun createGroup(name: String, color: GroupColor?): FavoriteGroup = locked {
         val maxOrder = state.groups.maxOfOrNull { it.sortOrder } ?: -1
-        val group = FavoriteGroup(id = newId(), name = name.trim(), sortOrder = maxOrder + 1, isDefault = false)
+        val group = FavoriteGroup(id = newId(), name = name.trim(), sortOrder = maxOrder + 1, isDefault = false, color = color)
         val next = rebuild(groups = (state.groups + group).sortedBy { it.sortOrder })
         commit(next, FavoritesWrite(groups = next.groups))
         group
@@ -244,6 +245,13 @@ class DefaultFavoritesRepository private constructor(
         val next = rebuild(
             groups = state.groups.map { if (it.id == groupId) it.copy(name = newName.trim()) else it }.sortedBy { it.sortOrder }
         )
+        commit(next, FavoritesWrite(groups = next.groups))
+    }
+
+    override suspend fun setGroupColor(groupId: String, color: GroupColor?) = locked {
+        val group = state.groups.firstOrNull { it.id == groupId } ?: return@locked
+        if (group.color == color) return@locked
+        val next = rebuild(groups = state.groups.map { if (it.id == groupId) it.copy(color = color) else it })
         commit(next, FavoritesWrite(groups = next.groups))
     }
 

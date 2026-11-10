@@ -5,6 +5,7 @@ import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TrackingSession
@@ -160,6 +161,9 @@ sealed interface FavoriteRowUi {
     /** 合一列表的 key（`stop_x` / `route_x`，两种类型间不重复） */
     val key: String
 
+    /** 所在分组的颜色（issue #38），卡片左边画一条色条；不分组或分组没设颜色时为 null */
+    val groupColor: GroupColor?
+
     /**
      * 收藏的车：「325 · 科技园站上车 · → 科技园」+ 到站。
      * @param arrival 还没拿到实时数据时是「正在查车」
@@ -172,7 +176,8 @@ sealed interface FavoriteRowUi {
         val direction: String,
         val arrival: ArrivalUi,
         val open: LineTarget,
-        val spoken: String = ""
+        val spoken: String = "",
+        override val groupColor: GroupColor? = null
     ) : FavoriteRowUi
 
     /** 收藏的路线：「家 → 公司」+「325 › 19 · 换乘 1 次」 */
@@ -180,7 +185,8 @@ sealed interface FavoriteRowUi {
         override val key: String,
         val routeId: String,
         val title: String,
-        val linesText: String
+        val linesText: String,
+        override val groupColor: GroupColor? = null
     ) : FavoriteRowUi
 }
 

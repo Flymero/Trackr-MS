@@ -179,12 +179,14 @@ internal object BusHomeMapper {
 
     fun favoriteRows(state: BusHomeUiState): List<FavoriteRowUi> {
         val groupId = state.selectedGroupId
+        val colorOf = state.favoriteGroups.mapNotNull { group -> group.color?.let { group.id to it } }.toMap()
         return state.favoriteItems
             .filter { groupId == null || it.groupId == groupId }
             .map { item ->
+                val color = item.groupId?.let(colorOf::get)
                 when (item) {
-                    is FavoriteItem.Stop -> stopRow(item, state.favoritesRealtime[item.stop.id])
-                    is FavoriteItem.Route -> routeRow(item)
+                    is FavoriteItem.Stop -> stopRow(item, state.favoritesRealtime[item.stop.id]).copy(groupColor = color)
+                    is FavoriteItem.Route -> routeRow(item).copy(groupColor = color)
                 }
             }
     }

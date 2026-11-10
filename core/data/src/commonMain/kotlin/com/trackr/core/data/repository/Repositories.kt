@@ -9,6 +9,7 @@ import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
@@ -144,8 +145,12 @@ interface FavoritesRepository {
     suspend fun saveRoute(route: TransitGroup)
     suspend fun removeRoute(routeId: String)
 
-    suspend fun createGroup(name: String): FavoriteGroup
+    /** 新建分组，排在最后；[color] 为 null 时不设颜色 */
+    suspend fun createGroup(name: String, color: GroupColor? = null): FavoriteGroup
     suspend fun renameGroup(groupId: String, newName: String)
+
+    /** 改分组颜色（issue #38），null = 不设颜色；分组不存在时什么都不做 */
+    suspend fun setGroupColor(groupId: String, color: GroupColor?)
 
     /** 删分组：组里的收藏（车和路线）都变不分组，不删 */
     suspend fun deleteGroup(groupId: String)
