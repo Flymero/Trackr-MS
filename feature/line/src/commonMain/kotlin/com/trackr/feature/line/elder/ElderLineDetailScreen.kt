@@ -35,8 +35,11 @@ import com.trackr.core.designsystem.resources.action_retry
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.domain.arrival.ArrivalState
 import com.trackr.core.domain.arrival.ArrivalText
+import com.trackr.core.model.diversionNote
+import com.trackr.core.model.displayLineNameWithoutDiversion
 import com.trackr.feature.line.resources.Res as LineRes
 import com.trackr.feature.line.resources.line_detail_error
+import com.trackr.feature.line.resources.line_detail_diversion_body
 import com.trackr.feature.line.resources.line_detail_hours
 import com.trackr.feature.line.resources.line_detail_loading
 import com.trackr.feature.line.resources.line_elder_alert_me
@@ -202,13 +205,21 @@ private fun ElderLineContent(
     ) {
         // 线路号 +「始发 → 终点」+ 运营时间
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ElderLineBadge(name = line.name)
+            ElderLineBadge(name = line.displayLineNameWithoutDiversion)
             Spacer(modifier = Modifier.width(dimens.spaceM))
             Text(
                 text = "${line.startStop} → ${line.endStop}",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f)
+            )
+        }
+        line.diversionNote?.let { note ->
+            Text(
+                text = stringResource(LineRes.string.line_detail_diversion_body, note),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color = TrackrTheme.colors.warn
             )
         }
         if (line.firstTime.isNotBlank() || line.lastTime.isNotBlank()) {
