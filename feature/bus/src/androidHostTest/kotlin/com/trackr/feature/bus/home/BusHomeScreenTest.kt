@@ -16,6 +16,7 @@ import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.NearbyStop
@@ -80,7 +81,8 @@ class BusHomeScreenTest {
         session: TrackingSession? = null,
         withFavorites: Boolean = true,
         groups: List<FavoriteGroup> = emptyList(),
-        nearbyLineName: String = "19"
+        nearbyLineName: String = "19",
+        favGroupId: String? = null
     ): BusHomeUiState {
         val nearby = NearbyStop(
             stopId = "n1",
@@ -99,7 +101,7 @@ class BusHomeScreenTest {
         val raw = BusHomeUiState(
             currentCity = shenzhen,
             favorites = if (withFavorites) listOf(fav) else emptyList(),
-            favoriteItems = if (withFavorites) listOf(FavoriteItem.Stop(fav, groupId = null, sortOrder = 0)) else emptyList(),
+            favoriteItems = if (withFavorites) listOf(FavoriteItem.Stop(fav, groupId = favGroupId, sortOrder = 0)) else emptyList(),
             favoriteGroups = groups,
             trackingSessions = listOfNotNull(session),
             nearbyStops = listOf(nearby)
@@ -188,6 +190,27 @@ class BusHomeScreenTest {
         composeTestRule.onNodeWithText("全部").assertIsDisplayed()
         composeTestRule.onNodeWithText("上班").performClick()
         assertEquals(BusHomeEvent.SelectGroup("g1"), events.last())
+    }
+
+    @Test
+    fun groupColor_stripeOnCard_dotOnChip() {
+        val colored = FavoriteGroup(id = "g1", name = "上班", color = GroupColor.BLUE)
+        val plain = FavoriteGroup(id = "g2", name = "回家")
+        setContent(stateOf(groups = listOf(colored, plain), favGroupId = "g1"))
+
+        val cardTag = BusHomeTags.favoriteRow("stop_f1")
+        composeTestRule.onNodeWithTag(BusHomeTags.accentStripe(cardTag), useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithTag(BusHomeTags.groupChipDot("g1"), useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithTag(BusHomeTags.groupChipDot("g2"), useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun groupWithoutColor_noStripe() {
+        setContent(stateOf(groups = listOf(FavoriteGroup(id = "g1", name = "上班")), favGroupId = "g1"))
+
+        val cardTag = BusHomeTags.favoriteRow("stop_f1")
+        composeTestRule.onNodeWithTag(cardTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(BusHomeTags.accentStripe(cardTag), useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test

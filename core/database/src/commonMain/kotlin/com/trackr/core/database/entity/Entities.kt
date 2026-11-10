@@ -61,14 +61,19 @@ data class FavoriteItemEntity(
     val sortOrder: Int
 )
 
-/** 收藏分组，对应 FavoriteGroup */
+/**
+ * 收藏分组，对应 FavoriteGroup。
+ *
+ * `color`（库版本 3，issue #38）：GroupColor 的名字，null = 不设颜色；认不出的名字按 null 读。
+ */
 @Entity(tableName = "favorite_group")
 data class FavoriteGroupEntity(
     @PrimaryKey val id: String,
     val position: Int,
     val name: String,
     val sortOrder: Int,
-    val isDefault: Boolean
+    val isDefault: Boolean,
+    val color: String? = null
 )
 
 /**

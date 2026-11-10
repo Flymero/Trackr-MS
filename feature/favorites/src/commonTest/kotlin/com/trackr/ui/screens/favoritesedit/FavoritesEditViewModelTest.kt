@@ -12,6 +12,7 @@ import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.GroupCategory
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitLeg
@@ -146,6 +147,24 @@ class FavoritesEditViewModelTest {
         viewModel.setItemGroup("route_r1", null)
         testScheduler.runCurrent()
         assertNull(viewModel.items.value.first { it.key == "route_r1" }.groupId)
+    }
+
+    @Test
+    fun groupColor_createWithColor_andChangeColor() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.createFavoriteGroup("健身", GroupColor.PINK)
+        viewModel.setFavoriteGroupColor(workGroup.id, GroupColor.BLUE)
+        testScheduler.runCurrent()
+
+        assertEquals(listOf("上班", "回家", "健身"), viewModel.favoriteGroups.value.map { it.name })
+        assertEquals(listOf(GroupColor.BLUE, null, GroupColor.PINK), viewModel.favoriteGroups.value.map { it.color })
+
+        // 改回不设颜色
+        viewModel.setFavoriteGroupColor(workGroup.id, null)
+        testScheduler.runCurrent()
+        assertNull(viewModel.favoriteGroups.value.first { it.id == workGroup.id }.color)
     }
 
     @Test

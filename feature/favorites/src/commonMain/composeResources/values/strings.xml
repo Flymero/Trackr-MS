@@ -24,4 +24,5 @@
     <string name="fav_edit_delete_this_group">删除这个分组</string>
     <string name="fav_edit_change_group">改分组</string>
     <string name="fav_edit_group_picker_title">放到哪个分组</string>
+    <string name="fav_edit_group_color">颜色</string>
 </resources>

@@ -14,14 +14,32 @@ enum class GroupCategory(val displayName: String) {
 }
 
 /**
+ * 收藏分组的颜色（issue #38）：首页「全部」里按颜色分辨收藏属于哪个分组。
+ *
+ * 只存色板里的名字，具体色值由设计系统按深浅色给（`groupAccentColor`）。
+ * 存储里读到不认识的名字（以后加了颜色、又装回旧版本）按没设颜色处理，见 [fromKey]。
+ */
+@Serializable
+enum class GroupColor {
+    RED, ORANGE, YELLOW, GREEN, TEAL, BLUE, PURPLE, PINK;
+
+    companion object {
+        fun fromKey(key: String?): GroupColor? = key?.let { k -> entries.firstOrNull { it.name == k } }
+    }
+}
+
+/**
  * 收藏中心自定义分组实体
+ *
+ * @param color 分组颜色，null = 不设颜色（老分组、新建的分组默认都是 null）
  */
 @Serializable
 data class FavoriteGroup(
     val id: String,
     val name: String,
     val sortOrder: Int = 0,
-    val isDefault: Boolean = false
+    val isDefault: Boolean = false,
+    val color: GroupColor? = null
 )
 
 /**

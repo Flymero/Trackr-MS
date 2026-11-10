@@ -54,5 +54,14 @@ val MIGRATION_1_2: Migration = object : Migration(1, 2) {
     }
 }
 
+/**
+ * 2 -> 3（issue #38，分组颜色）：`favorite_group` 加一列可空的 `color`，老分组都是 null（不设颜色），别的不动。
+ */
+val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `favorite_group` ADD COLUMN `color` TEXT")
+    }
+}
+
 /** 全部迁移，按版本顺序。建库的地方统一加（[buildTrackrDatabase]） */
-val TRACKR_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+val TRACKR_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)

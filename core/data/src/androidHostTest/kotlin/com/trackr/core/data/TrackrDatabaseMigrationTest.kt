@@ -11,6 +11,7 @@ import com.trackr.core.database.TrackrDatabaseConstructor
 import com.trackr.core.database.buildTrackrDatabase
 import com.trackr.core.database.entity.FavoriteItemEntity
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.GroupColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -28,10 +29,10 @@ import org.robolectric.RuntimeEnvironment
 import java.io.File
 
 /**
- * 库从版本 1（第 9 步）升到版本 2（第 14 步，加 favorite_item）：收藏、分组、顺序都不变。
+ * 库升级：版本 1（第 9 步）-> 2（第 14 步，加 favorite_item）-> 3（issue #38，分组加 color）：收藏、分组、顺序都不变。
  *
- * 不用 room-testing：按 `core/database/schemas/.../1.json` 里的建表语句手工建一个版本 1 的库文件、塞数据，
- * 再用正式的 builder（带 MIGRATION_1_2）打开。Room 打开后会按版本 2 的表结构校验，迁移写错这里就会失败。
+ * 不用 room-testing：按 `core/database/schemas/.../<版本>.json` 里的建表语句手工建一个旧版本的库文件、塞数据，
+ * 再用正式的 builder（带全部迁移）打开。Room 打开后会按当前版本的表结构校验，迁移写错这里就会失败。
  */
 @RunWith(RobolectricTestRunner::class)
 class TrackrDatabaseMigrationTest {
@@ -71,9 +72,12 @@ class TrackrDatabaseMigrationTest {
     }
 
     /** 按 1.json 建表、写 room_master_table，user_version = 1 */
-    private fun createV1Database(fill: SQLiteDatabase.() -> Unit) {
-        val schema = Json.parseToJsonElement(schemaFile(1).readText()).jsonObject.getValue("database").jsonObject
-        assertEquals(1, schema.getValue("version").jsonPrimitive.content.toInt())
+    private fun createV1Database(fill: SQLiteDatabase.() -> Unit) = createDatabase(1, fill)
+
+    /** 按 <version>.json 建表、写 room_master_table，user_version = [version] */
+    private fun createDatabase(version: Int, fill: SQLiteDatabase.() -> Unit) {
+        val schema = Json.parseToJsonElement(schemaFile(version).readText()).jsonObject.getValue("database").jsonObject
+        assertEquals(version, schema.getValue("version").jsonPrimitive.content.toInt())
         val sqlite = SQLiteDatabase.openOrCreateDatabase(dbFile, null)
         try {
             for (entity in schema.getValue("entities").jsonArray) {
@@ -85,7 +89,7 @@ class TrackrDatabaseMigrationTest {
                 }
             }
             schema.getValue("setupQueries").jsonArray.forEach { sqlite.execSQL(it.jsonPrimitive.content) }
-            sqlite.version = 1
+            sqlite.version = version
             sqlite.fill()
         } finally {
             sqlite.close()
@@ -252,5 +256,39 @@ class TrackrDatabaseMigrationTest {
         val reopened = openMigrated()
         assertEquals(before, reopened.favorites().getItems())
         assertEquals(TrackrDatabase.VERSION, reopened.openHelper.readableDatabase.version)
+    }
+
+    // ---- 2 -> 3：分组颜色（issue #38） ----
+
+    @Test
+    fun migrate2To3_addsColorColumn_existingGroupsHaveNoColor() = runBlocking {
+        createDatabase(2) {
+            group("commute", 0, "上班通勤", true)
+            group("gym", 1, "健身", false)
+            stop("a", 0, "1路")
+            insertOrThrow("favorite_item", null, ContentValues().apply {
+                put("id", "stop_a"); put("type", "STOP"); put("refId", "a"); put("groupId", "gym"); put("sortOrder", 0)
+            })
+        }
+        val database = openMigrated()
+
+        val groups = database.favoriteGroups().getAll()
+        assertEquals(listOf("commute", "gym"), groups.map { it.id })
+        assertEquals(listOf("上班通勤", "健身"), groups.map { it.name })
+        assertEquals(listOf<String?>(null, null), groups.map { it.color })
+        assertEquals(listOf(FavoriteItemEntity("stop_a", "STOP", "a", "gym", 0)), database.favorites().getItems())
+
+        // 迁移后能写颜色、读回来
+        val repository = DefaultFavoritesRepository.create(RoomFavoritesStore(database), Dispatchers.IO)
+        repository.setGroupColor("gym", GroupColor.PURPLE)
+        assertEquals("PURPLE", database.favoriteGroups().getAll().single { it.id == "gym" }.color)
+        assertEquals(TrackrDatabase.VERSION, database.openHelper.readableDatabase.version)
+    }
+
+    @Test
+    fun migrate1To3_groupsHaveNoColor() = runBlocking {
+        createV1Database { fillTypical() }
+        val database = openMigrated()
+        assertTrue(database.favoriteGroups().getAll().all { it.color == null })
     }
 }

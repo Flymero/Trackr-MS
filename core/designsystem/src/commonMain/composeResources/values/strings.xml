@@ -26,4 +26,14 @@
     <string name="action_start_tracking">开始追踪</string>
     <string name="action_boarded">我上车了</string>
     <string name="action_add">添加</string>
+    <!-- 收藏分组颜色（issue #38） -->
+    <string name="group_color_none">不设颜色</string>
+    <string name="group_color_red">红色</string>
+    <string name="group_color_orange">橙色</string>
+    <string name="group_color_yellow">黄色</string>
+    <string name="group_color_green">绿色</string>
+    <string name="group_color_teal">青色</string>
+    <string name="group_color_blue">蓝色</string>
+    <string name="group_color_purple">紫色</string>
+    <string name="group_color_pink">粉色</string>
 </resources>
