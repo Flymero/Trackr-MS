@@ -92,6 +92,7 @@ import com.trackr.core.designsystem.resources.ic_star_filled
 import com.trackr.core.designsystem.resources.ic_swap
 import com.trackr.core.designsystem.resources.transit_code
 import com.trackr.core.designsystem.theme.busColors
+import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusStop
 import com.trackr.core.model.LineOperatingState
@@ -99,9 +100,12 @@ import com.trackr.core.model.LiveBus
 import com.trackr.core.model.RailMode
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.displayLineName
+import com.trackr.core.model.displayLineNameWithoutDiversion
+import com.trackr.core.model.diversionNote
 import com.trackr.feature.line.resources.Res as LineRes
 import com.trackr.feature.line.resources.line_detail_error
 import com.trackr.feature.line.resources.line_detail_fare
+import com.trackr.feature.line.resources.line_detail_diversion_body
 import com.trackr.feature.line.resources.line_detail_hours
 import com.trackr.feature.line.resources.line_detail_loading
 import com.trackr.feature.line.resources.line_detail_reminder
@@ -255,7 +259,7 @@ fun LineDetailScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             LineTopBar(
-                title = static?.line?.displayLineName?.takeIf { it.isNotBlank() } ?: state.lineNameHint,
+                title = static?.line?.displayLineNameWithoutDiversion?.takeIf { it.isNotBlank() } ?: state.lineNameHint,
                 isFavorite = state.isFavorite,
                 actionsEnabled = static != null && state.selectedStop != null,
                 onBack = { onEvent(LineDetailEvent.Back) },
@@ -348,6 +352,7 @@ fun LineDetailScreen(
                                 static = static,
                                 onOpenTimetable = { onEvent(LineDetailEvent.OpenTimetable) }
                             )
+                            static.line.diversionNote?.let { DiversionBanner(note = it) }
                             if (hasError) {
                                 ErrorBanner(
                                     text = state.errorMessage.orEmpty(),
@@ -554,6 +559,33 @@ private fun DirectionHeader(
             TextButton(onClick = onOpenTimetable) {
                 Text(text = stringResource(LineRes.string.line_detail_timetable), fontSize = 13.sp)
             }
+        }
+    }
+}
+
+/** 临时改道提示条：线路名里带「（临时改道）」时显示，标题已去掉这截括号 */
+@Composable
+private fun DiversionBanner(note: String) {
+    Surface(
+        color = TrackrTheme.colors.warn.copy(alpha = 0.14f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .semantics(mergeDescendants = true) {}
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(
+                text = note,
+                color = TrackrTheme.colors.warn,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = stringResource(LineRes.string.line_detail_diversion_body, note),
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 12.sp
+            )
         }
     }
 }
