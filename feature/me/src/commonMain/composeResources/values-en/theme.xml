@@ -17,9 +17,6 @@
     <string name="theme_elder">Senior mode uses high-contrast colors. Your color choices are retained for standard mode.</string>
     <string name="theme_hex">HEX color</string>
     <string name="theme_hex_error">Enter six hex digits, for example #1F5FD6</string>
-    <string name="theme_pick_color">Choose color</string>
-    <string name="theme_use_color">Use this color</string>
-    <string name="theme_hue">Hue</string>
     <string name="theme_blue">Blue</string>
     <string name="theme_teal">Teal</string>
     <string name="theme_purple">Purple</string>
@@ -58,14 +55,4 @@
     <string name="theme_preview_bus">Bus</string>
     <string name="theme_preview_route">Routes</string>
     <string name="theme_preview_me">Me</string>
-    <string name="theme_rgb_error">Enter a whole number from 0 to 255 for each RGB channel</string>
-    <string name="theme_red_channel">Red (0–255)</string>
-    <string name="theme_green_channel">Green (0–255)</string>
-    <string name="theme_blue_channel">Blue (0–255)</string>
-    <string name="theme_color_area">Color selection area</string>
-    <string name="theme_color_area_state">Saturation %1$d%%, brightness %2$d%%</string>
-    <string name="theme_increase_saturation">Increase saturation</string>
-    <string name="theme_decrease_saturation">Decrease saturation</string>
-    <string name="theme_increase_brightness">Increase brightness</string>
-    <string name="theme_decrease_brightness">Decrease brightness</string>
 </resources>

@@ -768,10 +768,10 @@ class BusHomeViewModelTest {
         assertEquals(listOf<GroupColor?>(null, null), viewModel.uiState.value.favoriteRows.map { it.groupColor })
 
         // 编辑页给分组设了颜色：首页卡片跟着有色条
-        repo.setGroupColor("g_work", GroupColor.GREEN)
+        repo.setGroupColor("g_work", GroupColor.Preset.GREEN)
         testScheduler.runCurrent()
-        assertEquals(listOf(null, GroupColor.GREEN), viewModel.uiState.value.favoriteRows.map { it.groupColor })
-        assertEquals(GroupColor.GREEN, viewModel.uiState.value.favoriteGroups.single().color)
+        assertEquals(listOf(null, GroupColor.Preset.GREEN), viewModel.uiState.value.favoriteRows.map { it.groupColor })
+        assertEquals(GroupColor.Preset.GREEN, viewModel.uiState.value.favoriteGroups.single().color)
     }
 
     @Test

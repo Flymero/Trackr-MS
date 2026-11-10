@@ -28,9 +28,9 @@ class BusHomeMapperGroupColorTest {
 
     private val state = BusHomeUiState(
         favoriteGroups = listOf(
-            FavoriteGroup(id = "work", name = "上班", color = GroupColor.BLUE),
-            FavoriteGroup(id = "gym", name = "健身"),
-            FavoriteGroup(id = "home", name = "回家", color = GroupColor.ORANGE)
+            FavoriteGroup(id = "work", name = "上班", color = GroupColor.Preset.BLUE),
+            FavoriteGroup(id = "gym", name = "健身", color = GroupColor.Custom(0x12AB9F)),
+            FavoriteGroup(id = "home", name = "回家", color = GroupColor.Preset.ORANGE)
         ),
         favoriteItems = listOf(
             FavoriteItem.Stop(stop("a"), groupId = "work", sortOrder = 0),
@@ -47,7 +47,7 @@ class BusHomeMapperGroupColorTest {
         val rows = BusHomeMapper.favoriteRows(state)
 
         assertEquals(listOf("stop_a", "stop_b", "stop_c", "route_r1", "stop_d"), rows.map { it.key })
-        assertEquals(listOf(GroupColor.BLUE, null, null, GroupColor.ORANGE, null), rows.map { it.groupColor })
+        assertEquals(listOf(GroupColor.Preset.BLUE, GroupColor.Custom(0x12AB9F), null, GroupColor.Preset.ORANGE, null), rows.map { it.groupColor })
     }
 
     @Test
@@ -55,6 +55,6 @@ class BusHomeMapperGroupColorTest {
         val rows = BusHomeMapper.favoriteRows(state.copy(selectedGroupId = "home"))
 
         assertEquals(listOf("route_r1"), rows.map { it.key })
-        assertEquals(listOf<GroupColor?>(GroupColor.ORANGE), rows.map { it.groupColor })
+        assertEquals(listOf<GroupColor?>(GroupColor.Preset.ORANGE), rows.map { it.groupColor })
     }
 }

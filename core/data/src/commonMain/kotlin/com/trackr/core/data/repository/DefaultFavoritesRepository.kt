@@ -251,7 +251,7 @@ class DefaultFavoritesRepository private constructor(
     override suspend fun setGroupColor(groupId: String, color: GroupColor?) = locked {
         val group = state.groups.firstOrNull { it.id == groupId } ?: return@locked
         if (group.color == color) return@locked
-        val next = rebuild(groups = state.groups.map { if (it.id == groupId) it.copy(color = color) else it })
+        val next = rebuild(groups = state.groups.map { if (it.id == groupId) it.withColor(color) else it })
         commit(next, FavoritesWrite(groups = next.groups))
     }
 

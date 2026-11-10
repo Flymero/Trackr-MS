@@ -11,7 +11,6 @@ import com.trackr.core.database.entity.RouteLegEntity
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.FavoriteGroup
-import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteItemRecord
 import com.trackr.core.model.FavoriteItemType
 import com.trackr.core.model.FavoriteStationLine
@@ -31,8 +30,6 @@ import kotlinx.serialization.json.Json
 internal val localJson = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
-    // 认不出的枚举值（例如以后加的分组颜色）退回字段默认值
-    coerceInputValues = true
 }
 
 private val geoPointList = ListSerializer(GeoPoint.serializer())
@@ -96,7 +93,7 @@ fun FavoriteGroup.toEntity(position: Int) = FavoriteGroupEntity(
     name = name,
     sortOrder = sortOrder,
     isDefault = isDefault,
-    color = color?.name
+    color = colorKey
 )
 
 fun FavoriteGroupEntity.toModel() = FavoriteGroup(
@@ -104,7 +101,8 @@ fun FavoriteGroupEntity.toModel() = FavoriteGroup(
     name = name,
     sortOrder = sortOrder,
     isDefault = isDefault,
-    color = GroupColor.fromKey(color)
+    // 认不出的值原样留着（读的时候 FavoriteGroup.color 给 null），下次整份写回也不丢
+    colorKey = color
 )
 
 // ---- 收藏合一索引（第 14 步） ----

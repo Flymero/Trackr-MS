@@ -280,7 +280,7 @@ class TrackrDatabaseMigrationTest {
 
         // 迁移后能写颜色、读回来
         val repository = DefaultFavoritesRepository.create(RoomFavoritesStore(database), Dispatchers.IO)
-        repository.setGroupColor("gym", GroupColor.PURPLE)
+        repository.setGroupColor("gym", GroupColor.Preset.PURPLE)
         assertEquals("PURPLE", database.favoriteGroups().getAll().single { it.id == "gym" }.color)
         assertEquals(TrackrDatabase.VERSION, database.openHelper.readableDatabase.version)
     }

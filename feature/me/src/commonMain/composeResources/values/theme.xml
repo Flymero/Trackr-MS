@@ -17,9 +17,6 @@
     <string name="theme_elder">长辈版使用高对比配色；颜色偏好已保留，退出长辈版后恢复。</string>
     <string name="theme_hex">HEX 色值</string>
     <string name="theme_hex_error">请输入六位 HEX 色值，例如 #1F5FD6</string>
-    <string name="theme_pick_color">选择颜色</string>
-    <string name="theme_use_color">使用此颜色</string>
-    <string name="theme_hue">色相</string>
     <string name="theme_blue">蓝色</string>
     <string name="theme_teal">青绿</string>
     <string name="theme_purple">雾紫</string>
@@ -58,14 +55,4 @@
     <string name="theme_preview_bus">公交</string>
     <string name="theme_preview_route">路线</string>
     <string name="theme_preview_me">我的</string>
-    <string name="theme_rgb_error">RGB 各通道请输入 0–255 的整数</string>
-    <string name="theme_red_channel">红色（0–255）</string>
-    <string name="theme_green_channel">绿色（0–255）</string>
-    <string name="theme_blue_channel">蓝色（0–255）</string>
-    <string name="theme_color_area">颜色选择区域</string>
-    <string name="theme_color_area_state">饱和度 %1$d%%，明度 %2$d%%</string>
-    <string name="theme_increase_saturation">增加饱和度</string>
-    <string name="theme_decrease_saturation">减少饱和度</string>
-    <string name="theme_increase_brightness">增加明度</string>
-    <string name="theme_decrease_brightness">减少明度</string>
 </resources>

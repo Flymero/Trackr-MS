@@ -11,6 +11,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.assertTextContains
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.DataSourceType
@@ -172,7 +174,7 @@ class FavoritesEditScreenTest {
         composeTestRule.onNodeWithText("创建").performClick()
 
         assertEquals(
-            listOf(FavoritesEditEvent.CreateGroup("健身房", GroupColor.GREEN)),
+            listOf(FavoritesEditEvent.CreateGroup("健身房", GroupColor.Preset.GREEN)),
             events.filterIsInstance<FavoritesEditEvent.CreateGroup>()
         )
     }
@@ -190,7 +192,7 @@ class FavoritesEditScreenTest {
         assertEquals(
             listOf(
                 FavoritesEditEvent.RenameGroup("fav1", "上班"),
-                FavoritesEditEvent.SetGroupColor("fav1", GroupColor.RED)
+                FavoritesEditEvent.SetGroupColor("fav1", GroupColor.Preset.RED)
             ),
             events
         )
@@ -198,7 +200,7 @@ class FavoritesEditScreenTest {
 
     @Test
     fun editGroup_colorUnchanged_onlyRenames() {
-        setContent(listOf(favoriteGroup.copy(color = GroupColor.BLUE)))
+        setContent(listOf(favoriteGroup.withColor(GroupColor.Preset.BLUE)))
 
         composeTestRule.onNodeWithTag("btn_edit_group_fav1").performClick()
         composeTestRule.onNodeWithTag("group_color_BLUE").performScrollTo().assertIsSelected()
@@ -208,8 +210,48 @@ class FavoritesEditScreenTest {
     }
 
     @Test
+    fun editGroup_customColor_opensSharedPicker_andSendsCustom() {
+        setContent()
+
+        composeTestRule.onNodeWithTag("btn_edit_group_fav1").performClick()
+        composeTestRule.onNodeWithTag("group_color_custom").performScrollTo().assertIsNotSelected().performClick()
+        // 和主题色同一个选色面板
+        composeTestRule.onNodeWithTag("color_picker").assertExists()
+        composeTestRule.onNodeWithTag("color_picker_hex").performTextReplacement("#12AB9F")
+        composeTestRule.onNodeWithTag("color_picker_confirm").performClick()
+        composeTestRule.onNodeWithTag("color_picker").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("group_color_custom").performScrollTo().assertIsSelected()
+        composeTestRule.onNodeWithTag("group_color_none").assertIsNotSelected()
+        composeTestRule.onNodeWithText("保存").performClick()
+
+        assertEquals(
+            listOf(
+                FavoritesEditEvent.RenameGroup("fav1", "上班"),
+                FavoritesEditEvent.SetGroupColor("fav1", GroupColor.Custom(0x12AB9F))
+            ),
+            events
+        )
+    }
+
+    @Test
+    fun editGroup_customColor_cancelPicker_keepsPrevious() {
+        setContent(listOf(favoriteGroup.copy(colorKey = "#12AB9F")))
+
+        composeTestRule.onNodeWithTag("btn_edit_group_fav1").performClick()
+        composeTestRule.onNodeWithTag("group_color_custom").performScrollTo().assertIsSelected().performClick()
+        // 接着改当前的自定义色
+        composeTestRule.onNodeWithTag("color_picker_hex").assertTextContains("#12AB9F")
+        composeTestRule.onNodeWithTag("color_picker_hex").performTextReplacement("#000000")
+        composeTestRule.onNodeWithTag("color_picker_cancel").performClick()
+        composeTestRule.onNodeWithText("保存").performClick()
+
+        assertEquals(listOf(FavoritesEditEvent.RenameGroup("fav1", "上班")), events)
+    }
+
+    @Test
     fun groupRow_showsColorDotOnlyWhenColored() {
-        setContent(listOf(favoriteGroup.copy(color = GroupColor.BLUE), FavoriteGroup(id = "fav2", name = "回家", sortOrder = 1)))
+        setContent(listOf(favoriteGroup.withColor(GroupColor.Preset.BLUE), FavoriteGroup(id = "fav2", name = "回家", sortOrder = 1)))
 
         composeTestRule.onNodeWithTag("group_color_dot_fav1").assertExists()
         composeTestRule.onNodeWithTag("group_color_dot_fav2").assertDoesNotExist()

@@ -154,12 +154,12 @@ class FavoritesEditViewModelTest {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
 
-        viewModel.createFavoriteGroup("健身", GroupColor.PINK)
-        viewModel.setFavoriteGroupColor(workGroup.id, GroupColor.BLUE)
+        viewModel.createFavoriteGroup("健身", GroupColor.Preset.PINK)
+        viewModel.setFavoriteGroupColor(workGroup.id, GroupColor.Preset.BLUE)
         testScheduler.runCurrent()
 
         assertEquals(listOf("上班", "回家", "健身"), viewModel.favoriteGroups.value.map { it.name })
-        assertEquals(listOf(GroupColor.BLUE, null, GroupColor.PINK), viewModel.favoriteGroups.value.map { it.color })
+        assertEquals(listOf(GroupColor.Preset.BLUE, null, GroupColor.Preset.PINK), viewModel.favoriteGroups.value.map { it.color })
 
         // 改回不设颜色
         viewModel.setFavoriteGroupColor(workGroup.id, null)

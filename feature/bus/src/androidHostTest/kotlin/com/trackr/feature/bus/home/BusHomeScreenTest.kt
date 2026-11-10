@@ -194,7 +194,7 @@ class BusHomeScreenTest {
 
     @Test
     fun groupColor_stripeOnCard_dotOnChip() {
-        val colored = FavoriteGroup(id = "g1", name = "上班", color = GroupColor.BLUE)
+        val colored = FavoriteGroup(id = "g1", name = "上班", color = GroupColor.Preset.BLUE)
         val plain = FavoriteGroup(id = "g2", name = "回家")
         setContent(stateOf(groups = listOf(colored, plain), favGroupId = "g1"))
 
