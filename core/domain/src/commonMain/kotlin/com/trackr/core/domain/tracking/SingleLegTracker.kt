@@ -253,7 +253,7 @@ internal object SingleLegTracker {
 
     /**
      * 轮询可能直接从进站前跳到离站后，或车到站那轮还没取得定位。
-     * 必须在选下一班车之前补回原车；只认最近追过的同一辆车、刚过一站且人在站旁或已随车离开。
+     * 必须在选下一班车之前补回原车；只认最近追过的同一辆车、刚过一两站且人在站旁或已随车离开。
      * 此处只创建待确认，是否上车仍由两次不同定位判断，不能因车过站直接结束。
      */
     private fun recoverDepartedCandidate(
@@ -279,7 +279,7 @@ internal object SingleLegTracker {
             if (recentBus == null || recentBus.order !in (session.targetOrder + 1)..(session.targetOrder + 2)) {
                 return cleanedSession.copy(recentDepartedBusId = null, recentDepartedAtMillis = 0L)
             }
-            if (input.user == null) {
+            if (input.user == null && input.coarseUser == null) {
                 return cleanedSession
             }
             return if (BoardingDetector.shouldRecoverDepartedCandidate(input, recentBus)) {
@@ -294,8 +294,9 @@ internal object SingleLegTracker {
         if (cleanedSession.currentBusOrder !in (cleanedSession.targetOrder - 2)..cleanedSession.targetOrder) return cleanedSession
         val previousId = cleanedSession.currentBusId ?: return cleanedSession
         val departed = buses.firstOrNull { it.busId == previousId } ?: return cleanedSession
-        if (departed.order != cleanedSession.targetOrder + 1) return cleanedSession
-        if (input.user == null) {
+        // 上游数据常常一跳两站（车不停站、或这一轮轮询晚了），只认刚过一站会整段漏掉判定（issue #41）
+        if (departed.order !in (cleanedSession.targetOrder + 1)..(cleanedSession.targetOrder + 2)) return cleanedSession
+        if (input.user == null && input.coarseUser == null) {
             // 车刚过站但定位还没拿到：暂存 busId 保持高频定位与轮询，等下一轮拿到定位再补回
             return cleanedSession.copy(
                 recentDepartedBusId = previousId,

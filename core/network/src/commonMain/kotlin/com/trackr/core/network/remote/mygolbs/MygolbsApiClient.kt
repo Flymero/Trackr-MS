@@ -1,5 +1,6 @@
 package com.trackr.core.network.remote.mygolbs
 
+import com.trackr.core.domain.arrival.StopOrderResolver
 import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.domain.platform.ProcessMonotonicClock
@@ -176,6 +177,9 @@ class MygolbsApiClient(
         clock = clock
     )
     private val stopLinesSemaphore = Semaphore(MAX_CONCURRENT_STOP_LINES)
+
+    /** 站点详情核对站序时补查 CMD=103 的并发上限 */
+    private val routeStaticSemaphore = Semaphore(MAX_CONCURRENT_STOP_LINES)
 
     /** CMD=114 / CMD=110 失败时共用的 CMD=102 降级结果 */
     private val searchFallbackCache = SingleFlightCache<String, JSONObject>(
@@ -431,7 +435,8 @@ class MygolbsApiClient(
         val normalizedCity = normalizeCityName(cityName)
         val cleanStation = stationName.trim()
         try {
-            fetchStopLines(normalizedCity, cleanStation)
+            // 站点详情页是开始追踪 / 一起等的入口：站序必须按站表核对过（issue #41）
+            fetchStopLines(normalizedCity, cleanStation, verifyOrders = true)
         } catch (ce: CancellationException) {
             throw ce
         } catch (_: Exception) {
@@ -492,7 +497,8 @@ class MygolbsApiClient(
         val cleanStation = stationName.trim()
         return try {
             nearbyStopLinesCache.get("$normalizedCity|$cleanStation") {
-                stopLinesSemaphore.withPermit { fetchStopLines(normalizedCity, cleanStation) }
+                // 附近站一次查很多站，不为核对站序逐条线补查站表，只用已缓存的站表核对
+                stopLinesSemaphore.withPermit { fetchStopLines(normalizedCity, cleanStation, verifyOrders = false) }
             }
         } catch (ce: CancellationException) {
             throw ce
@@ -504,7 +510,11 @@ class MygolbsApiClient(
     /**
      * CMD=105 请求与解析；网络或上游错误直接抛出，由调用方决定兜底
      */
-    private suspend fun fetchStopLines(normalizedCity: String, cleanStation: String): NearbyStop {
+    private suspend fun fetchStopLines(
+        normalizedCity: String,
+        cleanStation: String,
+        verifyOrders: Boolean
+    ): NearbyStop {
         val stopId = "mg:$normalizedCity:$cleanStation"
         val nowHHMM = beijingNowHHMM()
         val json = callApi(
@@ -602,14 +612,56 @@ class MygolbsApiClient(
             )
         }
 
+        val verified = coroutineScope {
+            lineStatuses.map { status ->
+                async { verifyStationOrder(status, normalizedCity, cleanStation, loadIfMissing = verifyOrders) }
+            }.awaitAll()
+        }
+
         return NearbyStop(
             stopId = stopId,
             name = cleanStation,
             physicalStId = stopId,
             namesakeStId = stopId,
-            lines = lineStatuses,
+            lines = verified,
             source = DataSourceType.MYGOLBS
         )
+    }
+
+    /**
+     * CMD=105 的站序是拿 stationID 推的（stationID + 1）。有的城市 stationID 是站点编号而不是序号，
+     * 推出来的站序比全线站数还大，追踪和通知里就成了「还有 9xx 站」（issue #41）。
+     * 用 CMD=103 站表按站名核对：站名对得上就用站表里的站序；对不上、推出来的站序又不在站表里时清成 0（站序未知）。
+     *
+     * @param loadIfMissing 站表没缓存时要不要现查（12 小时缓存，和线路详情共用）；false 时只用已缓存的站表
+     */
+    private suspend fun verifyStationOrder(
+        status: NearbyStopLineStatus,
+        normalizedCity: String,
+        cleanStation: String,
+        loadIfMissing: Boolean
+    ): NearbyStopLineStatus {
+        val ref = MygolbsIds.parseLineId(status.line.lineId) ?: return status
+        val key = routeStaticKey(ref.cityCode, normalizedCity, ref.lineName, ref.direction)
+        val stops = routeStaticCache.getCached(key)?.stops
+            ?: if (loadIfMissing) {
+                try {
+                    routeStaticSemaphore.withPermit {
+                        loadRouteStatic(ref.cityCode, normalizedCity, ref.lineName, ref.direction)
+                    }.stops
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (_: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+        if (stops.isNullOrEmpty()) return status
+        val resolved = StopOrderResolver.resolve(stops, status.targetOrder, cleanStation)
+            ?: status.targetOrder.takeIf { StopOrderResolver.isInRange(stops, it) }
+            ?: 0
+        return if (resolved == status.targetOrder) status else status.copy(targetOrder = resolved)
     }
 
     /**

@@ -129,6 +129,9 @@ class BusTrackingService : LifecycleService() {
     /** 服务自己最近一次采用的定位（判上车用） */
     private var serviceFix: UserFix? = null
 
+    /** 上次补带 location 类型的单调时刻；-1 = 还没试过 */
+    private var lastLocationUpgradeAttemptMillis: Long = -1L
+
     /** 最近一次 onStartCommand 的 startId：停止时只停到这一次，之后又来的启动请求不受影响 */
     private var lastStartId: Int = 0
 
@@ -143,6 +146,10 @@ class BusTrackingService : LifecycleService() {
         // 这里排到下一轮再处理，不在仓库的锁里跑服务的代码
         lifecycleScope.launch(Dispatchers.Main) {
             trackingRepository.sessions.collect { onSessionsChanged(it) }
+        }
+        // 追踪中途才打开「上车后自动结束追踪」：前台服务当初没带 location 类型，要补上，否则这次追踪判不了上车（issue #41）
+        lifecycleScope.launch(Dispatchers.Main) {
+            settings.autoStopAfterBoarding.collect { upgradeLocationTypeIfNeeded(force = true) }
         }
     }
 
@@ -331,6 +338,7 @@ class BusTrackingService : LifecycleService() {
         // 旧版本留下的那条（id 10001，按钮不带 sessionId）：只要还有追踪在跑就清掉它，
         // 不然它会一直躺在通知栏，点它的「结束」还可能把别的项一起停掉
         if (live.isNotEmpty()) liveProgressNotifier.cancelNotification(this)
+        upgradeLocationTypeIfNeeded(force = false)
         updateLocationCadence()
         if (live.isEmpty() && sessions.none { it.interrupted }) {
             shutdown()
@@ -448,6 +456,7 @@ class BusTrackingService : LifecycleService() {
                 val wantLocation = TrackingEngine.wantsLocation(session.target, stopAfterBoarding) &&
                     locationSource.hasPrecisePermission()
                 runCatching { enterForeground(notificationOf(session), wantLocation, firstId) }
+                    .onSuccess { locationTrackingAllowed = it }
                     .onFailure { Log.w(TAG, "Cannot move foreground notification to the new one", it) }
             }
         }
@@ -583,6 +592,40 @@ class BusTrackingService : LifecycleService() {
             )
         }
 
+    /**
+     * 前台服务该带 location 类型却没带上时再试一次（issue #41「上车检测不一定生效」）。
+     *
+     * 没带上的情形：开始追踪时开关还关着；进程被杀后系统在后台重建服务，Android 14+ 不让后台进程拿 location 类型。
+     * 之前只在进前台那一刻决定一次，这一整次追踪都判不了上车。现在会话每次变化时补试（用户回到 App、
+     * 或在「我的」里打开开关时就能成功）；不是开关触发的补试最多一分钟一次。
+     */
+    private fun upgradeLocationTypeIfNeeded(force: Boolean) {
+        if (locationTrackingAllowed) return
+        val focusId = foregroundSessionId ?: return
+        val live = trackingRepository.sessions.value.filter { !it.interrupted && it.state.isActive }
+        val focus = live.firstOrNull { it.sessionId == focusId } ?: return
+        if (live.none { TrackingEngine.wantsLocation(it.target, stopAfterBoarding) }) return
+        if (!locationSource.hasPrecisePermission()) return
+        val now = monotonicClock.elapsedMillis()
+        if (!force && lastLocationUpgradeAttemptMillis >= 0L &&
+            now - lastLocationUpgradeAttemptMillis < LOCATION_UPGRADE_RETRY_MILLIS
+        ) return
+        lastLocationUpgradeAttemptMillis = now
+        locationTrackingAllowed = try {
+            enterForeground(notificationOf(focus), wantLocation = true, notificationId = foregroundNotifyId)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Cannot add location type to foreground tracking", e)
+            false
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Cannot add location type to foreground tracking", e)
+            false
+        }
+        if (locationTrackingAllowed) {
+            locationSource.lastKnownFixes().forEach { onServiceFix(it) }
+            updateLocationCadence()
+        }
+    }
+
     /** 按所有会话里最勤的那一档调整定位频率；都不需要时关闭定位 */
     private fun updateLocationCadence() {
         val tier = if (!locationTrackingAllowed) {
@@ -660,6 +703,9 @@ class BusTrackingService : LifecycleService() {
     companion object {
         private const val TAG = "BusTrackingService"
         private const val NO_GENERATION = -1
+
+        /** 补带 location 类型失败后，至少隔这么久再试 */
+        private const val LOCATION_UPGRADE_RETRY_MILLIS = 60_000L
 
         const val ACTION_START_TRACKING = "com.trackr.action.START_TRACKING"
         const val EXTRA_SESSION_ID = "extra_session_id"

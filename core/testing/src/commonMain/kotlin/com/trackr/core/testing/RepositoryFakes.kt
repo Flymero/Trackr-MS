@@ -2,6 +2,7 @@ package com.trackr.core.testing
 
 import com.trackr.core.model.ThemeColors
 import com.trackr.core.data.repository.FavoritesRepository
+import com.trackr.core.data.repository.LineDetailUpdate
 import com.trackr.core.data.repository.LocationRepository
 import com.trackr.core.data.repository.RealtimeRepository
 import com.trackr.core.data.repository.SearchHistoryRepository
@@ -339,6 +340,14 @@ class FakeRealtimeRepository(
     /** [getLineDetail] 返回前先跑一下（测试用来挂起、数并发）；null = 直接返回 */
     var lineDetailHook: (suspend (lineId: String) -> Unit)? = null
 
+    /** 每次 [getLineDetail] 请求的候车站序（按调用顺序） */
+    val lineDetailTargetOrders: MutableList<Int?> = mutableListOf()
+
+    /** 测试推「别处刚拿到的线路详情」 */
+    val lineDetailUpdateFlow = MutableSharedFlow<LineDetailUpdate>(extraBufferCapacity = 16)
+
+    override val lineDetailUpdates: Flow<LineDetailUpdate> get() = lineDetailUpdateFlow
+
     /** 记录每次附近站点查询的 (城市, 纬度, 经度) */
     val nearbyStopsCalls: MutableList<Triple<TransitCity, Double, Double>> = mutableListOf()
 
@@ -398,6 +407,7 @@ class FakeRealtimeRepository(
         directionHint: Int
     ): Result<BusLineDetail> {
         lineDetailCalls += lineId
+        lineDetailTargetOrders += targetOrder
         lineDetailHook?.invoke(lineId)
         lineDetailsMap[lineId]?.let { return Result.success(it) }
         lineDetailResult?.let { return it }
