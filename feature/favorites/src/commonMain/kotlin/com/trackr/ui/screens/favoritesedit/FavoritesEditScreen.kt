@@ -86,6 +86,8 @@ import com.trackr.core.designsystem.resources.ic_delete
 import com.trackr.core.designsystem.resources.ic_drag
 import com.trackr.core.designsystem.resources.ic_edit
 import com.trackr.core.designsystem.resources.ic_plus
+import com.trackr.core.designsystem.resources.ic_place
+import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.designsystem.resources.ic_route
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
@@ -385,10 +387,11 @@ fun FavoritesEditScreen(
     }
 }
 
-/** 一条收藏在列表里的主文案：车是「科技园站上车」，路线是名字（没名字时用起终点） */
+/** 一条收藏在列表里的主文案：车是「科技园站上车」，路线是名字（没名字时用起终点），站是站名 */
 private fun FavoriteItem.title(): String = when (this) {
     is FavoriteItem.Stop -> "${stop.targetStopName}上车"
     is FavoriteItem.Route -> route.title()
+    is FavoriteItem.Station -> station.stopName
 }
 
 private fun TransitGroup.title(): String =
@@ -451,7 +454,7 @@ private fun GroupRow(
     }
 }
 
-/** 一行收藏：把手 | 线路号（车）或路线图标 | 主副文案 | 删除 */
+/** 一行收藏：把手 | 线路号（车）、路线图标或站图钉 | 主副文案 | 删除 */
 @Composable
 private fun FavoriteRow(
     item: FavoriteItem,
@@ -480,6 +483,13 @@ private fun FavoriteRow(
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp)
             )
+            // 收藏的站（issue #47）：绿色图钉，和首页一样
+            is FavoriteItem.Station -> Icon(
+                imageVector = vectorResource(Res.drawable.ic_place),
+                contentDescription = null,
+                tint = TrackrTheme.colors.go,
+                modifier = Modifier.size(20.dp)
+            )
         }
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -494,6 +504,11 @@ private fun FavoriteRow(
                 text = buildString {
                     if (item is FavoriteItem.Route) {
                         append("${item.route.originStopName} → ${item.route.destinationStopName}")
+                        append(" · ")
+                    }
+                    // 站：默认方向（只有一个站台时没有）
+                    if (item is FavoriteItem.Station && item.station.platformLabel.isNotBlank()) {
+                        append(item.station.platformLabel)
                         append(" · ")
                     }
                     append(groupName ?: stringResource(Res.string.group_none))

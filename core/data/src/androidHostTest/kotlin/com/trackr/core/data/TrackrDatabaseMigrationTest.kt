@@ -11,6 +11,7 @@ import com.trackr.core.database.TrackrDatabaseConstructor
 import com.trackr.core.database.buildTrackrDatabase
 import com.trackr.core.database.entity.FavoriteItemEntity
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.GroupColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -29,7 +30,8 @@ import org.robolectric.RuntimeEnvironment
 import java.io.File
 
 /**
- * 库升级：版本 1（第 9 步）-> 2（第 14 步，加 favorite_item）-> 3（issue #38，分组加 color）：收藏、分组、顺序都不变。
+ * 库升级：版本 1（第 9 步）-> 2（第 14 步，加 favorite_item）-> 3（issue #38，分组加 color）-> 4（issue #47，加 favorite_station）：
+ * 收藏、分组、顺序都不变。
  *
  * 不用 room-testing：按 `core/database/schemas/.../<版本>.json` 里的建表语句手工建一个旧版本的库文件、塞数据，
  * 再用正式的 builder（带全部迁移）打开。Room 打开后会按当前版本的表结构校验，迁移写错这里就会失败。
@@ -290,5 +292,48 @@ class TrackrDatabaseMigrationTest {
         createV1Database { fillTypical() }
         val database = openMigrated()
         assertTrue(database.favoriteGroups().getAll().all { it.color == null })
+    }
+
+    // ---- 3 -> 4：收藏的站（issue #47） ----
+
+    @Test
+    fun migrate3To4_addsEmptyStationTable_keepsExistingFavorites() = runBlocking {
+        createDatabase(3) {
+            group("gym", 0, "健身", false)
+            stop("a", 0, "1路")
+            insertOrThrow("favorite_item", null, ContentValues().apply {
+                put("id", "stop_a"); put("type", "STOP"); put("refId", "a"); put("groupId", "gym"); put("sortOrder", 0)
+            })
+        }
+        val database = openMigrated()
+
+        assertTrue(database.favorites().getStations().isEmpty())
+        assertEquals(listOf(FavoriteItemEntity("stop_a", "STOP", "a", "gym", 0)), database.favorites().getItems())
+        assertEquals(listOf("a"), database.favoriteLines().getAll().map { it.id })
+        assertEquals(TrackrDatabase.VERSION, database.openHelper.readableDatabase.version)
+
+        // 迁移后能收藏站、重开后还在，排在原来的车前面
+        val repository = DefaultFavoritesRepository.create(RoomFavoritesStore(database), Dispatchers.IO)
+        val station = FavoriteStation(
+            id = "051_CHELAILE_科技园", cityId = "051", stopName = "科技园", stopId = "s1",
+            physicalStId = "p1", platformLabel = "往北", wgsLat = 25.4, wgsLng = 119.0, addedAtMillis = 5L
+        )
+        assertTrue(repository.toggleStation(station))
+        db?.close()
+        db = null
+        val reopened = DefaultFavoritesRepository.create(RoomFavoritesStore(openMigrated()), Dispatchers.IO)
+        assertEquals(listOf(station), reopened.favoriteStations.value)
+        assertEquals(
+            listOf(FavoriteItem.stationKey(station.id), FavoriteItem.stopKey("a")),
+            reopened.favoriteItems.value.map { it.key }
+        )
+    }
+
+    @Test
+    fun migrate1To4_typicalData_hasNoStations() = runBlocking {
+        createV1Database { fillTypical() }
+        val database = openMigrated()
+        assertTrue(database.favorites().getStations().isEmpty())
+        assertEquals(7, database.favorites().getItems().size)
     }
 }

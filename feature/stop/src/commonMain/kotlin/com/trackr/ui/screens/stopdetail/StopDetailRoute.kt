@@ -1,5 +1,6 @@
 package com.trackr.ui.screens.stopdetail
 
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -9,10 +10,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.trackr.core.designsystem.theme.LocalUiMode
+import com.trackr.core.model.UiMode
 import com.trackr.core.navigation.TrackrNavigator
 import com.trackr.core.navigation.ScreenKey
+import com.trackr.feature.stop.resources.Res as StopRes
+import com.trackr.feature.stop.resources.stop_default_platform_accept
+import com.trackr.feature.stop.resources.stop_default_platform_prompt
 import com.trackr.ui.components.message.HostMessage
 import com.trackr.ui.components.message.UserMessageHost
+import org.jetbrains.compose.resources.getString
 
 /**
  * 站点详情的有状态外壳：收集状态、轮询随 RESUMED 启停（§4.4）、一次性提示、导航。
@@ -45,6 +52,22 @@ internal fun StopDetailRoute(
     LaunchedEffect(viewModel) {
         var nextId = 0L
         viewModel.userMessages.collect { messages += HostMessage(key = nextId++, text = it) }
+    }
+
+    // 已收藏的站、切到了别的站台：提示条问一次「默认方向改成 X？」（issue #47）。
+    // 长辈版的提示只有「知道了」、点不了「改」，而且长辈版站点页本来就不放收藏，不问
+    val platformPrompt = state.defaultPlatformPrompt
+    val promptAllowed = LocalUiMode.current != UiMode.Elder
+    LaunchedEffect(platformPrompt, promptAllowed) {
+        messages.removeAll { it.key is PlatformPromptKey }
+        if (platformPrompt != null && promptAllowed) {
+            messages += HostMessage(
+                key = PlatformPromptKey(platformPrompt),
+                text = getString(StopRes.string.stop_default_platform_prompt, platformPrompt),
+                actionLabel = getString(StopRes.string.stop_default_platform_accept, platformPrompt),
+                duration = SnackbarDuration.Long
+            )
+        }
     }
 
     // 本站一起等出现「上了哪辆？」待选：打开导航弹层（和通知点进来的是同一个，栈顶已是它就不重复叠），
@@ -85,8 +108,18 @@ internal fun StopDetailRoute(
         {
             UserMessageHost(
                 message = messages.firstOrNull(),
-                onResult = { key, _ -> messages.removeAll { it.key == key } }
+                onResult = { key, actionPerformed ->
+                    messages.removeAll { it.key == key }
+                    if (key is PlatformPromptKey) {
+                        viewModel.onEvent(
+                            if (actionPerformed) StopDetailEvent.AcceptDefaultPlatform else StopDetailEvent.DismissDefaultPlatformPrompt
+                        )
+                    }
+                }
             )
         }
     )
 }
+
+/** 「默认方向改成 X？」提示条的 key（和普通提示区分开，回调时知道是它） */
+private data class PlatformPromptKey(val label: String)

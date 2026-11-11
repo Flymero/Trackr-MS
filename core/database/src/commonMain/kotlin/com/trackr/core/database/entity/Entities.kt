@@ -40,11 +40,33 @@ data class FavoriteLineEntity(
 )
 
 /**
+ * 收藏的站（issue #47，库版本 4），对应 FavoriteStation。顺序和分组在 [FavoriteItemEntity]（type = `STATION`）；
+ * `position` 只是写入时的镜像，读的时候不用。
+ */
+@Entity(tableName = "favorite_station")
+data class FavoriteStationEntity(
+    @PrimaryKey val id: String,
+    val position: Int,
+    val cityId: String,
+    val cityName: String,
+    val stopName: String,
+    val stopId: String,
+    val physicalStId: String,
+    val namesakeStId: String,
+    val platformLabel: String,
+    val wgsLat: Double,
+    val wgsLng: Double,
+    val source: String,
+    val mygolbsCityCode: String,
+    val addedAtMillis: Long
+)
+
+/**
  * 收藏合一（第 14 步，库版本 2）：车和路线排在一个列表里，每条收藏一行，记顺序和分组。
  * 内容仍在 `favorite_line` / `route*` 表，这张表只是索引。
  *
- * - `id`：`stop_<收藏的车 id>` 或 `route_<路线 id>`（FavoriteItem.key），两种类型之间不重复。
- * - `type`：`STOP` / `ROUTE`（FavoriteItemType 的名字）；`refId`：对应表里的 id。
+ * - `id`：`stop_<收藏的车 id>`、`route_<路线 id>` 或 `station_<收藏的站 id>`（FavoriteItem.key），类型之间不重复。
+ * - `type`：`STOP` / `ROUTE` / `STATION`（FavoriteItemType 的名字）；`refId`：对应表里的 id。
  * - `groupId`：收藏分组 id，null = 不分组。**不加外键**：`favorite_group` 是整份替换写的，外键的 SET NULL 会在每次改分组名时
  *   把所有收藏都改成不分组；旧数据里也有指向已删分组的 id。删分组时由仓库在同一个事务里把它的收藏改成 null（§2.4）。
  * - `sortOrder`：合一列表的顺序，小的在前，不要求连续。

@@ -11,6 +11,7 @@ import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
@@ -119,7 +120,7 @@ interface FavoritesRepository {
     /** 收藏的车，按合一顺序 */
     val favorites: StateFlow<List<FavoriteStationLine>>
 
-    /** 合一列表：车 + 路线，按 sortOrder */
+    /** 合一列表：车 + 路线 + 站，按 sortOrder */
     val favoriteItems: StateFlow<List<FavoriteItem>>
 
     /** 路线，按合一顺序；每条的 `customGroupId` 和它在 [favoriteItems] 里的分组一致（`sortOrder` 是路线之间的旧排序字段） */
@@ -131,6 +132,16 @@ interface FavoritesRepository {
     /** 有就删、没有就加到最前；返回 true 表示这次是加 */
     suspend fun toggleFavorite(item: FavoriteStationLine): Boolean
     suspend fun removeFavorite(id: String)
+
+    /** 收藏的站（issue #47），按合一顺序 */
+    val favoriteStations: StateFlow<List<FavoriteStation>>
+
+    /** 收藏的站：有（同 id）就删、没有就加到最前；返回 true 表示这次是加 */
+    suspend fun toggleStation(station: FavoriteStation): Boolean
+
+    /** 改已收藏的站（换默认站台）：内容换成传进来的，位置和分组不变；没收藏时什么都不做 */
+    suspend fun updateStation(station: FavoriteStation)
+    suspend fun removeStation(id: String)
 
     /**
      * 拖动排序：[keys]（[FavoriteItem.key]）按给的先后排，占用的还是这些收藏原来的位置，没列出的收藏不动。
@@ -225,7 +236,11 @@ interface RealtimeRepository {
      */
     fun stopDetailIncludesBuses(source: DataSourceType): Boolean = true
 
-    /** 收藏的每条线各查一次线路详情（命中 6 秒合并缓存），返回 收藏 id -> 站点 */
+    /**
+     * 收藏的每条线各查一次线路详情（命中 6 秒合并缓存），返回 收藏 id -> 站点。
+     * 收藏的站（issue #47）每个站查一次站点接口，key 是 [com.trackr.core.model.FavoriteItem.stationKey]，值是默认站台
+     * （找不到站台时是一个没有线路的站）。
+     */
     suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>>
 
     /**

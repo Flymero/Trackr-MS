@@ -17,10 +17,12 @@ import com.trackr.core.datastore.TrackrDataStoreFiles
 import com.trackr.core.datastore.createPreferencesDataStore
 import com.trackr.core.datastore.trackrDataStorePath
 import com.trackr.core.model.CandidateLine
+import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteItemRecord
 import com.trackr.core.model.FavoriteItemType
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.GroupCategory
 import com.trackr.core.model.GroupColor
@@ -657,6 +659,102 @@ class FavoritesRepositoryTest {
 
         assertTrue(reopened.favoriteGroups.value.isEmpty())
         assertTrue(reopened.favorites.value.any { it.id == "a" })
+    }
+
+    // ---- 收藏的站（issue #47） ----
+
+    private fun station(name: String, platform: String = "往北") = FavoriteStation(
+        id = FavoriteStation.idOf("051", DataSourceType.CHELAILE, name, ""),
+        cityId = "051", cityName = "莆田", stopName = name, stopId = "s-$name", physicalStId = "p-$name",
+        platformLabel = platform, wgsLat = 25.4, wgsLng = 119.0, addedAtMillis = 1L
+    )
+
+    private fun stationKey(station: FavoriteStation) = FavoriteItem.stationKey(station.id)
+
+    @Test
+    fun station_toggle_addsFirst_mixesWithOtherFavorites_andPersists() = runBlocking {
+        val repo = seeded()
+        val st = station("科技园")
+
+        assertTrue(repo.toggleStation(st))
+
+        val expected = listOf(stationKey(st), stopKey("c"), stopKey("b"), stopKey("a"), routeKey("r1"), routeKey("r2"))
+        assertEquals(expected, repo.keys())
+        assertEquals(listOf(st), repo.favoriteStations.value)
+        val reopened = open()
+        assertEquals(expected, reopened.keys())
+        assertEquals(listOf(st), reopened.favoriteStations.value)
+        assertEquals(st, (reopened.favoriteItems.value.first() as FavoriteItem.Station).station)
+
+        // 再点一次是取消：站和它的索引行都没了
+        assertFalse(repo.toggleStation(st))
+        assertTrue(repo.favoriteStations.value.isEmpty())
+        assertTrue(db.favorites().getStations().isEmpty())
+        assertTrue(db.favorites().getItems().none { it.type == "STATION" })
+        assertEquals(expected.drop(1), open().keys())
+    }
+
+    @Test
+    fun station_update_changesDefaultPlatform_keepsPositionAndGroup() = runBlocking {
+        val repo = seeded()
+        val st = station("科技园")
+        repo.toggleStation(st)
+        val gym = repo.createGroup("健身")
+        repo.setGroup(stationKey(st), gym.id)
+        repo.move(listOf(stopKey("c"), stationKey(st)))
+        val keysBefore = repo.keys()
+
+        val south = st.copy(stopId = "s-south", physicalStId = "p-south", platformLabel = "往南")
+        repo.updateStation(south)
+
+        fun check(r: DefaultFavoritesRepository) {
+            assertEquals(keysBefore, r.keys())
+            assertEquals(gym.id, r.groupOf(stationKey(st)))
+            assertEquals(listOf(south), r.favoriteStations.value)
+        }
+        check(repo)
+        check(open())
+
+        // 没收藏的站改了也不会加进来
+        repo.updateStation(station("别的站"))
+        assertEquals(listOf(south), repo.favoriteStations.value)
+    }
+
+    @Test
+    fun station_remove_andDeleteGroup_behaveLikeOtherFavorites() = runBlocking {
+        val repo = seeded()
+        val a = station("科技园")
+        val b = station("深大", platform = "")
+        repo.toggleStation(a)
+        repo.toggleStation(b)
+        val gym = repo.createGroup("健身")
+        repo.setGroup(stationKey(a), gym.id)
+
+        repo.deleteGroup(gym.id)
+        assertNull(repo.groupOf(stationKey(a)))
+
+        repo.removeStation(b.id)
+        assertEquals(listOf(a), repo.favoriteStations.value)
+        assertEquals(listOf(a), open().favoriteStations.value)
+    }
+
+    @Test
+    fun station_missingFromIndex_isReconciledInFront_staleRowsDropped() = runBlocking {
+        val repo = seeded()
+        val st = station("科技园")
+        // 站写进了表但索引里没有（例如旧存储期间加的），另外索引里有一行指向不存在的站
+        RoomFavoritesStore(db).write(
+            FavoritesWrite(
+                stations = listOf(st),
+                itemUpdates = listOf(FavoriteItemRecord(FavoriteItemType.STATION, "ghost", null, 99))
+            )
+        )
+
+        val reopened = open()
+        // 和索引里没有的车一样补在最前
+        assertEquals(listOf(stationKey(st), stopKey("c"), stopKey("b"), stopKey("a")), reopened.keys().take(4))
+        assertTrue(reopened.keys().none { it == FavoriteItem.stationKey("ghost") })
+        assertEquals(listOf(st), reopened.favoriteStations.value)
     }
 
     private companion object {

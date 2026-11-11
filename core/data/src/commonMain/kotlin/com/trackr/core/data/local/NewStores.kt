@@ -114,7 +114,7 @@ class RoomDataStoreTransitStore(
 }
 
 /**
- * 收藏合一（第 14 步）：车（favorite_line）、路线（route / route_leg / route_candidate_line）、收藏分组（favorite_group）、
+ * 收藏合一（第 14 步）：车（favorite_line）、路线（route / route_leg / route_candidate_line）、站（favorite_station，issue #47）、收藏分组（favorite_group）、
  * 合一索引（favorite_item）。读在一个事务里，写也在一个事务里（[com.trackr.core.database.dao.FavoritesDao.write]）。
  *
  * 车的 `position`、路线的 `position` / `sortOrder` / `customGroupId` 是写入时的镜像；顺序和分组以 favorite_item 为准，
@@ -129,7 +129,8 @@ class RoomFavoritesStore(private val db: TrackrDatabase) : FavoritesStore {
             routes = if (rows.routes.isEmpty()) null else rows.routes.map { it.toModel() },
             groups = if (rows.groups.isEmpty()) null else rows.groups.map { it.toModel() },
             items = if (rows.items.isEmpty()) null else rows.items.mapNotNull { it.toRecordOrNull() },
-            groupsInitialized = rows.groupsInitialized
+            groupsInitialized = rows.groupsInitialized,
+            stations = rows.stations.map { it.toModel() }
         )
     }
 
@@ -140,6 +141,7 @@ class RoomFavoritesStore(private val db: TrackrDatabase) : FavoritesStore {
             groups = change.groups?.mapIndexed { index, group -> group.toEntity(index) },
             items = change.items?.map { it.toEntity() },
             itemUpdates = change.itemUpdates.map { it.toEntity() },
+            stations = change.stations?.mapIndexed { index, station -> station.toEntity(index) },
             markGroupsInitialized = change.markGroupsInitialized
         )
     }

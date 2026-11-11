@@ -13,6 +13,7 @@ import com.trackr.core.data.local.TransitLocalSnapshot
 import com.trackr.core.data.local.TransitLocalStore
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItemRecord
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitGroup
@@ -236,6 +237,17 @@ class SharedPrefsRouteGroupStore(private val prefs: SharedPreferences) {
         }
     }
 
+    /** 收藏的站（issue #47）；没存过或坏了是空列表 */
+    fun loadFavoriteStations(): List<FavoriteStation> =
+        decodeOrEmpty(prefs.getString(KEY_FAVORITE_STATIONS, null))
+
+    fun saveFavoriteStations(list: List<FavoriteStation>) {
+        try {
+            prefs.edit().putString(KEY_FAVORITE_STATIONS, legacyJson.encodeToString(list)).apply()
+        } catch (_: Exception) {
+        }
+    }
+
     fun saveFavoriteItems(list: List<FavoriteItemRecord>) {
         try {
             prefs.edit().putString(KEY_FAVORITE_ITEMS, legacyJson.encodeToString(list)).apply()
@@ -269,6 +281,9 @@ class SharedPrefsRouteGroupStore(private val prefs: SharedPreferences) {
 
         /** 合一索引；和 :core:data 里 LegacyPrefs.KEY_FAVORITE_ITEMS 必须一致（新存储导入时读它） */
         const val KEY_FAVORITE_ITEMS = "favorite_items_json"
+
+        /** 收藏的站（issue #47）；和 :core:data 里 LegacyPrefs.KEY_FAVORITE_STATIONS 必须一致 */
+        const val KEY_FAVORITE_STATIONS = "favorite_stations_json"
     }
 }
 
@@ -302,7 +317,8 @@ class SharedPrefsFavoritesStore(
             items = items,
             // JSON 读不出来（null）说明文件坏了，按「没建过」处理，和旧版一样回落到两个默认分组；
             // 存成 "[]" 读到的是空列表，那才是用户自己删光的
-            groupsInitialized = groups != null && routeGroups.hasFavoriteGroupsInitialized()
+            groupsInitialized = groups != null && routeGroups.hasFavoriteGroupsInitialized(),
+            stations = routeGroups.loadFavoriteStations()
         )
     }
 
@@ -313,6 +329,7 @@ class SharedPrefsFavoritesStore(
         // 旧版删收藏分组时就是先写收藏分组、再写路线
         change.groups?.let { routeGroups.saveFavoriteGroups(it) }
         change.routes?.let { routeGroups.saveGroups(it) }
+        change.stations?.let { routeGroups.saveFavoriteStations(it) }
         if (change.markGroupsInitialized) routeGroups.markFavoriteGroupsInitialized()
         if (change.items != null || change.itemUpdates.isNotEmpty()) {
             val full = change.items ?: mergeByKey(cachedItems.orEmpty(), change.itemUpdates)

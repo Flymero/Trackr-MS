@@ -54,6 +54,7 @@ import com.trackr.feature.bus.home.BusHomeEvent
 import com.trackr.feature.bus.home.BusHomeMapper
 import com.trackr.feature.bus.home.BusHomeUiState
 import com.trackr.feature.bus.home.FavoriteRowUi
+import com.trackr.feature.bus.home.StationStatus
 import com.trackr.feature.bus.home.LocationIssue
 import com.trackr.feature.bus.home.NearbyLineUi
 import com.trackr.feature.bus.home.NearbyStopUi
@@ -68,6 +69,8 @@ import com.trackr.feature.bus.resources.bus_elder_keep_tracking
 import com.trackr.feature.bus.resources.bus_elder_nearby_title
 import com.trackr.feature.bus.resources.bus_elder_open_stop
 import com.trackr.feature.bus.resources.bus_elder_read_aloud
+import com.trackr.feature.bus.resources.bus_station_loading
+import com.trackr.feature.bus.resources.bus_station_not_found
 import com.trackr.feature.bus.resources.bus_elder_search_hint
 import com.trackr.feature.bus.resources.bus_elder_stop_tracking
 import com.trackr.feature.bus.resources.bus_elder_stop_tracking_confirm
@@ -391,6 +394,7 @@ private fun LazyListScope.elderFavorites(rows: List<FavoriteRowUi>, onEvent: (Bu
             when (it) {
                 is FavoriteRowUi.Stop -> "fav_stop"
                 is FavoriteRowUi.Route -> "fav_route"
+                is FavoriteRowUi.Station -> "fav_station"
             }
         }
     ) { row ->
@@ -401,6 +405,11 @@ private fun LazyListScope.elderFavorites(rows: List<FavoriteRowUi>, onEvent: (Bu
                 onReadAloud = { onEvent(BusHomeEvent.ReadAloud(row.spoken)) }
             )
             is FavoriteRowUi.Route -> ElderFavoriteRouteCard(row, onClick = { onEvent(BusHomeEvent.OpenRoute(row.routeId)) })
+            is FavoriteRowUi.Station -> ElderFavoriteStationCard(
+                row,
+                onClick = { onEvent(BusHomeEvent.OpenStop(row.open)) },
+                onReadAloud = { onEvent(BusHomeEvent.ReadAloud(row.spoken)) }
+            )
         }
     }
 }
@@ -436,6 +445,71 @@ private fun ElderFavoriteStopCard(row: FavoriteRowUi.Stop, onClick: () -> Unit, 
                     .fillMaxWidth()
                     .testTag(ElderBusHomeTags.readAloud(row.key))
             )
+        }
+    }
+}
+
+/**
+ * 收藏的站（issue #47）：「科技园站 · 往北」，下面最先到的几条线各一行（线路号、「→ 终点」、大字到站）+「读给我听」。
+ * 整张卡点开站点页
+ */
+@Composable
+private fun ElderFavoriteStationCard(row: FavoriteRowUi.Station, onClick: () -> Unit, onReadAloud: () -> Unit) {
+    val dimens = TrackrTheme.dimens
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(ElderBusHomeTags.favorite(row.key))
+    ) {
+        Column(
+            modifier = Modifier.padding(dimens.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(dimens.spaceS)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = row.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(imageVector = vectorResource(Res.drawable.ic_chevron_right), contentDescription = null, modifier = Modifier.size(32.dp))
+            }
+            when (row.status) {
+                StationStatus.Loading -> Text(
+                    text = stringResource(BusRes.string.bus_station_loading),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                StationStatus.NotFound -> Text(
+                    text = stringResource(BusRes.string.bus_station_not_found),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                StationStatus.Ready -> row.lines.forEach { line ->
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ElderLineBadge(name = line.lineName)
+                            Spacer(modifier = Modifier.width(dimens.spaceM))
+                            Text(text = line.direction, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        }
+                        ElderArrivalLine(arrival = line.arrival)
+                    }
+                }
+            }
+            if (row.status == StationStatus.Ready) {
+                ElderButton(
+                    text = stringResource(BusRes.string.bus_elder_read_aloud),
+                    onClick = onReadAloud,
+                    enabled = row.spoken.isNotBlank(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(ElderBusHomeTags.readAloud(row.key))
+                )
+            }
         }
     }
 }

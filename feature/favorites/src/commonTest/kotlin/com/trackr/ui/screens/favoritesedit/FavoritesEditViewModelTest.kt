@@ -27,6 +27,8 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertTrue
+import com.trackr.core.model.FavoriteStation
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
@@ -179,6 +181,29 @@ class FavoritesEditViewModelTest {
         viewModel.removeItem("route_r1")
         testScheduler.runCurrent()
         assertEquals(emptyList(), viewModel.items.value)
+    }
+
+    @Test
+    fun station_listedWithOthers_canBeGroupedAndRemoved() = runTest(main.dispatcher) {
+        val station = FavoriteStation(id = "034_CHELAILE_科技园", cityId = "034", stopName = "科技园", stopId = "s1", platformLabel = "往北")
+        favorites = FakeFavoritesRepository(
+            initialFavorites = listOf(stopFavorite(id = "a", lineName = "325", stopName = "科技园")),
+            initialGroups = listOf(workGroup),
+            initialStations = listOf(station)
+        )
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        val key = FavoriteItem.stationKey(station.id)
+        assertEquals(listOf("stop_a", key), viewModel.items.value.map { it.key })
+
+        viewModel.setItemGroup(key, workGroup.id)
+        testScheduler.runCurrent()
+        assertEquals(workGroup.id, viewModel.items.value.single { it.key == key }.groupId)
+
+        viewModel.removeItem(key)
+        testScheduler.runCurrent()
+        assertEquals(listOf("stop_a"), viewModel.items.value.map { it.key })
+        assertTrue(favorites.favoriteStations.value.isEmpty())
     }
 
     @Test

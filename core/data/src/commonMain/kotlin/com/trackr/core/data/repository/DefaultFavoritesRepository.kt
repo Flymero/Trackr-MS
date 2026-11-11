@@ -7,6 +7,7 @@ import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteItemRecord
 import com.trackr.core.model.FavoriteItemType
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.GroupCategory
 import com.trackr.core.model.GroupColor
@@ -27,7 +28,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * 收藏合一仓库（第 14 步）：收藏的车、路线、收藏分组、合一索引的**唯一**持有者。
+ * 收藏合一仓库（第 14 步）：收藏的车、路线、站（issue #47）、收藏分组、合一索引的**唯一**持有者。
  *
  * `:androidApp` 的 TransitRepository（收藏的车那部分）和 RouteGroupRepository（路线、收藏分组）都转调这里，
  * 所以两边看到的是同一份数据，不会互相覆盖。
@@ -54,7 +55,9 @@ class DefaultFavoritesRepository private constructor(
         val stops: List<FavoriteStationLine>,
         val routes: List<TransitGroup>,
         val groups: List<FavoriteGroup>,
-        val items: List<FavoriteItemRecord>
+        val items: List<FavoriteItemRecord>,
+        /** 收藏的站（issue #47），按索引的顺序 */
+        val stations: List<FavoriteStation> = emptyList()
     )
 
     private val mutex = Mutex()
@@ -68,6 +71,9 @@ class DefaultFavoritesRepository private constructor(
 
     private val _favoriteGroups = MutableStateFlow(initial.groups)
     override val favoriteGroups: StateFlow<List<FavoriteGroup>> = _favoriteGroups.asStateFlow()
+
+    private val _favoriteStations = MutableStateFlow(initial.stations)
+    override val favoriteStations: StateFlow<List<FavoriteStation>> = _favoriteStations.asStateFlow()
 
     private val _favoriteItems = MutableStateFlow(itemsOf(initial))
     override val favoriteItems: StateFlow<List<FavoriteItem>> = _favoriteItems.asStateFlow()
@@ -99,6 +105,39 @@ class DefaultFavoritesRepository private constructor(
             items = state.items.filterNot { it.type == FavoriteItemType.STOP && it.refId == id }
         )
         commit(next, FavoritesWrite(stops = next.stops, items = next.items))
+    }
+
+    // ---- 收藏的站（issue #47） ----
+
+    override suspend fun toggleStation(station: FavoriteStation): Boolean = locked {
+        if (state.stations.any { it.id == station.id }) {
+            removeStationLocked(station.id)
+            false
+        } else {
+            // 和车一样加到最前
+            val record = FavoriteItemRecord(FavoriteItemType.STATION, station.id, groupId = null, sortOrder = minOrder() - 1)
+            val next = rebuild(stations = state.stations + station, items = state.items + record)
+            commit(next, FavoritesWrite(stations = next.stations, itemUpdates = listOf(record)))
+            true
+        }
+    }
+
+    override suspend fun updateStation(station: FavoriteStation) = locked {
+        val existing = state.stations.firstOrNull { it.id == station.id } ?: return@locked
+        if (existing == station) return@locked
+        val next = rebuild(stations = state.stations.map { if (it.id == station.id) station else it })
+        commit(next, FavoritesWrite(stations = next.stations))
+    }
+
+    override suspend fun removeStation(id: String) = locked { removeStationLocked(id) }
+
+    private suspend fun removeStationLocked(id: String) {
+        if (state.stations.none { it.id == id }) return
+        val next = rebuild(
+            stations = state.stations.filterNot { it.id == id },
+            items = state.items.filterNot { it.type == FavoriteItemType.STATION && it.refId == id }
+        )
+        commit(next, FavoritesWrite(stations = next.stations, items = next.items))
     }
 
     // ---- 合一列表 ----
@@ -307,6 +346,7 @@ class DefaultFavoritesRepository private constructor(
     private fun mirrorWrite(next: State, changed: List<FavoriteItemRecord>) = FavoritesWrite(
         stops = if (changed.any { it.type == FavoriteItemType.STOP }) next.stops else null,
         routes = if (changed.any { it.type == FavoriteItemType.ROUTE }) next.routes else null,
+        stations = if (changed.any { it.type == FavoriteItemType.STATION }) next.stations else null,
         itemUpdates = changed
     )
 
@@ -315,8 +355,9 @@ class DefaultFavoritesRepository private constructor(
         stops: List<FavoriteStationLine> = state.stops,
         routes: List<TransitGroup> = state.routes,
         groups: List<FavoriteGroup> = state.groups,
-        items: List<FavoriteItemRecord> = state.items
-    ): State = arrange(stops, routes, groups, items)
+        items: List<FavoriteItemRecord> = state.items,
+        stations: List<FavoriteStation> = state.stations
+    ): State = arrange(stops, routes, groups, items, stations)
 
     /**
      * 写盘（等写完）再发新值。写失败时和旧版一样不让应用崩：记下错误（[onWriteError]），内存里照样换成新值，
@@ -345,6 +386,7 @@ class DefaultFavoritesRepository private constructor(
         _favorites.value = next.stops
         _routes.value = next.routes
         _favoriteGroups.value = next.groups
+        _favoriteStations.value = next.stations
         _favoriteItems.value = itemsOf(next)
     }
 
@@ -388,10 +430,12 @@ class DefaultFavoritesRepository private constructor(
                 snapshot.groups == null &&
                 snapshot.items == null &&
                 snapshot.stops.isEmpty() &&
+                snapshot.stations.isEmpty() &&
                 snapshot.routes == null
             val groups = if (seedDefaultGroups) DEFAULT_GROUPS else snapshot.groups.orEmpty().sortedBy { it.sortOrder }
-            val items = FavoriteItemOrder.reconcile(snapshot.stops, routes, groups, snapshot.items)
-            var state = arrange(snapshot.stops, routes, groups, items)
+            val stations = snapshot.stations.distinctBy { it.id }
+            val items = FavoriteItemOrder.reconcile(snapshot.stops, routes, groups, snapshot.items, stations)
+            var state = arrange(snapshot.stops, routes, groups, items, stations)
             // 路线自己的 sortOrder 要和合一列表里路线的先后一致（不减）；对不上时（例如索引是从旧存储导进来的）按先后改成 0、1、2…
             val routeOrders = state.routes.map { it.sortOrder }
             val renumbered = routeOrders != routeOrders.sorted()
@@ -407,6 +451,7 @@ class DefaultFavoritesRepository private constructor(
                     FavoritesWrite(
                         stops = if (itemsChanged) state.stops else null,
                         routes = if (routesChanged || itemsChanged) state.routes else null,
+                        stations = if (itemsChanged) state.stations else null,
                         groups = if (seedDefaultGroups) state.groups else null,
                         items = if (itemsChanged) state.items else null,
                         markGroupsInitialized = seedDefaultGroups
@@ -420,7 +465,8 @@ class DefaultFavoritesRepository private constructor(
             stops: List<FavoriteStationLine>,
             routes: List<TransitGroup>,
             groups: List<FavoriteGroup>,
-            items: List<FavoriteItemRecord>
+            items: List<FavoriteItemRecord>,
+            stations: List<FavoriteStation>
         ): State {
             val sortedItems = items.withIndex()
                 .sortedWith(compareBy({ it.value.sortOrder }, { it.index }))
@@ -434,16 +480,19 @@ class DefaultFavoritesRepository private constructor(
                     val record = recordByKey[FavoriteItem.routeKey(route.id)]
                     if (record == null || route.customGroupId == record.groupId) route else route.copy(customGroupId = record.groupId)
                 }
-            return State(orderedStops, orderedRoutes, groups, sortedItems)
+            val orderedStations = stations.sortedBy { rank[FavoriteItem.stationKey(it.id)] ?: Int.MAX_VALUE }
+            return State(orderedStops, orderedRoutes, groups, sortedItems, orderedStations)
         }
 
         private fun itemsOf(state: State): List<FavoriteItem> {
             val stops = state.stops.associateBy { it.id }
             val routes = state.routes.associateBy { it.id }
+            val stations = state.stations.associateBy { it.id }
             return state.items.mapNotNull { record ->
                 when (record.type) {
                     FavoriteItemType.STOP -> stops[record.refId]?.let { FavoriteItem.Stop(it, record.groupId, record.sortOrder) }
                     FavoriteItemType.ROUTE -> routes[record.refId]?.let { FavoriteItem.Route(it, record.groupId, record.sortOrder) }
+                    FavoriteItemType.STATION -> stations[record.refId]?.let { FavoriteItem.Station(it, record.groupId, record.sortOrder) }
                 }
             }
         }

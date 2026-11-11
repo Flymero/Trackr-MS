@@ -5,6 +5,7 @@ import com.trackr.core.database.entity.CandidateLineEntity
 import com.trackr.core.database.entity.FavoriteGroupEntity
 import com.trackr.core.database.entity.FavoriteItemEntity
 import com.trackr.core.database.entity.FavoriteLineEntity
+import com.trackr.core.database.entity.FavoriteStationEntity
 import com.trackr.core.database.entity.ReminderEntity
 import com.trackr.core.database.entity.RouteEntity
 import com.trackr.core.database.entity.RouteLegEntity
@@ -13,6 +14,7 @@ import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItemRecord
 import com.trackr.core.model.FavoriteItemType
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.GeoPoint
 import com.trackr.core.model.GroupCategory
@@ -78,6 +80,41 @@ fun FavoriteLineEntity.toModel() = FavoriteStationLine(
     targetStopName = targetStopName,
     targetOrder = targetOrder,
     totalStops = totalStops,
+    wgsLat = wgsLat,
+    wgsLng = wgsLng,
+    source = dataSourceOf(source),
+    mygolbsCityCode = mygolbsCityCode,
+    addedAtMillis = addedAtMillis
+)
+
+// ---- 收藏的站（issue #47） ----
+
+fun FavoriteStation.toEntity(position: Int) = FavoriteStationEntity(
+    id = id,
+    position = position,
+    cityId = cityId,
+    cityName = cityName,
+    stopName = stopName,
+    stopId = stopId,
+    physicalStId = physicalStId,
+    namesakeStId = namesakeStId,
+    platformLabel = platformLabel,
+    wgsLat = wgsLat,
+    wgsLng = wgsLng,
+    source = source.name,
+    mygolbsCityCode = mygolbsCityCode,
+    addedAtMillis = addedAtMillis
+)
+
+fun FavoriteStationEntity.toModel() = FavoriteStation(
+    id = id,
+    cityId = cityId,
+    cityName = cityName,
+    stopName = stopName,
+    stopId = stopId,
+    physicalStId = physicalStId,
+    namesakeStId = namesakeStId,
+    platformLabel = platformLabel,
     wgsLat = wgsLat,
     wgsLng = wgsLng,
     source = dataSourceOf(source),

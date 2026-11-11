@@ -15,6 +15,11 @@
     <string name="stop_first_arrives">%1$s 先到</string>
     <string name="stop_add_line">再加一条</string>
     <string name="stop_watch_hint">谁先到，谁排第一、放大显示。点「我上车了」就认定是此刻在站的那辆，其他线停止追踪，开始提醒下车。</string>
+    <!-- 收藏整个站（issue #47） -->
+    <string name="stop_favorite_station">收藏这个站</string>
+    <string name="stop_unfavorite_station">取消收藏这个站</string>
+    <string name="stop_default_platform_prompt">默认方向改成「%1$s」？</string>
+    <string name="stop_default_platform_accept">改成%1$s</string>
     <!-- 长辈版站点页（第 34 步） -->
     <string name="stop_elder_pick_platform">在哪个方向上车？</string>
 </resources>

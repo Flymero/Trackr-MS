@@ -15,6 +15,7 @@ import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
@@ -162,11 +163,15 @@ class FakeSettingsRepository(
 class FakeFavoritesRepository(
     initialFavorites: List<FavoriteStationLine> = emptyList(),
     initialRoutes: List<TransitGroup> = emptyList(),
-    initialGroups: List<FavoriteGroup> = emptyList()
+    initialGroups: List<FavoriteGroup> = emptyList(),
+    initialStations: List<FavoriteStation> = emptyList()
 ) : FavoritesRepository {
 
     private val _favorites = MutableStateFlow(initialFavorites)
     override val favorites: StateFlow<List<FavoriteStationLine>> = _favorites.asStateFlow()
+
+    private val _favoriteStations = MutableStateFlow(initialStations)
+    override val favoriteStations: StateFlow<List<FavoriteStation>> = _favoriteStations.asStateFlow()
 
     private val _routes = MutableStateFlow(initialRoutes)
     override val routes: StateFlow<List<TransitGroup>> = _routes.asStateFlow()
@@ -186,7 +191,9 @@ class FakeFavoritesRepository(
     private var nextGroupId = 1
 
     private fun buildItems(): List<FavoriteItem> {
-        val all = _favorites.value.map { FavoriteItem.stopKey(it.id) to it } + _routes.value.map { FavoriteItem.routeKey(it.id) to it }
+        val all = _favorites.value.map { FavoriteItem.stopKey(it.id) to it } +
+            _favoriteStations.value.map { FavoriteItem.stationKey(it.id) to it } +
+            _routes.value.map { FavoriteItem.routeKey(it.id) to it }
         val rank = order.withIndex().associate { it.value to it.index }
         return all.withIndex()
             .sortedWith(compareBy({ rank[it.value.first] ?: (order.size + it.index) }, { it.index }))
@@ -194,6 +201,7 @@ class FakeFavoritesRepository(
                 val (key, value) = entry.value
                 when (value) {
                     is FavoriteStationLine -> FavoriteItem.Stop(value, groupOf[key], index)
+                    is FavoriteStation -> FavoriteItem.Station(value, groupOf[key], index)
                     else -> {
                         val route = value as TransitGroup
                         // 显式设成 null（拖到「不分组」）要盖掉路线自己的 customGroupId
@@ -223,6 +231,23 @@ class FakeFavoritesRepository(
 
     override suspend fun removeFavorite(id: String) {
         _favorites.update { list -> list.filterNot { it.id == id } }
+        refresh()
+    }
+
+    override suspend fun toggleStation(station: FavoriteStation): Boolean {
+        val exists = _favoriteStations.value.any { it.id == station.id }
+        _favoriteStations.update { list -> if (exists) list.filterNot { it.id == station.id } else list + station }
+        refresh()
+        return !exists
+    }
+
+    override suspend fun updateStation(station: FavoriteStation) {
+        _favoriteStations.update { list -> list.map { if (it.id == station.id) station else it } }
+        refresh()
+    }
+
+    override suspend fun removeStation(id: String) {
+        _favoriteStations.update { list -> list.filterNot { it.id == id } }
         refresh()
     }
 

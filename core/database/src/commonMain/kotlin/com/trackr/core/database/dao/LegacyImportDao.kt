@@ -10,6 +10,7 @@ import com.trackr.core.database.entity.CandidateLineEntity
 import com.trackr.core.database.entity.FavoriteGroupEntity
 import com.trackr.core.database.entity.FavoriteItemEntity
 import com.trackr.core.database.entity.FavoriteLineEntity
+import com.trackr.core.database.entity.FavoriteStationEntity
 import com.trackr.core.database.entity.ReminderEntity
 import com.trackr.core.database.entity.RouteEntity
 import com.trackr.core.database.entity.RouteLegEntity
@@ -28,6 +29,8 @@ data class LegacyImport(
     val reminders: List<ReminderEntity>? = null,
     /** 收藏合一索引（旧存储里的 `favorite_items_json`，第 14 步起才有）。null = 不动，启动时仓库按车和路线对账补齐 */
     val favoriteItems: List<FavoriteItemEntity>? = null,
+    /** 收藏的站（旧存储里的 `favorite_stations_json`，issue #47 起才有）。null = 不动 */
+    val favoriteStations: List<FavoriteStationEntity>? = null,
     /** 写进 store_meta 的导入标记 */
     val meta: StoreMetaEntity
 )
@@ -84,6 +87,12 @@ interface LegacyImportDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFavoriteItems(items: List<FavoriteItemEntity>)
 
+    @Query("DELETE FROM favorite_station")
+    suspend fun deleteFavoriteStations()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFavoriteStations(items: List<FavoriteStationEntity>)
+
     @Upsert
     suspend fun putMeta(entry: StoreMetaEntity)
 
@@ -118,6 +127,10 @@ interface LegacyImportDao {
         data.favoriteItems?.let {
             deleteFavoriteItems()
             insertFavoriteItems(it)
+        }
+        data.favoriteStations?.let {
+            deleteFavoriteStations()
+            insertFavoriteStations(it)
         }
         putMeta(data.meta)
     }

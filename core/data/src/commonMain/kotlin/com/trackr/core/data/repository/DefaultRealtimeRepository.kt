@@ -8,6 +8,8 @@ import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.BusStop
 import com.trackr.core.model.DataSourceType
+import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.NearbyStopLineStatus
@@ -331,9 +333,12 @@ class DefaultRealtimeRepository(
 
     override suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>> = runCatching {
         val favs = favoritesRepository.favorites.value
-        if (favs.isEmpty()) return@runCatching emptyMap()
+        val stations = favoritesRepository.favoriteStations.value
+        if (favs.isEmpty() && stations.isEmpty()) return@runCatching emptyMap()
 
         coroutineScope {
+            // 收藏的站（issue #47）：每个站 1 次站点请求，找回默认站台
+            val stationTasks = stations.map { station -> async { station.id to fetchFavoriteStation(station) } }
             val tasks = favs.map { fav ->
                 async {
                     val city = TransitCity(
@@ -399,8 +404,34 @@ class DefaultRealtimeRepository(
                     } else null
                 }
             }
-            tasks.awaitAll().filterNotNull().toMap()
+            val stationResults = stationTasks.awaitAll().mapNotNull { (id, stop) ->
+                stop?.let { FavoriteItem.stationKey(id) to it }
+            }
+            tasks.awaitAll().filterNotNull().toMap() + stationResults
         }
+    }
+
+    /**
+     * 查一个收藏的站的默认站台。请求失败返回 null（首页沿用「正在查车」）；请求成功但找不到站台时返回一个
+     * 没有线路的站（首页显示「暂时查不到」）。
+     */
+    private suspend fun fetchFavoriteStation(station: FavoriteStation): NearbyStop? {
+        val city = TransitCity(
+            cityId = station.cityId,
+            cityName = station.cityName,
+            mygolbsCityCode = station.mygolbsCityCode.takeIf { it.isNotBlank() }
+        )
+        val platforms = getStopDetail(
+            city = city,
+            stopId = station.stopId.takeIf { it.isNotBlank() },
+            stopName = station.stopName.takeIf { it.isNotBlank() },
+            physicalStId = station.physicalStId.takeIf { it.isNotBlank() },
+            namesakeStId = station.namesakeStId.takeIf { it.isNotBlank() },
+            stationLat = station.wgsLat.takeIf { it > 0.0 },
+            stationLng = station.wgsLng.takeIf { it > 0.0 }
+        ).getOrNull() ?: return null
+        return StationPlatformMatcher.pick(platforms, station)
+            ?: NearbyStop(stopId = station.stopId, name = station.stopName, source = station.source)
     }
 
     companion object {
