@@ -25,7 +25,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -41,6 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.trackr.core.designsystem.component.TrackrBottomActionBar
 import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.action_back
 import com.trackr.core.designsystem.resources.action_clear
@@ -112,13 +112,12 @@ fun AmapKeyScreen(
             )
         },
         bottomBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
+            TrackrBottomActionBar {
                 Button(
                     onClick = { onEvent(AmapKeyEvent.Save) },
                     enabled = state.canSave,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
                         .height(48.dp)
                         .testTag("btn_amap_key_save")
                 ) {
