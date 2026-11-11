@@ -7,6 +7,7 @@ import com.trackr.core.data.route.FavoriteGroupSelection
 import com.trackr.core.data.route.FavoritesGroupDataFix
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.GroupColor
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -54,9 +55,16 @@ class FavoritesEditViewModel(
 
     // ---- 分组 ----
 
-    fun createFavoriteGroup(name: String) {
+    fun createFavoriteGroup(name: String, color: GroupColor? = null) {
         viewModelScope.launch {
-            favorites.createGroup(name)
+            favorites.createGroup(name, color)
+        }
+    }
+
+    /** 改分组颜色（issue #38），null = 不设颜色；首页收藏卡片左边的色条跟着变 */
+    fun setFavoriteGroupColor(groupId: String, color: GroupColor?) {
+        viewModelScope.launch {
+            favorites.setGroupColor(groupId, color)
         }
     }
 

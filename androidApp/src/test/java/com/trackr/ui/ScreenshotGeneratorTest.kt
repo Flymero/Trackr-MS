@@ -913,7 +913,7 @@ class ScreenshotGeneratorTest {
         }
         composeTestRule.onNodeWithTag("theme_settings").performScrollToNode(hasTestTag("theme_pick_color"))
         composeTestRule.onNodeWithTag("theme_pick_color").performClick()
-        val bitmap = composeTestRule.onNodeWithTag("theme_color_picker").captureToImage().asAndroidBitmap()
+        val bitmap = composeTestRule.onNodeWithTag("color_picker").captureToImage().asAndroidBitmap()
         FileOutputStream(File(outputDir, "theme_color_picker.png")).use {
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
         }

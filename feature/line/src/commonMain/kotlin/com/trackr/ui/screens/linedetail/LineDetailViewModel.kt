@@ -214,6 +214,7 @@ class LineDetailViewModel(
     )
     val uiState: StateFlow<LineDetailUiState> = _uiState.asStateFlow()
 
+    private val entryLineId: String = initialLineId
     private var currentLineId: String = initialLineId
     private var currentSource: DataSourceType = initialSource
 
@@ -337,7 +338,7 @@ class LineDetailViewModel(
                 state.copy(
                     static = static,
                     selectedStop = state.selectedStop
-                        ?: initialTargetOrder?.takeIf { it > 0 }?.let { order -> cached.stops.find { it.order == order } }
+                        ?: initialTargetOrder?.takeIf { it > 0 }?.let { order -> entryStopIn(cached.stops, order) }
                 )
             }
         }
@@ -479,11 +480,15 @@ class LineDetailViewModel(
                 ?: _uiState.value.selectedStop?.order
                 ?: initialTargetOrder
 
+            val requestLineId = currentLineId
+            // 入口带的站 id 只对应入口那一站：换过站或换过向后再传，上游会按旧站算到站时间
+            val stationId = _uiState.value.selectedStop?.stopId?.takeIf { it.startsWith("ms-st:") }
+                ?: initialStationId.takeIf { !userPickedStop && requestLineId == entryLineId }
             val result = realtime.getLineDetail(
                 city = currentCity,
                 lineId = requestedLineId,
                 targetOrder = targetOrder,
-                stationId = _uiState.value.selectedStop?.stopId ?: initialStationId,
+                stationId = stationId,
                 source = requestedSource,
                 lineNameHint = lineNameHint
             )
@@ -507,12 +512,12 @@ class LineDetailViewModel(
                 // 找回选中站时站序和站 ID 一起核对：服务端重排站序后按站 ID 找，不落到另一站上
                 val targetStop = if (selected == null || (isInitial && !userPickedStop)) {
                     if (initialTargetOrder != null && initialTargetOrder > 0) {
-                        detail.stops.findStop(initialTargetOrder, initialStationId) ?: calculateDefaultStop(detail)
+                        entryStopIn(detail.stops, initialTargetOrder) ?: calculateDefaultStop(detail)
                     } else {
                         calculateDefaultStop(detail)
                     }
                 } else {
-                    detail.stops.findStop(selected.order, selected.stopId) ?: calculateDefaultStop(detail)
+                    sameStopIn(detail.stops, selected) ?: calculateDefaultStop(detail)
                 }
 
                 applyDetail(detail, targetStop)
@@ -553,6 +558,27 @@ class LineDetailViewModel(
         error is TransitServiceFailure -> "服务请求失败，请稍后重试"
         error is IOException -> "网络请求失败，请检查网络后重试"
         else -> "获取实时公交数据失败，请稍后重试"
+    }
+
+    /** 入口指定的那一站：个别数据源站序会重复，能用站 id 区分时优先用站 id */
+    private fun entryStopIn(stops: List<BusStop>, order: Int): BusStop? {
+        if (initialStationId?.startsWith("ms-st:") == true) return stops.findStop(order, initialStationId)
+        val sameOrder = stops.filter { it.order == order }
+        return sameOrder.firstOrNull { it.stopId == initialStationId } ?: sameOrder.firstOrNull()
+    }
+
+    /**
+     * 在新站表里找回 [picked] 这一站。站序可能重复（掌上公交的站 id 又就是站序），也可能因站表调整整体移动，
+     * 所以先比站序 + 站名，再按 id / 唯一的站名找；都找不到才认站序（比如站改了名）。
+     */
+    private fun sameStopIn(stops: List<BusStop>, picked: BusStop): BusStop? {
+        if (picked.stopId.startsWith("ms-st:")) return stops.findStop(picked.order, picked.stopId)
+        val sameOrder = stops.filter { it.order == picked.order }
+        return sameOrder.firstOrNull { it.stopId == picked.stopId && it.name == picked.name }
+            ?: sameOrder.firstOrNull { it.name == picked.name }
+            ?: stops.firstOrNull { it.stopId == picked.stopId && it.name == picked.name }
+            ?: stops.singleOrNull { it.name == picked.name }
+            ?: sameOrder.firstOrNull()
     }
 
     /** 把一份新数据拆成静态 / 实时两半写进状态；静态没变就沿用旧实例 */

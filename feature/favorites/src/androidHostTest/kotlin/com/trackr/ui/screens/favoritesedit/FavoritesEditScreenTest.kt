@@ -2,12 +2,17 @@ package com.trackr.ui.screens.favoritesedit
 
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.assertTextContains
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.DataSourceType
@@ -15,6 +20,7 @@ import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.GroupCategory
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitLeg
 import org.junit.Assert.assertEquals
@@ -79,12 +85,12 @@ class FavoritesEditScreenTest {
         FavoriteItem.Route(route, null, 1)
     )
 
-    private fun setContent() {
+    private fun setContent(groups: List<FavoriteGroup> = listOf(favoriteGroup)) {
         composeTestRule.setContent {
             TrackrTheme {
                 FavoritesEditScreen(
                     items = items,
-                    favoriteGroups = listOf(favoriteGroup),
+                    favoriteGroups = groups,
                     onEvent = { events += it }
                 )
             }
@@ -152,5 +158,102 @@ class FavoritesEditScreenTest {
         composeTestRule.onNodeWithText("删除").performClick()
 
         assertEquals(FavoritesEditEvent.DeleteItem("route_g1"), events.single())
+    }
+
+    // ---- 分组颜色（issue #38） ----
+
+    @Test
+    fun createGroup_withColor_sendsColor() {
+        setContent()
+
+        composeTestRule.onNodeWithTag("btn_create_favorite_group").performClick()
+        composeTestRule.onNodeWithTag("input_group_name").performTextInput("健身房")
+        composeTestRule.onNodeWithTag("group_color_GREEN").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("group_color_GREEN").assertIsSelected()
+        composeTestRule.onNodeWithTag("group_color_none").assertIsNotSelected()
+        composeTestRule.onNodeWithText("创建").performClick()
+
+        assertEquals(
+            listOf(FavoritesEditEvent.CreateGroup("健身房", GroupColor.Preset.GREEN)),
+            events.filterIsInstance<FavoritesEditEvent.CreateGroup>()
+        )
+    }
+
+    @Test
+    fun editGroup_changeColor_sendsRenameAndSetColor() {
+        setContent()
+
+        composeTestRule.onNodeWithTag("btn_edit_group_fav1").performClick()
+        // 没设过颜色：选中的是「不设颜色」
+        composeTestRule.onNodeWithTag("group_color_none").performScrollTo().assertIsSelected()
+        composeTestRule.onNodeWithTag("group_color_RED").performScrollTo().performClick()
+        composeTestRule.onNodeWithText("保存").performClick()
+
+        assertEquals(
+            listOf(
+                FavoritesEditEvent.RenameGroup("fav1", "上班"),
+                FavoritesEditEvent.SetGroupColor("fav1", GroupColor.Preset.RED)
+            ),
+            events
+        )
+    }
+
+    @Test
+    fun editGroup_colorUnchanged_onlyRenames() {
+        setContent(listOf(favoriteGroup.withColor(GroupColor.Preset.BLUE)))
+
+        composeTestRule.onNodeWithTag("btn_edit_group_fav1").performClick()
+        composeTestRule.onNodeWithTag("group_color_BLUE").performScrollTo().assertIsSelected()
+        composeTestRule.onNodeWithText("保存").performClick()
+
+        assertEquals(listOf(FavoritesEditEvent.RenameGroup("fav1", "上班")), events)
+    }
+
+    @Test
+    fun editGroup_customColor_opensSharedPicker_andSendsCustom() {
+        setContent()
+
+        composeTestRule.onNodeWithTag("btn_edit_group_fav1").performClick()
+        composeTestRule.onNodeWithTag("group_color_custom").performScrollTo().assertIsNotSelected().performClick()
+        // 和主题色同一个选色面板
+        composeTestRule.onNodeWithTag("color_picker").assertExists()
+        composeTestRule.onNodeWithTag("color_picker_hex").performTextReplacement("#12AB9F")
+        composeTestRule.onNodeWithTag("color_picker_confirm").performClick()
+        composeTestRule.onNodeWithTag("color_picker").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("group_color_custom").performScrollTo().assertIsSelected()
+        composeTestRule.onNodeWithTag("group_color_none").assertIsNotSelected()
+        composeTestRule.onNodeWithText("保存").performClick()
+
+        assertEquals(
+            listOf(
+                FavoritesEditEvent.RenameGroup("fav1", "上班"),
+                FavoritesEditEvent.SetGroupColor("fav1", GroupColor.Custom(0x12AB9F))
+            ),
+            events
+        )
+    }
+
+    @Test
+    fun editGroup_customColor_cancelPicker_keepsPrevious() {
+        setContent(listOf(favoriteGroup.copy(colorKey = "#12AB9F")))
+
+        composeTestRule.onNodeWithTag("btn_edit_group_fav1").performClick()
+        composeTestRule.onNodeWithTag("group_color_custom").performScrollTo().assertIsSelected().performClick()
+        // 接着改当前的自定义色
+        composeTestRule.onNodeWithTag("color_picker_hex").assertTextContains("#12AB9F")
+        composeTestRule.onNodeWithTag("color_picker_hex").performTextReplacement("#000000")
+        composeTestRule.onNodeWithTag("color_picker_cancel").performClick()
+        composeTestRule.onNodeWithText("保存").performClick()
+
+        assertEquals(listOf(FavoritesEditEvent.RenameGroup("fav1", "上班")), events)
+    }
+
+    @Test
+    fun groupRow_showsColorDotOnlyWhenColored() {
+        setContent(listOf(favoriteGroup.withColor(GroupColor.Preset.BLUE), FavoriteGroup(id = "fav2", name = "回家", sortOrder = 1)))
+
+        composeTestRule.onNodeWithTag("group_color_dot_fav1").assertExists()
+        composeTestRule.onNodeWithTag("group_color_dot_fav2").assertDoesNotExist()
     }
 }

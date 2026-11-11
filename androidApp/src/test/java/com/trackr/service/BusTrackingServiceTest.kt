@@ -271,6 +271,66 @@ class BusTrackingServiceTest {
     }
 
     @Test
+    fun officialPush_boardingClosesOnlySameStopAndReleasesThoseSubscriptions() {
+        // 初始 HTTP 快照就用 b1：推送帧全程跟同一辆车（否则换车判定会把帧当信号丢失）
+        transit.realtime.lineDetailResult = Result.success(officialDetail(id = "b1", order = 3))
+        val session = requireNotNull(trackingRepository.start(officialTarget()))
+        val sameTarget = officialTarget().copy(lineId = "ms:1_2_0")
+        val oppositeTarget = officialTarget().copy(lineId = "ms:1_3_0")
+        transit.realtime.lineDetailsMap[sameTarget.lineId] = officialDetail(id = "same", order = 1).let {
+            it.copy(line = it.line.copy(lineId = sameTarget.lineId))
+        }
+        transit.realtime.lineDetailsMap[oppositeTarget.lineId] = officialDetail(id = "opposite", order = 1).let {
+            it.copy(line = it.line.copy(lineId = oppositeTarget.lineId), stops = it.stops.map { stop ->
+                if (stop.order == 7) stop.copy(wgsLat = stop.wgsLat + 60.0 / 111_000) else stop
+            })
+        }
+        val same = requireNotNull(trackingRepository.start(sameTarget))
+        val opposite = requireNotNull(trackingRepository.start(oppositeTarget))
+        val controller = startService(session.sessionId)
+        val service = controller.get()
+        try {
+            waitUntil("订阅建立") { push.subscriptions.size == 3 }
+            val sub = push.subscriptions.first { it.base.line.lineId == session.leg.lineId }
+            val stopLat = 25.0 + 7 * 0.001 // s7：上车站（targetOrder 7）
+            fun fixAt(metersNorth: Double, ageMillis: Long) = UserFix(
+                lat = stopLat + metersNorth / 111_000.0,
+                lng = 119.0,
+                accuracyMeters = 10f,
+                // 服务用 AndroidMonotonicClock（SystemClock.elapsedRealtime）判定位新鲜度，测试对齐同一时基
+                elapsedMillis = android.os.SystemClock.elapsedRealtime() - ageMillis
+            )
+            fun atStopBus() = sub.base.copy(buses = listOf(LiveBus("b1", "b1", 7, segmentProgress = 1f, isArrived = true, wgsLat = stopLat, wgsLng = 119.0)))
+            fun approachingBus() = sub.base.copy(buses = listOf(LiveBus("b1", "b1", 7, segmentProgress = 0.6f, isArrived = false, wgsLat = stopLat - 30.0 / 111_000.0, wgsLng = 119.0)))
+            // 车临近上车站（第一帧后引擎开定位、定位收集器开始收）
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, approachingBus()))
+            waitUntil("推送帧写入状态") { trackingRepository.sessionById(session.sessionId)?.state?.currentBusId == "b1" }
+            waitUntil("定位收集启动") { location.activeCollectors > 0 }
+            // 车到站（带着定位发生到站转变）、人在站台 20 米：进入待确认（「上车后自动结束追踪」默认开）
+            location.emit(fixAt(20.0, 0))
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, atStopBus()))
+            waitUntil("进入待确认") { trackingRepository.sessionById(session.sessionId)?.state?.boardingCandidateBusId == "b1" }
+            // 人跟着车走两次 → 引擎自动判上车并结束追踪（参数链 P1-1：推送入口必须透传开关）
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(4))
+            location.emit(fixAt(150.0, 4_000))
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, sub.base.copy(buses = listOf(LiveBus("b1", "b1", 8, segmentProgress = 0.2f, wgsLat = stopLat + 150.0 / 111_000.0, wgsLng = 119.0)))))
+            waitUntil("跟车确认") { (trackingRepository.sessionById(session.sessionId)?.state?.boardingConfirmStreak ?: 0) >= 1 }
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(4))
+            location.emit(fixAt(320.0, 4_000))
+            sub.updates.tryEmit(MeishanPushUpdate(MeishanPushAvailability.ONLINE, sub.base.copy(buses = listOf(LiveBus("b1", "b1", 8, segmentProgress = 0.4f, wgsLat = stopLat + 320.0 / 111_000.0, wgsLng = 119.0)))))
+            waitUntil("自动结束追踪") { trackingRepository.sessionById(session.sessionId) == null }
+            waitUntil("only opposite session and subscription remain; sessions=" +
+                trackingRepository.sessions.value.map { Triple(it.leg.lineId, it.state.targetStopLat, it.state.targetStopLng) } +
+                "; subscriptions=" + push.subscriptions.map { it.base.line.lineId }) {
+                trackingRepository.sessions.value.map { it.sessionId } == listOf(opposite.sessionId) &&
+                    push.subscriptions.filterNot { it in push.released }.map { it.base.line.lineId } == listOf(oppositeTarget.lineId)
+            }
+            assertNull(trackingRepository.sessionById(same.sessionId))
+            assertNotNull(trackingRepository.sessionById(opposite.sessionId))
+        } finally { controller.destroy() }
+    }
+
+    @Test
     fun officialTracking_lateFallbackHttpDoesNotOverwriteRecoveredTcp() {
         transit.realtime.lineDetailResult = Result.success(officialDetail())
         val session = requireNotNull(trackingRepository.start(officialTarget()))
@@ -1158,4 +1218,19 @@ class BusTrackingServiceTest {
             trackingRepository.sessions.value.map { it.sessionId } == listOf(second.sessionId)
         }
     }
+
+    @Test fun enablingAutoStopDuringTrackingAddsForegroundLocationType() {
+        transit.settings.setAutoStopAfterBoarding(false)
+        transit.realtime.lineDetailResult = Result.success(lineDetail("L59", listOf(LiveBus("b1", "b1", 6))))
+        val session = requireNotNull(trackingRepository.start(singleTarget()))
+        val controller = startService(session.sessionId)
+        try {
+            assertEquals(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE, controller.get().lastForegroundServiceType)
+            transit.settings.setAutoStopAfterBoarding(true)
+            waitUntil("foreground location type upgraded") {
+                controller.get().lastForegroundServiceType and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION != 0
+            }
+        } finally { controller.destroy() }
+    }
+
 }

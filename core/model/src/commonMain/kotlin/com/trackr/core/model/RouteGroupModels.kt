@@ -1,5 +1,6 @@
 package com.trackr.core.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -14,15 +15,69 @@ enum class GroupCategory(val displayName: String) {
 }
 
 /**
+ * 收藏分组的颜色（issue #38）：首页「全部」里按颜色分辨收藏属于哪个分组。
+ *
+ * 两种：色板里的一个（[Preset]，具体色值由设计系统按深浅色给），或用户在选色面板里自己调的（[Custom]，0xRRGGBB，深浅色都用这一个）。
+ * 存储里只存一个字符串 [key]：色板的名字（`BLUE`）或 `#RRGGBB`；读到不认识的按没设颜色处理，见 [fromKey]。
+ */
+sealed interface GroupColor {
+    /** 存储用的字符串 */
+    val key: String
+
+    enum class Preset : GroupColor {
+        RED, ORANGE, YELLOW, GREEN, TEAL, BLUE, PURPLE, PINK;
+
+        override val key: String get() = name
+    }
+
+    /** 自定义颜色，[rgb] = 0xRRGGBB（不带透明度） */
+    data class Custom(val rgb: Int) : GroupColor {
+        init {
+            require(rgb in 0..0xFFFFFF) { "rgb 必须是 0xRRGGBB：$rgb" }
+        }
+
+        override val key: String get() = "#" + rgb.toString(16).padStart(6, '0').uppercase()
+    }
+
+    companion object {
+        /** 色板名字或 `#RRGGBB` -> 颜色；null、空、认不出的都给 null */
+        fun fromKey(key: String?): GroupColor? {
+            if (key.isNullOrBlank()) return null
+            Preset.entries.firstOrNull { it.name == key }?.let { return it }
+            val hex = key.removePrefix("#")
+            if (!key.startsWith("#") || hex.length != 6 || !hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+            return Custom(hex.toInt(16))
+        }
+    }
+}
+
+/**
  * 收藏中心自定义分组实体
+ *
+ * @param colorKey 分组颜色存的字符串（[GroupColor.key]），null = 不设颜色（老分组、新建的分组默认都是 null）。
+ *   JSON 里叫 `color`；存字符串而不是对象，认不出的值（以后加的颜色）读进来也不会让整份分组解析失败。用 [color] 读。
  */
 @Serializable
 data class FavoriteGroup(
     val id: String,
     val name: String,
     val sortOrder: Int = 0,
-    val isDefault: Boolean = false
-)
+    val isDefault: Boolean = false,
+    @SerialName("color") val colorKey: String? = null
+) {
+    constructor(
+        id: String,
+        name: String,
+        sortOrder: Int = 0,
+        isDefault: Boolean = false,
+        color: GroupColor?
+    ) : this(id, name, sortOrder, isDefault, color?.key)
+
+    /** 分组颜色；没设或存的值认不出时为 null */
+    val color: GroupColor? get() = GroupColor.fromKey(colorKey)
+
+    fun withColor(color: GroupColor?): FavoriteGroup = copy(colorKey = color?.key)
+}
 
 /**
  * 单段行程中可乘坐的候选公交/地铁线路

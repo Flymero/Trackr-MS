@@ -332,6 +332,8 @@ class TransitRepository(
         atTimeHHMM: String?
     ): Result<LineTimetable> = realtime.getTimetable(city, line, atTimeHHMM)
 
+    override val lineDetailUpdates get() = realtime.lineDetailUpdates
+
     override suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>> =
         realtime.refreshFavoritesRealtime()
 

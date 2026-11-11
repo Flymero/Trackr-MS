@@ -36,9 +36,9 @@ class GithubUpdateChecker(
 
     companion object {
         val DEFAULT_ENDPOINTS = listOf(
-            "https://raw.githubusercontent.com/5151561/Trackr/update/update.json",
-            "https://fastly.jsdelivr.net/gh/5151561/Trackr@update/update.json",
-            "https://cdn.jsdelivr.net/gh/5151561/Trackr@update/update.json"
+            "https://raw.githubusercontent.com/Flymero/Trackr-MS/update/update.json",
+            "https://fastly.jsdelivr.net/gh/Flymero/Trackr-MS@update/update.json",
+            "https://cdn.jsdelivr.net/gh/Flymero/Trackr-MS@update/update.json"
         )
 
         /** 更新包下载地址允许的域名白名单（精确匹配，不含子域名） */

@@ -400,4 +400,11 @@ class GithubUpdateCheckerTest {
         assertFalse(GithubUpdateChecker.isAllowedDownloadUrl("javascript:alert(1)"))
         assertFalse(GithubUpdateChecker.isAllowedDownloadUrl(""))
     }
+
+    @Test fun defaultUpdateSourcesOnlyReferenceTheForkRepository() {
+        assertEquals(3, GithubUpdateChecker.DEFAULT_ENDPOINTS.size)
+        assertTrue(GithubUpdateChecker.DEFAULT_ENDPOINTS.all { it.contains("Flymero/Trackr-MS") })
+        assertFalse(GithubUpdateChecker.DEFAULT_ENDPOINTS.any { it.contains("5151561/Trackr") })
+    }
+
 }

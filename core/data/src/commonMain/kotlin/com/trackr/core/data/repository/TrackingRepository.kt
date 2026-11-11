@@ -441,8 +441,9 @@ class DefaultTrackingRepository @OptIn(ExperimentalUuidApi::class) constructor(
                 lastGeneration = maxOf(lastGeneration, current.generation + 1)
                 lastBuses.remove(sessionId)
                 lastLineBuses.remove(sessionId)
-                userFix = null
-                publish(_sessions.value.filterNot { it.sessionId == sessionId })
+                val remaining = _sessions.value.filterNot { it.sessionId == sessionId }
+                if (remaining.isEmpty()) userFix = null
+                publish(remaining)
             } else {
                 if (next.generation != current.generation) {
                     // 引擎切了程：上一程的车和定位都不再用

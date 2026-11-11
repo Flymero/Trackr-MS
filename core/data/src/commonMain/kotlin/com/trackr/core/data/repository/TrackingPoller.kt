@@ -5,6 +5,8 @@ import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.domain.tracking.WatchPollPlan
 import com.trackr.core.model.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.selects.select
 import kotlin.time.Clock
 
 /** One generation of one session. Platforms own jobs, lifecycle, location and presentation. */
@@ -19,25 +21,25 @@ class TrackingPoller(
     private val onEffect: (TrackingEngine.Effect, String) -> Unit,
     private val onExpired: (TrackingSession) -> Unit = {},
     private val requestDispatcher: CoroutineDispatcher = Dispatchers.Default,
-    /** 单线路取数钩子（Android 注入：推送在线时恒等 reduce 让位），onOperating 回报运营状态 */
+    /** Online TCP can ignore shared HTTP snapshots; offline hooks may reuse them without another request. */
     private val singleLineFetch: (suspend (
         sessionId: String, generation: Int, city: TransitCity,
-        leg: TrackingLegParams, state: TrackingSessionState, onOperating: (LineOperatingState) -> Unit
+        leg: TrackingLegParams, state: TrackingSessionState, sharedDetail: BusLineDetail?,
+        onOperating: (LineOperatingState) -> Unit
     ) -> Result<(TrackingSession) -> TrackingEngine.Result>)? = null,
-    /** 一起等取数钩子（Android 注入：官方线拆分 + HTTP 补漏 + 聚合缓冲） */
     private val watchFetch: (suspend (
         sessionId: String, generation: Int, target: TrackingTarget.WatchTogether, plan: WatchPollPlan,
         onOperating: (LineOperatingState) -> Unit
     ) -> Result<(TrackingSession) -> TrackingEngine.Result>)? = null,
-    /** 轮询等待钩子（Android 注入：可被推送事件提前唤醒；非运营时段按 worker 状态拉长等待），null = 纯 delay */
+    /** Platform wakeups and shared-data wakeups are awaited together, not substituted for each other. */
     private val roundWait: (suspend (sessionId: String, millis: Long) -> Unit)? = null
 ) {
     private val watchPoller = WatchTogetherPoller(realtime)
 
-    /** Cancellation and generation checks also reject a provider that returns after cancellation. */
     suspend fun run(sessionId: String, generation: Int, onUpdate: () -> Unit = {}) {
         var failures = 0
         var operating = LineOperatingState.RUNNING
+        var shared: LineDetailUpdate? = null
         fun current() = tracking.sessionById(sessionId)?.takeIf {
             it.generation == generation && !it.interrupted && it.state.isActive
         }
@@ -52,13 +54,14 @@ class TrackingPoller(
             val plan = TrackingEngine.watchPollPlan(session)
             val result: Result<(TrackingSession) -> TrackingEngine.Result> = try {
                 if (target != null && plan != null) {
-                    (watchFetch?.invoke(sessionId, generation, target, plan) { operating = LineOperatingState.RUNNING }
-                        ?: upstreamWatchFetch(sessionId, generation, target, plan) { operating = LineOperatingState.RUNNING })
+                    watchFetch?.invoke(sessionId, generation, target, plan) { operating = LineOperatingState.RUNNING }
+                        ?: upstreamWatchFetch(sessionId, generation, target, plan) { operating = LineOperatingState.RUNNING }
                 } else {
-                    val leg = session.leg
-                    val state = session.state
-                    (singleLineFetch?.invoke(sessionId, generation, cityFor(leg.cityId, leg.mygolbsCityCode), leg, state) { operating = it }
-                        ?: upstreamSingleLineFetch(sessionId, generation, leg, state) { operating = it })
+                    val detail = shared?.takeIf { matchesRequest(it, session) }?.detail
+                    shared = null
+                    singleLineFetch?.invoke(sessionId, generation, cityFor(session.leg.cityId, session.leg.mygolbsCityCode),
+                        session.leg, session.state, detail) { operating = it }
+                        ?: upstreamSingleLineFetch(sessionId, generation, session, detail) { operating = it }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -68,79 +71,98 @@ class TrackingPoller(
             currentCoroutineContext().ensureActive()
             result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             if (current() == null) return
-            var effects: List<TrackingEngine.Effect> = emptyList()
-            val applied = tracking.update(sessionId, generation) { latest ->
+            val applied = tracking.applyTrackingResult(sessionId, generation, settings.autoStopAfterBoarding.value) { latest ->
                 result.fold(onSuccess = { reduce ->
                     failures = 0
                     val reduced = reduce(latest)
-                    effects = reduced.effects
-                    if (effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session.copy(lastRealtimeAtMillis = clock.now().toEpochMilliseconds(), refreshFailed = false)
+                    reduced.copy(session = reduced.session.copy(lastRealtimeAtMillis = clock.now().toEpochMilliseconds(), refreshFailed = false))
                 }, onFailure = {
                     failures++
-                    TrackingEngine.reduceFailure(latest, clock.now().toEpochMilliseconds()).copy(refreshFailed = true)
+                    TrackingEngine.Result(TrackingEngine.reduceFailure(latest, clock.now().toEpochMilliseconds()).copy(refreshFailed = true))
                 })
             }
-            if (!applied) return
-            effects.forEach { onEffect(it, sessionId) }
+            if (!applied.applied) return
+            applied.effects.forEach { onEffect(it, sessionId) }
             onUpdate()
             val next = current() ?: return
-            val intervalMs = TrackingEngine.pollingIntervalMillis(next.state, failures, operating)
-            if (roundWait != null) roundWait(sessionId, intervalMs) else delay(intervalMs)
+            if (session.state.legPhase == LegPhase.SINGLE && next.state.targetOrder != session.state.targetOrder) continue
+            val interval = TrackingEngine.pollingIntervalMillis(next.state, failures, operating)
+            shared = awaitNextRound(next, interval)
         }
     }
 
-    /** 上游默认的一起等取数：站点接口一轮 + 缺线补查，返回延迟 reduce */
     private suspend fun upstreamWatchFetch(
-        sessionId: String, generation: Int,
-        target: TrackingTarget.WatchTogether, plan: WatchPollPlan,
+        sessionId: String, generation: Int, target: TrackingTarget.WatchTogether, plan: WatchPollPlan,
         onOperating: (LineOperatingState) -> Unit
     ): Result<(TrackingSession) -> TrackingEngine.Result> =
         withContext(requestDispatcher) { watchPoller.poll(target, plan, cityFor(target.cityId, target.mygolbsCityCode, target.cityName)) }.map { poll ->
             currentCoroutineContext().ensureActive()
-            if (tracking.sessionById(sessionId)?.takeIf {
-                    it.generation == generation && !it.interrupted && it.state.isActive
-                } != null
-            ) {
-                tracking.recordLineBuses(sessionId, generation, poll.lines.mapValues { it.value.buses })
-            }
+            if (isCurrent(sessionId, generation)) tracking.recordLineBuses(sessionId, generation, poll.lines.mapValues { it.value.buses })
             onOperating(LineOperatingState.RUNNING)
             val reduce: (TrackingSession) -> TrackingEngine.Result = { latest ->
                 TrackingEngine.reduceWatchPoll(latest, poll, locationEnabled(), serviceFix(),
-                    clock.now().toEpochMilliseconds(), monotonicClock.elapsedMillis(), settings.autoStopAfterBoarding.value)
+                    clock.now().toEpochMilliseconds(), monotonicClock.elapsedMillis(), settings.autoStopAfterBoarding.value, tracking.latestUserFix)
             }
             reduce
         }
 
-    /** 上游默认的单线路取数：线路详情一查，返回延迟 reduce */
     private suspend fun upstreamSingleLineFetch(
-        sessionId: String, generation: Int,
-        leg: TrackingLegParams, state: TrackingSessionState,
+        sessionId: String, generation: Int, session: TrackingSession, sharedDetail: BusLineDetail?,
         onOperating: (LineOperatingState) -> Unit
-    ): Result<(TrackingSession) -> TrackingEngine.Result> =
-        withContext(requestDispatcher) { realtime.getLineDetail(
-            city = cityFor(leg.cityId, leg.mygolbsCityCode), lineId = leg.lineId,
-            targetOrder = when {
-                state.legPhase == LegPhase.WAITING_BOARD && state.boardStopOrder > 0 -> state.boardStopOrder
-                state.targetOrder > 0 -> state.targetOrder
-                else -> leg.targetOrder
-            },
-            stationId = state.targetStopId.ifBlank { leg.targetStopId }, source = leg.source,
-            lineNameHint = state.lineName, directionHint = leg.direction
-        ) }.map { detail ->
+    ): Result<(TrackingSession) -> TrackingEngine.Result> {
+        val fetched = if (sharedDetail != null) Result.success(sharedDetail) else withContext(requestDispatcher) {
+            realtime.getLineDetail(city = cityFor(session.leg.cityId, session.leg.mygolbsCityCode), lineId = session.leg.lineId,
+                targetOrder = requestOrder(session), stationId = session.state.targetStopId.ifBlank { session.leg.targetStopId },
+                source = session.leg.source, lineNameHint = session.state.lineName, directionHint = session.leg.direction)
+        }
+        return fetched.map { detail ->
             currentCoroutineContext().ensureActive()
-            if (tracking.sessionById(sessionId)?.takeIf {
-                    it.generation == generation && !it.interrupted && it.state.isActive
-                } != null
-            ) {
-                tracking.recordBuses(sessionId, generation, detail.buses)
-            }
+            if (isCurrent(sessionId, generation)) tracking.recordBuses(sessionId, generation, detail.buses)
             onOperating(detail.operatingState)
             val reduce: (TrackingSession) -> TrackingEngine.Result = { latest ->
-                TrackingEngine.reducePoll(latest, detail, locationEnabled(), serviceFix(), tracking.latestUserFix,
+                reduceTrackingLine(latest, detail, locationEnabled(), serviceFix(), tracking.latestUserFix,
                     clock.now().toEpochMilliseconds(), monotonicClock.elapsedMillis(), settings.autoStopAfterBoarding.value)
             }
             reduce
         }
+    }
+
+    private fun isCurrent(id: String, generation: Int): Boolean = tracking.sessionById(id)?.let {
+        it.generation == generation && !it.interrupted && it.state.isActive
+    } == true
+
+    private fun requestOrder(session: TrackingSession): Int = when {
+        session.state.legPhase == LegPhase.WAITING_BOARD && session.state.boardStopOrder > 0 -> session.state.boardStopOrder
+        session.state.targetOrder > 0 -> session.state.targetOrder
+        else -> session.leg.targetOrder
+    }
+
+    private fun matchesRequest(update: LineDetailUpdate, session: TrackingSession): Boolean =
+        update.source == session.leg.source && update.lineId == session.leg.lineId && update.targetOrder == requestOrder(session) &&
+            (update.cityId.isBlank() || update.cityId == session.leg.cityId) &&
+            (update.stationId.isNullOrBlank() || update.stationId == session.state.targetStopId.ifBlank { session.leg.targetStopId })
+
+    private suspend fun awaitNextRound(session: TrackingSession, interval: Long): LineDetailUpdate? = coroutineScope {
+        val platform = async<LineDetailUpdate?> {
+            if (roundWait != null) roundWait(session.sessionId, interval) else delay(interval)
+            null
+        }
+        val shared = async {
+            if (session.watchTarget != null) awaitCancellation()
+            val started = monotonicClock.elapsedMillis()
+            withTimeoutOrNull(interval) {
+                realtime.lineDetailUpdates.firstOrNull {
+                    matchesRequest(it, session) && monotonicClock.elapsedMillis() - started >= 5_000L
+                } ?: awaitCancellation()
+            }
+        }
+        try {
+            select { shared.onAwait { it }; platform.onAwait { it } }
+        } finally {
+            platform.cancel()
+            shared.cancel()
+        }
+    }
 
     private fun cityFor(id: String, code: String, name: String = ""): TransitCity =
         settings.selectedCity.value.takeIf { it.cityId == id }

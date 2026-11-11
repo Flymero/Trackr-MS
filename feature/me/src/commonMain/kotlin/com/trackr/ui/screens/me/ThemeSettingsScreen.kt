@@ -2,6 +2,10 @@
 
 package com.trackr.ui.screens.me
 
+import com.trackr.core.designsystem.resources.color_picker_pick_color
+import com.trackr.core.designsystem.component.ColorPickerDialog
+import com.trackr.core.designsystem.component.parseRgbHex
+import com.trackr.core.designsystem.component.rgbHex
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -314,15 +318,13 @@ private fun ThemePreview() {
     }
 }
 
-internal fun rgbHex(rgb: Int): String = "#" + rgb.toString(16).padStart(6, '0').uppercase()
-internal fun parseThemeHex(text: String): Int? = text.removePrefix("#").takeIf { it.length == 6 && it.all { c -> c in '0'..'9' || c.lowercaseChar() in 'a'..'f' } }?.toIntOrNull(16)?.takeIf { it in 0..0xFFFFFF }
 
 @Composable
 private fun CustomColorField(rgb: Int, enabled: Boolean, onColor: (Int) -> Unit) {
     var text by rememberSaveable { mutableStateOf(rgbHex(rgb)) }
     var picker by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(rgb) { if (parseThemeHex(text) != rgb) text = rgbHex(rgb) }
-    val pickColorLabel = stringResource(Res.string.theme_pick_color)
+    LaunchedEffect(rgb) { if (parseRgbHex(text) != rgb) text = rgbHex(rgb) }
+    val pickColorLabel = stringResource(DsRes.string.color_picker_pick_color)
     Row(horizontalArrangement = Arrangement.spacedBy(TrackrTheme.dimens.spaceM), verticalAlignment = Alignment.Bottom) {
         OutlinedButton(
             onClick = { picker = true }, enabled = enabled,
@@ -335,16 +337,16 @@ private fun CustomColorField(rgb: Int, enabled: Boolean, onColor: (Int) -> Unit)
         }
         OutlinedTextField(
             value = text,
-            onValueChange = { value -> text = value; parseThemeHex(value)?.let(onColor) },
+            onValueChange = { value -> text = value; parseRgbHex(value)?.let(onColor) },
             enabled = enabled, singleLine = true,
             modifier = Modifier.weight(1f).testTag("theme_hex"),
             label = { Text(stringResource(Res.string.theme_hex)) },
             shape = MaterialTheme.shapes.small,
-            isError = parseThemeHex(text) == null,
+            isError = parseRgbHex(text) == null,
         )
     }
-    if (parseThemeHex(text) == null) Text(stringResource(Res.string.theme_hex_error), modifier = Modifier.testTag("theme_hex_error"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-    if (picker) ThemeColorPickerDialog(rgb, onDismiss = { picker = false }, onColor = { onColor(it); picker = false })
+    if (parseRgbHex(text) == null) Text(stringResource(Res.string.theme_hex_error), modifier = Modifier.testTag("theme_hex_error"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+    if (picker) ColorPickerDialog(rgb, onDismiss = { picker = false }, onColor = { onColor(it); picker = false })
 }
 
 private fun modeLabel(mode: ThemeMode): StringResource = when (mode) {

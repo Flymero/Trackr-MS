@@ -38,6 +38,8 @@
     <string name="line_detail_fare">票价 %1$s</string>
     <string name="line_detail_stop_count">共 %1$s 站</string>
     <string name="line_detail_timetable">时刻表 ›</string>
+    <!-- 临时改道提示（掌上公交只在线路名里写「（临时改道）」） -->
+    <string name="line_detail_diversion_body">这条线正在%1$s，走向和站点可能和平时不同，以下面的站点为准</string>
     <string name="line_detail_track_this">追踪这班车</string>
     <!-- 长辈版线路页 / 换站（第 32 步） -->
     <string name="line_elder_pick_stop_title">在哪一站上车？</string>

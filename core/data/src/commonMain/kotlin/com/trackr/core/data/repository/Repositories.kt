@@ -9,6 +9,7 @@ import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
@@ -25,6 +26,7 @@ import com.trackr.core.network.remote.meishan.MeishanIds
 import com.trackr.core.network.remote.mygolbs.MygolbsIds
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 /*
  * 原来的上帝接口 ITransitRepository 按职责拆成下面几个（重构计划 §2.5）。
@@ -144,8 +146,12 @@ interface FavoritesRepository {
     suspend fun saveRoute(route: TransitGroup)
     suspend fun removeRoute(routeId: String)
 
-    suspend fun createGroup(name: String): FavoriteGroup
+    /** 新建分组，排在最后；[color] 为 null 时不设颜色 */
+    suspend fun createGroup(name: String, color: GroupColor? = null): FavoriteGroup
     suspend fun renameGroup(groupId: String, newName: String)
+
+    /** 改分组颜色（issue #38），null = 不设颜色；分组不存在时什么都不做 */
+    suspend fun setGroupColor(groupId: String, color: GroupColor?)
 
     /** 删分组：组里的收藏（车和路线）都变不分组，不删 */
     suspend fun deleteGroup(groupId: String)
@@ -226,7 +232,23 @@ interface RealtimeRepository {
 
     /** 收藏的每条线各查一次线路详情（命中 6 秒合并缓存），返回 收藏 id -> 站点 */
     suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>>
+
+    /**
+     * 每一份真正从上游拿到的线路详情（命中缓存的不算）。追踪服务等下一轮时订阅它：
+     * 页面刚查过同一条线、同一个候车站，就直接拿这份刷新追踪和通知。默认没有（Fake 不用改）。
+     */
+    val lineDetailUpdates: Flow<LineDetailUpdate> get() = emptyFlow()
 }
+
+/** [RealtimeRepository.lineDetailUpdates] 的一项：哪个数据源、哪条线、按哪个候车站查的 */
+data class LineDetailUpdate(
+    val source: DataSourceType,
+    val lineId: String,
+    val targetOrder: Int?,
+    val detail: BusLineDetail,
+    val cityId: String = "",
+    val stationId: String? = null
+)
 
 /**
  * 手机定位（WGS-84），都带精度和单调时刻（[UserFix]）。实现经 `LocationSource`（Android / iOS 各一份）。

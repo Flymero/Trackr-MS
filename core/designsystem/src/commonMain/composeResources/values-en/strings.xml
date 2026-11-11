@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 设计系统的通用文案（英文）。页面文案在第 28 步进各 feature 的 composeResources。 -->
+<resources>
+    <!-- 收藏分组颜色（issue #38） -->
+    <string name="group_color_none">No color</string>
+    <string name="group_color_red">Red</string>
+    <string name="group_color_orange">Orange</string>
+    <string name="group_color_yellow">Yellow</string>
+    <string name="group_color_green">Green</string>
+    <string name="group_color_teal">Teal</string>
+    <string name="group_color_blue">Blue</string>
+    <string name="group_color_purple">Purple</string>
+    <string name="group_color_pink">Pink</string>
+</resources>

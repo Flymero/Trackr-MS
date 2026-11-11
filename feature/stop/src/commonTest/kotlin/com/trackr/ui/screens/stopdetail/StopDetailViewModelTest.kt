@@ -414,6 +414,42 @@ class StopDetailViewModelTest {
         assertEquals("暂无在途车辆", rTemp.arrival.value)
     }
 
+    @Test
+    fun testRows_inServiceFirstThenFavoritesFirstWithinEachGroup() {
+        fun status(n: Int, text: String = "", bus: Boolean = false) = NearbyStopLineStatus(
+            line = line("L$n", "${n}路", "终点$n"),
+            targetOrder = 5,
+            targetStopId = "s$n",
+            targetStopName = "大站",
+            statusText = text,
+            approachingBuses = if (bus) listOf(LiveBus(busId = "b$n", plateOrFleetNo = "", order = 2, etaSeconds = 300)) else emptyList()
+        )
+        val stop = NearbyStop(
+            stopId = "stop_x",
+            name = "大站",
+            lines = listOf(
+                status(1, text = "末班已过"),
+                status(2, bus = true),
+                status(3, text = "暂停运营"),
+                status(4, text = "等待发车"),
+                status(5), // 没车没文字：算不在运营
+                status(6, bus = true),
+                status(7, text = "末班已过")
+            )
+        )
+        // 收藏：一条运营中的（6 路）、一条不在运营的（7 路）
+        val favorites = setOf("034_L6_5", "034_L7_5")
+
+        val rows = rowsOf("034", stop, favorites)
+
+        assertEquals(
+            listOf("6路", "2路", "4路", "7路", "1路", "3路", "5路"),
+            rows.map { it.lineName }
+        )
+        assertTrue(rows[0].isFavorite)
+        assertTrue(rows[3].isFavorite)
+    }
+
     // ================================================================ 选线 / 收藏 / 一起等
 
     @Test

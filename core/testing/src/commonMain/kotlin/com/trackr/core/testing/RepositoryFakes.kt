@@ -2,6 +2,7 @@ package com.trackr.core.testing
 
 import com.trackr.core.model.ThemeColors
 import com.trackr.core.data.repository.FavoritesRepository
+import com.trackr.core.data.repository.LineDetailUpdate
 import com.trackr.core.data.repository.LocationRepository
 import com.trackr.core.data.repository.MeishanLineRepository
 import com.trackr.core.data.repository.RealtimeRepository
@@ -13,6 +14,7 @@ import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
@@ -263,14 +265,23 @@ class FakeFavoritesRepository(
         refresh()
     }
 
-    override suspend fun createGroup(name: String): FavoriteGroup {
-        val group = FavoriteGroup(id = "fake_group_${nextGroupId++}", name = name.trim(), sortOrder = _favoriteGroups.value.size)
+    override suspend fun createGroup(name: String, color: GroupColor?): FavoriteGroup {
+        val group = FavoriteGroup(
+            id = "fake_group_${nextGroupId++}",
+            name = name.trim(),
+            sortOrder = _favoriteGroups.value.size,
+            color = color
+        )
         _favoriteGroups.update { it + group }
         return group
     }
 
     override suspend fun renameGroup(groupId: String, newName: String) {
         _favoriteGroups.update { list -> list.map { if (it.id == groupId) it.copy(name = newName.trim()) else it } }
+    }
+
+    override suspend fun setGroupColor(groupId: String, color: GroupColor?) {
+        _favoriteGroups.update { list -> list.map { if (it.id == groupId) it.withColor(color) else it } }
     }
 
     override suspend fun deleteGroup(groupId: String) {
@@ -348,6 +359,14 @@ class FakeRealtimeRepository(
     /** [getLineDetail] 返回前先跑一下（测试用来挂起、数并发）；null = 直接返回 */
     var lineDetailHook: (suspend (lineId: String) -> Unit)? = null
 
+    /** 每次 [getLineDetail] 请求的候车站序（按调用顺序） */
+    val lineDetailTargetOrders: MutableList<Int?> = mutableListOf()
+
+    /** 测试推「别处刚拿到的线路详情」 */
+    val lineDetailUpdateFlow = MutableSharedFlow<LineDetailUpdate>(extraBufferCapacity = 16)
+
+    override val lineDetailUpdates: Flow<LineDetailUpdate> get() = lineDetailUpdateFlow
+
     /** 记录每次附近站点查询的 (城市, 纬度, 经度) */
     val nearbyStopsCalls: MutableList<Triple<TransitCity, Double, Double>> = mutableListOf()
 
@@ -406,7 +425,10 @@ class FakeRealtimeRepository(
         lineNameHint: String,
         directionHint: Int
     ): Result<BusLineDetail> {
-        lineDetailCallsMutex.withLock { lineDetailCalls += lineId }
+        lineDetailCallsMutex.withLock {
+            lineDetailCalls += lineId
+            lineDetailTargetOrders += targetOrder
+        }
         lineDetailHook?.invoke(lineId)
         lineDetailsMap[lineId]?.let { return Result.success(it) }
         lineDetailResult?.let { return it }

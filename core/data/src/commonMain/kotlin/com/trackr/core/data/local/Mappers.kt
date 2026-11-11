@@ -92,14 +92,17 @@ fun FavoriteGroup.toEntity(position: Int) = FavoriteGroupEntity(
     position = position,
     name = name,
     sortOrder = sortOrder,
-    isDefault = isDefault
+    isDefault = isDefault,
+    color = colorKey
 )
 
 fun FavoriteGroupEntity.toModel() = FavoriteGroup(
     id = id,
     name = name,
     sortOrder = sortOrder,
-    isDefault = isDefault
+    isDefault = isDefault,
+    // 认不出的值原样留着（读的时候 FavoriteGroup.color 给 null），下次整份写回也不丢
+    colorKey = color
 )
 
 // ---- 收藏合一索引（第 14 步） ----

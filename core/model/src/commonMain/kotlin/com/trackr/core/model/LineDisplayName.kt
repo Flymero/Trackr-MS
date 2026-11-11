@@ -18,3 +18,30 @@ val BusLineDirection.displayLineName: String
  */
 val FavoriteStationLine.displayLineName: String
     get() = lineName.trim().ifBlank { lineNo.trim() }
+
+/**
+ * 临时改道标记（issue #41 后续）。
+ *
+ * 掌上公交改道期间不给单独的字段，只把线路名改成「153路（临时改道）」；改道刚开始那阵站序还可能乱（出现第 900 站）。
+ * 页面据此提示用户「今天走向和站点可能和平时不同」，标题用去掉标记的名字。
+ */
+object TemporaryDiversion {
+
+    /** 「（临时改道）」「(临时改道)」「（临时改道至 X）」这类括号标记，全角半角都认 */
+    private val MARKER = Regex("""\s*[（(]\s*(临时改道[^）)]*?)\s*[）)]\s*""")
+
+    /** 线路名里的改道说明（如「临时改道」）；没有改道标记时为 null */
+    fun noteOf(lineName: String): String? =
+        MARKER.find(lineName)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+
+    /** 去掉改道标记后的线路名（「153路（临时改道）」→「153路」）；没有标记时原样返回 */
+    fun strip(lineName: String): String = MARKER.replace(lineName, "").trim().ifEmpty { lineName.trim() }
+}
+
+/** 这个方向正在临时改道时的说明（如「临时改道」）；没有改道时为 null */
+val BusLineDirection.diversionNote: String?
+    get() = TemporaryDiversion.noteOf(name)
+
+/** 去掉「（临时改道）」标记的显示名：改道另有提示条，标题不用再挂一截括号 */
+val BusLineDirection.displayLineNameWithoutDiversion: String
+    get() = TemporaryDiversion.strip(displayLineName)

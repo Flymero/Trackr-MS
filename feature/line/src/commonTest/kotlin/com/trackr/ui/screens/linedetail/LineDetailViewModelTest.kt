@@ -82,8 +82,12 @@ private class CountingLineRepository(
 ) : RealtimeRepository by delegate {
     val lineDetailTargetOrders = mutableListOf<Int?>()
     val lineIds = mutableListOf<String>()
+    val stationIds = mutableListOf<String?>()
     var gate: CompletableDeferred<Unit>? = null
     var gateTargetOrder: Int? = null
+
+    /** 单独卡住某条线路的请求；回来的数据在发请求时就定了，用来模拟晚回来的旧方向响应 */
+    val lineGates = mutableMapOf<String, CompletableDeferred<Unit>>()
 
     override suspend fun getLineDetail(
         city: TransitCity,
@@ -98,10 +102,12 @@ private class CountingLineRepository(
     ): Result<BusLineDetail> {
         lineDetailTargetOrders += targetOrder
         lineIds += lineId
-        if (gateTargetOrder == null || gateTargetOrder == targetOrder) {
-            gate?.await()
-        }
-        return delegate.getLineDetail(city, lineId, targetOrder, stationId, wgsLat, wgsLng, source, lineNameHint, directionHint)
+        stationIds += stationId
+        if (gateTargetOrder == null || gateTargetOrder == targetOrder) gate?.await()
+        val lineGate = lineGates[lineId]
+        val result = delegate.getLineDetail(city, lineId, targetOrder, stationId, wgsLat, wgsLng, source, lineNameHint, directionHint)
+        lineGate?.await()
+        return result
     }
 }
 
@@ -1694,6 +1700,105 @@ class LineDetailViewModelTest {
         assertEquals("line_002", state.static?.line?.lineId)
         assertEquals("人民广场", state.selectedStop?.name)
         assertEquals(PanelMode.STATION_CARD, state.panelMode)
+    }
+
+    // ---------- 选中的候车站不能被刷新换掉 ----------
+
+    private val duplicateOrderStops = listOf(
+        BusStop(stopId = "d1", name = "汉口路", order = 1),
+        BusStop(stopId = "d2", name = "人民广场", order = 2),
+        BusStop(stopId = "d3", name = "南京路", order = 2),
+        BusStop(stopId = "d4", name = "上海体育馆", order = 3)
+    )
+
+    private fun useDuplicateOrderStops() {
+        fakeRepository.lineDetailResult = Result.success(
+            BusLineDetail(line = forwardDirection, reverseDirection = reverseDirection, stops = duplicateOrderStops, buses = buses)
+        )
+    }
+
+    @Test
+    fun selectStop_duplicateOrder_keepsTappedStopAfterRefresh() = runTest(main.dispatcher) {
+        useDuplicateOrderStops()
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.selectStop(duplicateOrderStops[2])
+        testScheduler.runCurrent()
+        assertEquals("南京路", viewModel.uiState.value.selectedStop?.name)
+
+        viewModel.refreshNow()
+        testScheduler.runCurrent()
+        assertEquals("南京路", viewModel.uiState.value.selectedStop?.name)
+    }
+
+    @Test
+    fun initialLoad_duplicateOrder_usesEntryStationId() = runTest(main.dispatcher) {
+        useDuplicateOrderStops()
+        val viewModel = createViewModel(targetOrder = 2, stationId = "d3")
+        testScheduler.runCurrent()
+
+        assertEquals("南京路", viewModel.uiState.value.selectedStop?.name)
+    }
+
+    @Test
+    fun selectStop_orderShifted_findsStopByIdentity() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        viewModel.selectStop(stops[2])
+        testScheduler.runCurrent()
+
+        // 上游站表多了一站，站序整体后移：还应该是用户选的那一站，不能被第 3 站的新站顶替
+        val shifted = listOf(BusStop(stopId = "s0", name = "新增站", order = 1)) +
+            stops.map { it.copy(order = it.order + 1) }
+        fakeRepository.lineDetailResult = Result.success(
+            BusLineDetail(line = forwardDirection, reverseDirection = reverseDirection, stops = shifted, buses = buses)
+        )
+        viewModel.refreshNow()
+        testScheduler.runCurrent()
+
+        assertEquals("s3", viewModel.uiState.value.selectedStop?.stopId)
+        assertEquals(4, viewModel.uiState.value.selectedStop?.order)
+    }
+
+    @Test
+    fun selectStop_stopsSendingEntryStationId() = runTest(main.dispatcher) {
+        val repo = CountingLineRepository(fakeRepository.realtime)
+        val viewModel = createViewModel(targetOrder = 2, stationId = "s2", realtime = repo)
+        testScheduler.runCurrent()
+        assertEquals("s2", repo.stationIds.last())
+
+        viewModel.selectStop(stops[2])
+        testScheduler.runCurrent()
+
+        assertEquals(3, repo.lineDetailTargetOrders.last())
+        assertNull(repo.stationIds.last())
+    }
+
+    @Test
+    fun switchDirection_lateOldDirectionResponse_isIgnored() = runTest(main.dispatcher) {
+        val repo = CountingLineRepository(fakeRepository.realtime)
+        val viewModel = createViewModel(targetOrder = 1, realtime = repo)
+        testScheduler.runCurrent()
+
+        // 旧方向的刷新发出去了但还没回来，用户此时换向
+        val oldResponse = CompletableDeferred<Unit>()
+        repo.lineGates["line_001"] = oldResponse
+        viewModel.refreshNow()
+        testScheduler.runCurrent()
+
+        fakeRepository.lineDetailResult = Result.success(reverseDetail())
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+        assertEquals("汉口路", viewModel.uiState.value.selectedStop?.name)
+
+        oldResponse.complete(Unit)
+        testScheduler.runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals("line_002", state.static?.line?.lineId)
+        assertEquals("汉口路", state.selectedStop?.name)
+        assertFalse(state.isRefreshing)
     }
 
     // ---------- 底栏换向 ----------

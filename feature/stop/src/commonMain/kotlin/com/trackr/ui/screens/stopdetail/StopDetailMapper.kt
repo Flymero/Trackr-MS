@@ -68,8 +68,27 @@ internal fun arrivalOf(status: NearbyStopLineStatus): ArrivalDisplay {
     return ArrivalText.format(state, lineName = status.line.displayLineName, stopName = status.targetStopName)
 }
 
+/** 状态文字里出现这些词就算不在运营（「末班已过」「暂停运营」「不在运营时间」等） */
+private val OUT_OF_SERVICE_WORDS = listOf("末班已过", "停运", "暂停运营", "不在运营", "非运营", "未运营", "收班")
+
+/**
+ * 这条线现在有没有在运营：有来车就算；数据源给了状态文字时，不含 [OUT_OF_SERVICE_WORDS] 就算
+ * （「等待发车」「3站」「正在运营中」都算在运营）；既没车也没文字（「暂无在途车辆」）不算。
+ */
+internal fun isInService(status: NearbyStopLineStatus): Boolean {
+    if (status.approachingBuses.isNotEmpty()) return true
+    val text = status.statusText.trim()
+    if (text.isEmpty()) return false
+    return OUT_OF_SERVICE_WORDS.none { text.contains(it) }
+}
+
+/**
+ * 站点页的线路行。排序：运营中的在前、不在运营的在后；每一段里收藏的在前；
+ * 其余保持数据源给的顺序（稳定排序）。傍晚停运的线多，运营中的线不再夹在中间难找。
+ */
 internal fun rowsOf(cityId: String, stop: NearbyStop?, favoriteIds: Set<String>): List<StopLineRowUi> =
     stop?.lines.orEmpty().map { status ->
+        val inService = isInService(status)
         val line = status.line
         StopLineRowUi(
             key = rowKeyOf(status),
@@ -83,8 +102,10 @@ internal fun rowsOf(cityId: String, stop: NearbyStop?, favoriteIds: Set<String>)
             targetOrder = status.targetOrder,
             stopId = stop?.stopId.orEmpty(),
             source = line.source
-        )
+        ) to inService
     }
+        .sortedWith(compareBy({ !it.second }, { !it.first.isFavorite }))
+        .map { it.first }
 
 /** 顶栏小字「120米 · 8 条线」 */
 internal fun subtitleOf(stop: NearbyStop?): String {

@@ -55,7 +55,7 @@ class ForegroundTrackingController(
                             val previous = workers[session.sessionId]
                             if (previous == null || previous.first != session.generation) {
                                 previous?.second?.cancel()
-                                fix = null
+                                if (previous != null && live.size <= 1) fix = null
                                 workers[session.sessionId] = session.generation to launch {
                                     poller.run(session.sessionId, session.generation)
                                 }
@@ -68,6 +68,12 @@ class ForegroundTrackingController(
                             locationJob?.cancel()
                             tier = nextTier
                             locationJob = if (tier == LocationCadence.Tier.OFF) null else launch {
+                                location.lastKnownFixes().forEach { cached ->
+                                    if (TrackingEngine.shouldAcceptServiceFix(fix, cached)) {
+                                        fix = cached
+                                        repository.updateUserFix(cached)
+                                    }
+                                }
                                 location.fixes(nextTier).collect { incoming ->
                                     if (TrackingEngine.shouldAcceptServiceFix(fix, incoming)) {
                                         fix = incoming

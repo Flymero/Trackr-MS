@@ -16,6 +16,9 @@ import com.trackr.core.data.repository.MeishanPushRepository
 import com.trackr.core.data.repository.MeishanPushTarget
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
+import com.trackr.core.data.repository.applyTrackingResult
+import com.trackr.core.data.repository.reduceTrackingLine
+import com.trackr.core.data.repository.trackingRoundInterval
 import com.trackr.core.data.repository.TrackingPoller
 import com.trackr.core.data.repository.WatchTogetherPoller
 import com.trackr.core.domain.platform.LocationSource
@@ -161,6 +164,7 @@ class BusTrackingService : LifecycleService() {
         city: TransitCity,
         leg: com.trackr.core.model.TrackingLegParams,
         state: TrackingSessionState,
+        sharedDetail: BusLineDetail?,
         onOperating: (LineOperatingState) -> Unit
     ): Result<(TrackingSession) -> TrackingEngine.Result> {
         val worker = workers[sessionId]
@@ -176,7 +180,7 @@ class BusTrackingService : LifecycleService() {
             else -> leg.targetOrder
         }
         val fetchStationId = state.targetStopId.ifBlank { leg.targetStopId }
-        val detailResult = withContext(Dispatchers.IO) {
+        val detailResult = sharedDetail?.let { Result.success(it) } ?: withContext(Dispatchers.IO) {
             repository.getLineDetail(
                 city = city,
                 lineId = leg.lineId,
@@ -204,7 +208,7 @@ class BusTrackingService : LifecycleService() {
             onOperating(detail.operatingState)
             trackingRepository.recordBuses(sessionId, generation, detail.buses)
             val reduce: (TrackingSession) -> TrackingEngine.Result = { latest ->
-                TrackingEngine.reducePoll(
+                reduceTrackingLine(
                     latest, detail,
                     locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission(),
                     serviceFix = serviceFix, dropFix = trackingRepository.latestUserFix,
@@ -324,7 +328,8 @@ class BusTrackingService : LifecycleService() {
                     serviceFix = serviceFix,
                     nowMillis = clock.now().toEpochMilliseconds(),
                     nowElapsedMillis = monotonicClock.elapsedMillis(),
-                    stopAfterBoarding = stopAfterBoarding
+                    stopAfterBoarding = stopAfterBoarding,
+                    dropFix = trackingRepository.latestUserFix
                 )
             } else {
                 TrackingEngine.reduceWatchPoll(
@@ -334,7 +339,8 @@ class BusTrackingService : LifecycleService() {
                     serviceFix = serviceFix,
                     nowMillis = clock.now().toEpochMilliseconds(),
                     nowElapsedMillis = monotonicClock.elapsedMillis(),
-                    stopAfterBoarding = stopAfterBoarding
+                    stopAfterBoarding = stopAfterBoarding,
+                    dropFix = trackingRepository.latestUserFix
                 )
             }
             reduced
@@ -344,12 +350,9 @@ class BusTrackingService : LifecycleService() {
     /** 上游 TrackingPoller 的等待钩子：非运营时段把等待拉长到 5 分钟；推送事件可提前唤醒 */
     private suspend fun roundWaitForPoller(sessionId: String, millis: Long) {
         val worker = workers[sessionId]
-        val interval = if (worker?.operatingState != LineOperatingState.RUNNING) {
-            maxOf(millis, TrackingEngine.NOT_RUNNING_POLL_INTERVAL_MS)
-        } else {
-            millis
-        }
-        withTimeoutOrNull(interval) { worker?.refreshWakeup?.receive() }
+        val state = trackingRepository.sessionById(sessionId)?.state ?: return
+        val interval = trackingRoundInterval(state, millis, worker?.operatingState ?: LineOperatingState.RUNNING)
+        if (worker == null) delay(interval) else withTimeoutOrNull(interval) { worker.refreshWakeup.receive() }
     }
 
     /** 请求用的城市：和当前选的城市一样就用它（带城市名），否则按会话里的 id 拼一个 */
@@ -417,6 +420,9 @@ class BusTrackingService : LifecycleService() {
     /** 服务自己最近一次采用的定位（判上车用） */
     private var serviceFix: UserFix? = null
 
+    /** 上次补带 location 类型的单调时刻；-1 = 还没试过 */
+    private var lastLocationUpgradeAttemptMillis: Long = -1L
+
     /** 最近一次 onStartCommand 的 startId：停止时只停到这一次，之后又来的启动请求不受影响 */
     private var lastStartId: Int = 0
 
@@ -431,6 +437,10 @@ class BusTrackingService : LifecycleService() {
         // 这里排到下一轮再处理，不在仓库的锁里跑服务的代码
         lifecycleScope.launch(Dispatchers.Main) {
             trackingRepository.sessions.collect { onSessionsChanged(it) }
+        }
+        // 追踪中途才打开「上车后自动结束追踪」：前台服务当初没带 location 类型，要补上，否则这次追踪判不了上车（issue #41）
+        lifecycleScope.launch(Dispatchers.Main) {
+            settings.autoStopAfterBoarding.collect { upgradeLocationTypeIfNeeded(force = true) }
         }
     }
 
@@ -620,6 +630,7 @@ class BusTrackingService : LifecycleService() {
         // 旧版本留下的那条（id 10001，按钮不带 sessionId）：只要还有追踪在跑就清掉它，
         // 不然它会一直躺在通知栏，点它的「结束」还可能把别的项一起停掉
         if (live.isNotEmpty()) liveProgressNotifier.cancelNotification(this)
+        upgradeLocationTypeIfNeeded(force = false)
         updateLocationCadence()
         updateTrackingWakeLock(live)
         if (live.isEmpty() && sessions.none { it.interrupted }) {
@@ -663,9 +674,12 @@ class BusTrackingService : LifecycleService() {
         worker.job?.cancel()
         worker.job = null
         stopPush(worker)
-        if (worker.generation != session.generation) {
-            // 新会话 / 切了程：上一次的服务定位不再用
+        if (worker.generation != NO_GENERATION && worker.generation != session.generation && workers.size <= 1) {
+            // Invalidate the service fix only when no other tracking session is using it.
             serviceFix = null
+        }
+        if (serviceFix == null && locationTrackingAllowed && locationSource.hasPrecisePermission()) {
+            locationSource.lastKnownFixes().forEach { onServiceFix(it) }
         }
         worker.generation = session.generation
         render(session, force = true)
@@ -755,14 +769,13 @@ class BusTrackingService : LifecycleService() {
         val dropFix = trackingRepository.latestUserFix
         val nowMillis = clock.now().toEpochMilliseconds()
         val nowElapsed = monotonicClock.elapsedMillis()
-        var effects: List<TrackingEngine.Effect> = emptyList()
         val applied = if (watch) {
             trackingRepository.recordLineBuses(
                 worker.sessionId,
                 worker.generation,
                 mapOf(detail.line.lineId to detail.buses)
             )
-            trackingRepository.update(worker.sessionId, worker.generation) { current ->
+            trackingRepository.applyTrackingResult(worker.sessionId, worker.generation, stopAfterBoarding) { current ->
                 val requested = current.watchTarget?.lines?.map { it.lineId }?.toSet().orEmpty()
                 if (worker.watchRequested != requested) {
                     worker.watchRequested = requested
@@ -786,7 +799,8 @@ class BusTrackingService : LifecycleService() {
                         serviceFix = serviceFix,
                         nowMillis = nowMillis,
                         nowElapsedMillis = nowElapsed,
-                        stopAfterBoarding = stopAfterBoarding
+                        stopAfterBoarding = stopAfterBoarding,
+                        dropFix = trackingRepository.latestUserFix
                     )
                 } else {
                     TrackingEngine.reduceWatchPoll(
@@ -799,20 +813,20 @@ class BusTrackingService : LifecycleService() {
                         serviceFix = serviceFix,
                         nowMillis = nowMillis,
                         nowElapsedMillis = nowElapsed,
-                        stopAfterBoarding = stopAfterBoarding
+                        stopAfterBoarding = stopAfterBoarding,
+                        dropFix = trackingRepository.latestUserFix
                     )
                 }
-                effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session.copy(
+                reduced.copy(session = reduced.session.copy(
                     // 推送帧是实时数据：与 poller 成功路径同口径盖新鲜度戳，避免推送喂养的会话被误判陈旧
                     lastRealtimeAtMillis = nowMillis,
                     refreshFailed = false
-                )
+                ))
             }
         } else {
             trackingRepository.recordBuses(worker.sessionId, worker.generation, detail.buses)
-            trackingRepository.update(worker.sessionId, worker.generation) { current ->
-                val reduced = TrackingEngine.reducePoll(
+            trackingRepository.applyTrackingResult(worker.sessionId, worker.generation, stopAfterBoarding) { current ->
+                val reduced = reduceTrackingLine(
                     session = current,
                     detail = detail,
                     locationEnabled = locationEnabled,
@@ -822,16 +836,15 @@ class BusTrackingService : LifecycleService() {
                     nowElapsedMillis = nowElapsed,
                     stopAfterBoarding = stopAfterBoarding
                 )
-                effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session.copy(
+                reduced.copy(session = reduced.session.copy(
                     // 推送帧是实时数据：与 poller 成功路径同口径盖新鲜度戳，避免推送喂养的会话被误判陈旧
                     lastRealtimeAtMillis = nowMillis,
                     refreshFailed = false
-                )
+                ))
             }
         }
-        if (!applied) return
-        effects.forEach { runEffect(it, worker.sessionId) }
+        if (!applied.applied) return
+        applied.effects.forEach { runEffect(it, worker.sessionId) }
         afterUpdate(worker)
     }
 
@@ -917,6 +930,7 @@ class BusTrackingService : LifecycleService() {
                 val wantLocation = TrackingEngine.wantsLocation(session.target, stopAfterBoarding) &&
                     locationSource.hasPrecisePermission()
                 runCatching { enterForeground(notificationOf(session), wantLocation, firstId) }
+                    .onSuccess { locationTrackingAllowed = it }
                     .onFailure { Log.w(TAG, "Cannot move foreground notification to the new one", it) }
             }
         }
@@ -1054,6 +1068,40 @@ class BusTrackingService : LifecycleService() {
             )
         }
 
+    /**
+     * 前台服务该带 location 类型却没带上时再试一次（issue #41「上车检测不一定生效」）。
+     *
+     * 没带上的情形：开始追踪时开关还关着；进程被杀后系统在后台重建服务，Android 14+ 不让后台进程拿 location 类型。
+     * 之前只在进前台那一刻决定一次，这一整次追踪都判不了上车。现在会话每次变化时补试（用户回到 App、
+     * 或在「我的」里打开开关时就能成功）；不是开关触发的补试最多一分钟一次。
+     */
+    private fun upgradeLocationTypeIfNeeded(force: Boolean) {
+        if (locationTrackingAllowed) return
+        val focusId = foregroundSessionId ?: return
+        val live = trackingRepository.sessions.value.filter { !it.interrupted && it.state.isActive }
+        val focus = live.firstOrNull { it.sessionId == focusId } ?: return
+        if (live.none { TrackingEngine.wantsLocation(it.target, stopAfterBoarding) }) return
+        if (!locationSource.hasPrecisePermission()) return
+        val now = monotonicClock.elapsedMillis()
+        if (!force && lastLocationUpgradeAttemptMillis >= 0L &&
+            now - lastLocationUpgradeAttemptMillis < LOCATION_UPGRADE_RETRY_MILLIS
+        ) return
+        lastLocationUpgradeAttemptMillis = now
+        locationTrackingAllowed = try {
+            enterForeground(notificationOf(focus), wantLocation = true, notificationId = foregroundNotifyId)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Cannot add location type to foreground tracking", e)
+            false
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Cannot add location type to foreground tracking", e)
+            false
+        }
+        if (locationTrackingAllowed) {
+            locationSource.lastKnownFixes().forEach { onServiceFix(it) }
+            updateLocationCadence()
+        }
+    }
+
     /** 按所有会话里最勤的那一档调整定位频率；都不需要时关闭定位 */
     private fun updateLocationCadence() {
         val tier = if (!locationTrackingAllowed) {
@@ -1073,6 +1121,7 @@ class BusTrackingService : LifecycleService() {
         if (tier == LocationCadence.Tier.OFF) return
         if (!locationSource.hasPrecisePermission()) return
         activeTier = tier
+        locationSource.lastKnownFixes().forEach { onServiceFix(it) }
         locationJob = lifecycleScope.launch {
             locationSource.fixes(tier).collect { fix -> onServiceFix(fix) }
             // 没有可用的定位来源（流直接结束）：下次刷新时再试
@@ -1175,6 +1224,9 @@ class BusTrackingService : LifecycleService() {
         private const val NO_GENERATION = -1
         private const val PUSH_RETRY_MIN_MILLIS = 2_000L
         private const val PUSH_RETRY_MAX_MILLIS = 30_000L
+
+        /** 补带 location 类型失败后，至少隔这么久再试 */
+        private const val LOCATION_UPGRADE_RETRY_MILLIS = 60_000L
 
         const val ACTION_START_TRACKING = "com.trackr.action.START_TRACKING"
         const val EXTRA_SESSION_ID = "extra_session_id"
