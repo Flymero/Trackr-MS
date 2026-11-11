@@ -32,7 +32,14 @@ sealed interface ScreenKey : NavKey {
         val targetOrder: Int = 0,
         val stopId: String = "",
         val source: DataSourceType = DataSourceType.CHELAILE,
-        val lineName: String = ""
+        val lineName: String = "",
+        /**
+         * 上车站名（路线规划 / 路线详情点线路进来才有）。高德方案没对齐到实时源时 [lineId] / [targetOrder]
+         * 都靠不住（站序是占位的 1），线路页按站名找候车站，这个方向没有就换反向找。
+         */
+        val boardStopName: String = "",
+        /** 下车站名：和 [boardStopName] 一起判方向（上车站要在下车站前面） */
+        val alightStopName: String = ""
     ) : ScreenKey
 
     @Serializable

@@ -29,6 +29,7 @@ import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TrackingTarget
+import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.displayLineName
 import com.trackr.data.repository.IScheduledReminderRepository
@@ -167,6 +168,12 @@ class LineDetailViewModel(
     private val initialStationId: String? = null,
     private val initialSource: DataSourceType = if (initialLineId.startsWith("mg:")) DataSourceType.MYGOLBS else DataSourceType.CHELAILE,
     private val lineNameHint: String = "",
+    /**
+     * 进页面时带来的上车站 / 下车站名（路线规划、路线详情点线路进来）。有它时按站名定候车站、判方向，
+     * 不信 [initialTargetOrder]：高德方案没对齐时站序是占位的 1。
+     */
+    private val entryBoardStopName: String = "",
+    private val entryAlightStopName: String = "",
     private val settings: SettingsRepository,
     private val favorites: FavoritesRepository,
     private val realtime: RealtimeRepository,
@@ -190,9 +197,13 @@ class LineDetailViewModel(
         LineDetailUiState(
             supportsAutoStartReminders = reminderRepository.supportsAutoStart,
             lineNameHint = lineNameHint,
-            entryStopOrder = initialTargetOrder?.takeIf { it > 0 }
+            // 按站名定站时站序要等站表回来才知道，先不滚
+            entryStopOrder = initialTargetOrder?.takeIf { it > 0 && entryBoardStopName.isBlank() }
         )
     )
+
+    /** 入口按站名定候车站（见 [entryBoardStopName]） */
+    private val hasEntryStopName: Boolean = entryBoardStopName.isNotBlank()
     val uiState: StateFlow<LineDetailUiState> = _uiState.asStateFlow()
 
     private val entryLineId: String = initialLineId
@@ -336,7 +347,11 @@ class LineDetailViewModel(
                 state.copy(
                     static = static,
                     selectedStop = state.selectedStop
-                        ?: initialTargetOrder?.takeIf { it > 0 }?.let { order -> entryStopIn(cached.stops, order) }
+                        ?: if (hasEntryStopName) {
+                            resolveEntryStop(cached.stops, entryBoardStopName, entryAlightStopName, initialTargetOrder)
+                        } else {
+                            initialTargetOrder?.takeIf { it > 0 }?.let { order -> entryStopIn(cached.stops, order) }
+                        }
                 )
             }
         }
@@ -453,15 +468,29 @@ class LineDetailViewModel(
                 lineNameHint = lineNameHint
             )
 
-            result.onSuccess { detail ->
+            result.onSuccess { fetched ->
                 // 请求期间换了向：这份是旧方向的数据，按站序套到新方向会选错站
                 if (requestLineId != currentLineId) {
                     _uiState.update { it.copy(isRefreshing = false) }
                     return@onSuccess
                 }
+                // 入口带了站名：按站名找候车站，这个方向没有（或上车站在下车站后面）就换反向找
+                val byName = if (isInitial && !userPickedStop && hasEntryStopName) {
+                    resolveEntryDirection(fetched, currentCity)
+                } else {
+                    null
+                }
+                if (byName != null && byName.first.line.lineId != requestLineId) {
+                    currentLineId = byName.first.line.lineId
+                    currentSource = byName.first.line.source
+                    publishTrackingState()
+                }
+                val detail = byName?.first ?: fetched
                 val selected = _uiState.value.selectedStop
                 // 初次加载或无选中站时，计算默认选中的候车站（首车前面一站）；用户已经在缓存的站表上点过站就保留
-                val targetStop = if (selected == null || (isInitial && !userPickedStop)) {
+                val targetStop = if (byName != null) {
+                    byName.second
+                } else if (selected == null || (isInitial && !userPickedStop)) {
                     if (initialTargetOrder != null && initialTargetOrder > 0) {
                         entryStopIn(detail.stops, initialTargetOrder) ?: calculateDefaultStop(detail)
                     } else {
@@ -472,12 +501,17 @@ class LineDetailViewModel(
                 }
 
                 applyDetail(detail, targetStop)
+                if (byName != null) {
+                    _uiState.update { it.copy(entryStopOrder = byName.second.order) }
+                }
 
                 refreshFallbackNextDeparture(detail, targetStop)
 
-                // 初次加载未指定候车站时，需要再按默认候车站请求一次才能拿到到该站的精确 ETA；
-                // 在同一协程内顺序执行并重新计时，避免轮询紧接着再发一次
-                if (isInitial && targetStop != null && targetOrder == null) {
+                // 初次加载未指定候车站（或按站名定的站和请求时带的站序 / 方向不一样）时，需要再按候车站请求一次
+                // 才能拿到到该站的精确 ETA；在同一协程内顺序执行并重新计时，避免轮询紧接着再发一次
+                val entryStopMoved = byName != null &&
+                    (byName.second.order != targetOrder || detail.line.lineId != requestLineId)
+                if (isInitial && targetStop != null && (targetOrder == null || entryStopMoved)) {
                     pollingCoordinator.restart()
                     fetchLineDetail(isInitial = false, targetOrderOverride = targetStop.order)
                 }
@@ -497,6 +531,27 @@ class LineDetailViewModel(
         } finally {
             activeLoads.decrementAndFetch()
         }
+    }
+
+    /**
+     * 按入口站名定方向和候车站：当前方向找得到就用它；找不到再请求一次反向线路，在反向里找。
+     * @return 用哪份数据 + 哪一站；两个方向都找不到返回 null（退回原来的站序 / 默认候车站逻辑）
+     */
+    private suspend fun resolveEntryDirection(
+        detail: BusLineDetail,
+        city: TransitCity
+    ): Pair<BusLineDetail, BusStop>? {
+        resolveEntryStop(detail.stops, entryBoardStopName, entryAlightStopName, initialTargetOrder)
+            ?.let { return detail to it }
+        val reverse = detail.reverseDirection?.takeIf { it.lineId.isNotBlank() } ?: return null
+        val revDetail = realtime.getLineDetail(
+            city = city,
+            lineId = reverse.lineId,
+            source = reverse.source,
+            lineNameHint = reverse.name
+        ).getOrNull() ?: return null
+        val stop = resolveEntryStop(revDetail.stops, entryBoardStopName, entryAlightStopName) ?: return null
+        return revDetail to stop
     }
 
     /** 入口指定的那一站：个别数据源站序会重复，能用站 id 区分时优先用站 id */

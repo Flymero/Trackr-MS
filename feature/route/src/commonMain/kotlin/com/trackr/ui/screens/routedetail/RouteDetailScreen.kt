@@ -87,7 +87,7 @@ import com.trackr.core.model.LegPhase
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitLeg
 import com.trackr.core.navigation.TrackrNavigator
-import com.trackr.core.navigation.ScreenKey
+import com.trackr.feature.route.toLineDetailKey
 import com.trackr.feature.route.resources.Res as RouteRes
 import com.trackr.feature.route.resources.route_detail_add_line_hint
 import com.trackr.feature.route.resources.route_detail_add_line_title
@@ -911,16 +911,7 @@ fun RouteDetailRoute(
     val lifecycleOwner = LocalLifecycleOwner.current
     val openLine: (CandidateLine) -> Unit = { candidate ->
         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            navigator.open(
-                ScreenKey.LineDetail(
-                    cityId = candidate.cityId,
-                    lineId = candidate.lineId,
-                    targetOrder = if (candidate.fromStopOrder > 0) candidate.fromStopOrder else candidate.toStopOrder,
-                    stopId = "",
-                    source = candidate.source,
-                    lineName = candidate.lineName
-                )
-            )
+            navigator.open(candidate.toLineDetailKey())
         }
     }
 
