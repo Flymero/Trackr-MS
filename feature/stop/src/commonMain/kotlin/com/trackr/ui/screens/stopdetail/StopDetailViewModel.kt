@@ -12,6 +12,7 @@ import com.trackr.core.domain.platform.ProcessMonotonicClock
 import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.domain.tracking.WatchTogetherRoute
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.NearbyStopLineStatus
@@ -93,6 +94,15 @@ class StopDetailViewModel(
     /** 已经按哪个一起等会话把站台切过去（只切一次，之后用户可以自己换） */
     private var alignedWatchSessionId: String? = null
 
+    /** 收藏的站（issue #47），只用来认出这个站收藏了没有 */
+    private var stationFavorites: List<FavoriteStation> = emptyList()
+
+    /** 用户自己切过站台（之后才问「默认方向改成 X？」） */
+    private var userSwitchedPlatform = false
+
+    /** 「默认方向改成 X？」这次打开已经问过了 */
+    private var platformPromptHandled = false
+
     internal val pollingCoordinator = PollingCoordinator(
         scope = viewModelScope,
         strategy = FixedDelayPollingStrategy(delayMs = POLL_INTERVAL_SECONDS * 1000L),
@@ -119,6 +129,12 @@ class StopDetailViewModel(
             favorites.favorites.collectLatest { list ->
                 val ids = list.map { it.id }.toSet()
                 publish { it.copy(favoriteIds = ids) }
+            }
+        }
+        viewModelScope.launch {
+            favorites.favoriteStations.collectLatest { list ->
+                stationFavorites = list
+                publish { it }
             }
         }
         viewModelScope.launch {
@@ -150,6 +166,12 @@ class StopDetailViewModel(
             StopDetailEvent.Retry -> loadStopDetail(isInitial = true)
             is StopDetailEvent.SelectPlatform -> selectStopIndex(event.index)
             is StopDetailEvent.ToggleFavorite -> toggleFavoriteByKey(event.rowKey)
+            StopDetailEvent.ToggleStationFavorite -> toggleStationFavorite()
+            StopDetailEvent.AcceptDefaultPlatform -> acceptDefaultPlatform()
+            StopDetailEvent.DismissDefaultPlatformPrompt -> {
+                platformPromptHandled = true
+                publish { it }
+            }
             StopDetailEvent.StartSelecting -> _uiState.update { it.copy(selecting = true, selectedLineKeys = emptySet()) }
             is StopDetailEvent.StartSelectingWith -> startSelectingWith(event.rowKey)
             StopDetailEvent.CancelSelecting -> exitSelecting()
@@ -269,7 +291,8 @@ class StopDetailViewModel(
                     val idx = stopList.indexOfFirst { it.physicalStId == currentPhyId }
                     if (idx >= 0) idx else _uiState.value.selectedStopIndex.coerceIn(0, stopList.size - 1)
                 } else if (stopList.isNotEmpty()) {
-                    _uiState.value.selectedStopIndex.coerceIn(0, stopList.size - 1)
+                    // 第一次加载：停在打开时给的那个站台上（从首页的站收藏点进来就是默认站台）
+                    initialPlatformIndex(stopList) ?: _uiState.value.selectedStopIndex.coerceIn(0, stopList.size - 1)
                 } else 0
 
                 publish {
@@ -301,9 +324,19 @@ class StopDetailViewModel(
         }
     }
 
+    /** 打开时给的站台在结果里的位置；认不出为 null */
+    private fun initialPlatformIndex(stops: List<NearbyStop>): Int? {
+        val idx = stops.indexOfFirst { stop ->
+            (physicalStId.isNotBlank() && stop.physicalStId == physicalStId) ||
+                (stopId.isNotBlank() && stop.stopId == stopId)
+        }
+        return idx.takeIf { it >= 0 }
+    }
+
     fun selectStopIndex(index: Int) {
         if (index in _uiState.value.stops.indices) {
             val changed = index != _uiState.value.selectedStopIndex
+            if (changed) userSwitchedPlatform = true
             // 一起等只在一个站台：换站台清空勾选
             publish {
                 it.copy(
@@ -352,6 +385,106 @@ class StopDetailViewModel(
         val status = stop.lines.firstOrNull { rowKeyOf(it) == rowKey } ?: return
         if (status.line.lineId.isBlank()) return
         toggleFavorite(stop, status)
+    }
+
+    // ---------------------------------------------------------------- 收藏整个站（issue #47）
+
+    /**
+     * 这个页面对应的站收藏：按站 id（城市 + 数据源 + 同名站 id / 站名）认；还没拿到站台时按打开时给的站台 id 认，
+     * 站台有了以后任一站台和收藏的默认站台对上也算（换过数据源、同名站 id 变了也认得出）。
+     */
+    private fun matchedStation(state: StopDetailUiState): FavoriteStation? {
+        val sameCity = stationFavorites.filter { it.cityId == cityId }
+        if (sameCity.isEmpty()) return null
+        val id = stationIdOf(state)
+        return sameCity.firstOrNull { it.id == id }
+            ?: sameCity.firstOrNull { fav -> state.stops.any { isSamePlatform(it, fav) } }
+            ?: if (state.stops.isEmpty()) {
+                sameCity.firstOrNull { fav ->
+                    (physicalStId.isNotBlank() && fav.physicalStId == physicalStId) ||
+                        (stopId.isNotBlank() && fav.stopId == stopId)
+                }
+            } else {
+                null
+            }
+    }
+
+    private fun stationIdOf(state: StopDetailUiState): String? {
+        val first = state.stops.firstOrNull() ?: return null
+        val namesake = state.stops.firstNotNullOfOrNull { it.namesakeStId?.takeIf(String::isNotBlank) } ?: namesakeStId
+        return FavoriteStation.idOf(cityId, first.source, state.stopName, namesake)
+    }
+
+    private fun isSamePlatform(stop: NearbyStop, fav: FavoriteStation): Boolean =
+        (fav.physicalStId.isNotBlank() && stop.physicalStId == fav.physicalStId) ||
+            (fav.stopId.isNotBlank() && stop.stopId == fav.stopId)
+
+    /** 当前站台存成站收藏（收藏时、改默认方向时用） */
+    private fun stationFromCurrent(state: StopDetailUiState, base: FavoriteStation?): FavoriteStation? {
+        val stop = state.stops.getOrNull(state.selectedStopIndex) ?: return null
+        val id = base?.id ?: stationIdOf(state) ?: return null
+        val city = settings.selectedCity.value
+        val label = if (state.stops.size > 1) state.platformLabels.getOrNull(state.selectedStopIndex).orEmpty() else ""
+        val lat = stop.wgsLat.takeIf { it > 0.0 } ?: stationLat
+        val lng = stop.wgsLng.takeIf { it > 0.0 } ?: stationLng
+        val mygolbsCode = stop.lines.firstNotNullOfOrNull { s -> s.line.mygolbsCityCode.takeIf { it.isNotBlank() } }
+            ?: city.mygolbsCityCode?.takeIf { city.cityId == cityId }.orEmpty()
+        val fresh = FavoriteStation(
+            id = id,
+            cityId = cityId,
+            cityName = if (city.cityId == cityId) city.cityName else base?.cityName.orEmpty(),
+            stopName = state.stopName,
+            stopId = stop.stopId,
+            physicalStId = stop.physicalStId.orEmpty(),
+            namesakeStId = stop.namesakeStId?.takeIf { it.isNotBlank() } ?: namesakeStId,
+            platformLabel = label,
+            wgsLat = lat,
+            wgsLng = lng,
+            source = stop.source,
+            mygolbsCityCode = mygolbsCode
+        )
+        return if (base != null) fresh.copy(addedAtMillis = base.addedAtMillis) else fresh
+    }
+
+    private fun stationTitle(fav: FavoriteStation): String =
+        listOf(fav.stopName, fav.platformLabel).filter { it.isNotBlank() }.joinToString(" · ")
+
+    private fun toggleStationFavorite() {
+        val state = _uiState.value
+        val existing = matchedStation(state)
+        viewModelScope.launch {
+            if (existing != null) {
+                favorites.removeStation(existing.id)
+                _userMessages.trySend("已取消收藏 ${existing.stopName}")
+            } else {
+                val station = stationFromCurrent(state, base = null) ?: return@launch
+                favorites.toggleStation(station)
+                // 刚收藏：当前站台就是默认，不再问
+                platformPromptHandled = true
+                _userMessages.trySend("已收藏 ${stationTitle(station)}")
+            }
+        }
+    }
+
+    private fun acceptDefaultPlatform() {
+        platformPromptHandled = true
+        val state = _uiState.value
+        val existing = matchedStation(state)
+        val updated = existing?.let { stationFromCurrent(state, base = it) }
+        publish { it }
+        if (updated == null) return
+        viewModelScope.launch {
+            favorites.updateStation(updated)
+            _userMessages.trySend("默认方向改成「${updated.platformLabel.ifBlank { updated.stopName }}」")
+        }
+    }
+
+    /** 「默认方向改成 X？」：收藏过、用户自己切到了不是默认的站台、这次还没问过 */
+    private fun defaultPlatformPromptOf(state: StopDetailUiState, fav: FavoriteStation?): String? {
+        if (fav == null || platformPromptHandled || !userSwitchedPlatform || state.stops.size < 2) return null
+        val stop = state.stops.getOrNull(state.selectedStopIndex) ?: return null
+        if (isSamePlatform(stop, fav)) return null
+        return state.platformLabels.getOrNull(state.selectedStopIndex)?.takeIf { it.isNotBlank() }
     }
 
     // ---------------------------------------------------------------- 选线 / 一起等
@@ -517,10 +650,14 @@ class StopDetailViewModel(
     /** 改原始字段，并按新值重算派生字段（站台名、行、小字、一起等视图、弹层） */
     private fun publish(transform: (StopDetailUiState) -> StopDetailUiState) {
         _uiState.update { old ->
-            val s = transform(old)
+            val transformed = transform(old)
+            // 站台名先算好：站收藏要用它
+            val s = transformed.copy(platformLabels = platformLabels(transformed.stops))
             val stop = s.stops.getOrNull(s.selectedStopIndex)
+            val station = matchedStation(s)
             s.copy(
-                platformLabels = platformLabels(s.stops),
+                isStationFavorite = station != null,
+                defaultPlatformPrompt = defaultPlatformPromptOf(s, station),
                 subtitle = subtitleOf(stop),
                 rows = rowsOf(cityId, stop, s.favoriteIds),
                 transferText = transferTextOf(stop),

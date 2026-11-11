@@ -4,6 +4,7 @@ import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteItemRecord
 import com.trackr.core.model.FavoriteItemType
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.GroupCategory
 import com.trackr.core.model.TransitGroup
@@ -12,7 +13,7 @@ import com.trackr.core.model.TransitGroup
  * 收藏合一索引的对账（第 14 步）。规则和库迁移 `MIGRATION_1_2` 一样：
  *
  * - 索引里有的收藏：按索引的 sortOrder 排（相同时按原来的先后）。
- * - 索引里没有的车（从没建过索引、旧存储期间新加的）：排在最前，按车列表原来的顺序。
+ * - 索引里没有的车（从没建过索引、旧存储期间新加的）：排在最前，按车列表原来的顺序；没有的站（issue #47）接在这些车后面。
  * - 索引里没有的路线：接在最后，按收藏页原来的顺序（`sortOrder`，相同时按列表里的先后）；分组见 [derivedRouteGroupId]。
  * - 指向已不存在的车 / 路线的索引行删掉；同一个 key 出现多次只留第一条。
  * - 最后 sortOrder 从 0 连续编号。
@@ -26,10 +27,12 @@ object FavoriteItemOrder {
         stops: List<FavoriteStationLine>,
         routes: List<TransitGroup>,
         groups: List<FavoriteGroup>,
-        items: List<FavoriteItemRecord>?
+        items: List<FavoriteItemRecord>?,
+        stations: List<FavoriteStation> = emptyList()
     ): List<FavoriteItemRecord> {
         val stopKeys = stops.mapTo(HashSet()) { FavoriteItem.stopKey(it.id) }
         val routeKeys = routes.mapTo(HashSet()) { FavoriteItem.routeKey(it.id) }
+        val stationKeys = stations.mapTo(HashSet()) { FavoriteItem.stationKey(it.id) }
 
         val seen = HashSet<String>()
         val kept = items.orEmpty()
@@ -40,6 +43,7 @@ object FavoriteItemOrder {
                 val exists = when (record.type) {
                     FavoriteItemType.STOP -> record.key in stopKeys
                     FavoriteItemType.ROUTE -> record.key in routeKeys
+                    FavoriteItemType.STATION -> record.key in stationKeys
                 }
                 exists && seen.add(record.key)
             }
@@ -48,6 +52,10 @@ object FavoriteItemOrder {
             .filter { FavoriteItem.stopKey(it.id) !in seen }
             .distinctBy { it.id }
             .map { FavoriteItemRecord(FavoriteItemType.STOP, it.id, groupId = null) }
+        val missingStations = stations
+            .filter { FavoriteItem.stationKey(it.id) !in seen }
+            .distinctBy { it.id }
+            .map { FavoriteItemRecord(FavoriteItemType.STATION, it.id, groupId = null) }
         val groupIds = groups.mapTo(HashSet()) { it.id }
         val missingRoutes = routes
             .withIndex()
@@ -57,7 +65,7 @@ object FavoriteItemOrder {
             .distinctBy { it.id }
             .map { FavoriteItemRecord(FavoriteItemType.ROUTE, it.id, groupId = derivedRouteGroupId(it, groupIds)) }
 
-        return (missingStops + kept + missingRoutes).mapIndexed { index, record -> record.copy(sortOrder = index) }
+        return (missingStops + missingStations + kept + missingRoutes).mapIndexed { index, record -> record.copy(sortOrder = index) }
     }
 
     /**

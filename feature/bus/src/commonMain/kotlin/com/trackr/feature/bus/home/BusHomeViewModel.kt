@@ -17,6 +17,7 @@ import com.trackr.core.domain.platform.SystemSettingsLauncher
 import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.model.EngineMode
+import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -170,6 +172,17 @@ class BusHomeViewModel(
             favorites.favoriteItems.collect { items ->
                 edit { it.copy(favoriteItems = items) }
             }
+        }
+
+        // 新收藏了站（issue #47）：马上查一次，不用等下一轮刷新才从「正在查车」变成到站
+        viewModelScope.launch {
+            favorites.favoriteStations
+                .map { list -> list.map { it.id }.toSet() }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { ids ->
+                    if (ids.any { FavoriteItem.stationKey(it) !in _uiState.value.favoritesRealtime }) refreshFavoritesRealtime()
+                }
         }
 
         // 收藏分组；选中的分组被删了就回到「全部」

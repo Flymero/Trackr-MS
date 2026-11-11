@@ -40,6 +40,9 @@ object LegacyPrefs {
     /** 收藏合一索引（第 14 步起，旧存储模式下才写）：`List<FavoriteItemRecord>` 的 JSON */
     const val KEY_FAVORITE_ITEMS = "favorite_items_json"
 
+    /** 收藏的站（issue #47 起，旧存储模式下才写）：`List<FavoriteStation>` 的 JSON */
+    const val KEY_FAVORITE_STATIONS = "favorite_stations_json"
+
     // trackr_scheduled_reminders
     const val KEY_REMINDERS = "reminders_list_json"
 

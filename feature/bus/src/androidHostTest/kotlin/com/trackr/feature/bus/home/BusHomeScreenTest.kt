@@ -16,6 +16,7 @@ import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LiveBus
@@ -134,6 +135,50 @@ class BusHomeScreenTest {
         assertEquals(31f, (nativeBottom - materialBottom).value, 0.5f)
         composeTestRule.runOnIdle { height.value = 0.dp }
         assertEquals(49f, (fab.getUnclippedBoundsInRoot().bottom - nativeBottom).value, 0.5f)
+    }
+
+    @Test
+    fun favoriteStation_showsOneRow_withFirstLines_andOpensStop() {
+        val station = FavoriteStation(
+            id = "051_CHELAILE_科技园站", cityId = "051", stopName = "科技园站", stopId = "s1", physicalStId = "p1",
+            platformLabel = "往北"
+        )
+        val item = FavoriteItem.Station(station, groupId = null, sortOrder = 0)
+        fun status(name: String, eta: Int) = NearbyStopLineStatus(
+            line = BusLineDirection(lineId = "l$name", name = name, startStop = "A", endStop = "B"),
+            targetOrder = 5, targetStopId = "s1", targetStopName = "科技园站",
+            approachingBuses = listOf(LiveBus(busId = "b$name", plateOrFleetNo = "", order = 4, etaSeconds = eta))
+        )
+        val raw = BusHomeUiState(
+            currentCity = shenzhen,
+            favoriteItems = listOf(item),
+            favoritesRealtime = mapOf(item.key to NearbyStop(stopId = "s1", name = "科技园站", lines = listOf(status("325", 240), status("19", 120))))
+        )
+        setContent(BusHomeMapper.derive(BusHomeUiState(), raw))
+
+        composeTestRule.onNodeWithText("科技园站 · 往北").assertIsDisplayed()
+        composeTestRule.onNodeWithText("19 2 分", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("2 条线").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag(BusHomeTags.favoriteRow(item.key)).performClick()
+        val open = events.filterIsInstance<BusHomeEvent.OpenStop>().single().target
+        assertEquals("s1", open.stopId)
+        assertEquals("p1", open.physicalStId)
+    }
+
+    @Test
+    fun favoriteStation_notFound_saysSo() {
+        val station = FavoriteStation(id = "x", cityId = "051", stopName = "改道站", stopId = "s9")
+        val item = FavoriteItem.Station(station, groupId = null, sortOrder = 0)
+        val raw = BusHomeUiState(
+            currentCity = shenzhen,
+            favoriteItems = listOf(item),
+            favoritesRealtime = mapOf(item.key to NearbyStop(stopId = "s9", name = "改道站"))
+        )
+        setContent(BusHomeMapper.derive(BusHomeUiState(), raw))
+
+        composeTestRule.onNodeWithText("改道站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("这个站暂时查不到，可能临时改道").assertIsDisplayed()
     }
 
     @Test

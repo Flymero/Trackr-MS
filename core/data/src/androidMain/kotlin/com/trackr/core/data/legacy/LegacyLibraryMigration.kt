@@ -15,6 +15,7 @@ import com.trackr.core.database.entity.StoreMetaEntity
 import com.trackr.core.datastore.SettingsKeys
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItemRecord
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitGroup
@@ -113,6 +114,9 @@ class LegacyLibraryMigration(
         val favoriteItems = decode(
             LegacyPrefs.ROUTE_GROUPS, routeGroups, LegacyPrefs.KEY_FAVORITE_ITEMS, ListSerializer(FavoriteItemRecord.serializer())
         )
+        val favoriteStations = decode(
+            LegacyPrefs.ROUTE_GROUPS, routeGroups, LegacyPrefs.KEY_FAVORITE_STATIONS, ListSerializer(FavoriteStation.serializer())
+        )
         val reminderList = decode(LegacyPrefs.REMINDERS, reminders, LegacyPrefs.KEY_REMINDERS, ListSerializer(ScheduledReminder.serializer()))
         val triggers = scheduleState.all.mapNotNull { (key, value) ->
             if (key.startsWith(LegacyPrefs.KEY_PREFIX_NEXT_TRIGGER) && value is Long) {
@@ -136,6 +140,7 @@ class LegacyLibraryMigration(
         groups?.let { imported["routes"] = it.size }
         favoriteGroups?.let { imported["favoriteGroups"] = it.size }
         favoriteItems?.let { imported["favoriteItems"] = it.size }
+        favoriteStations?.let { imported["favoriteStations"] = it.size }
         reminderList?.let { imported["reminders"] = it.size }
 
         db.legacyImport().importAll(
@@ -146,6 +151,7 @@ class LegacyLibraryMigration(
                 favoriteGroups = favoriteGroups?.mapIndexed { index, group -> group.toEntity(index) },
                 reminders = reminderList?.mapIndexed { index, reminder -> reminder.toEntity(index, triggers[reminder.id]) },
                 favoriteItems = favoriteItems?.distinctBy { it.key }?.map { it.toEntity() },
+                favoriteStations = favoriteStations?.distinctBy { it.id }?.mapIndexed { index, station -> station.toEntity(index) },
                 meta = StoreMetaEntity(META_LEGACY_IMPORT_GEN, generation.toString())
             )
         )

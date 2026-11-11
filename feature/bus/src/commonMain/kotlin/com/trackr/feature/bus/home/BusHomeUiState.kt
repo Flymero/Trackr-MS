@@ -158,7 +158,7 @@ data class TrackingCardUi(
 
 /** 收藏合一列表里的一行 */
 sealed interface FavoriteRowUi {
-    /** 合一列表的 key（`stop_x` / `route_x`，两种类型间不重复） */
+    /** 合一列表的 key（`stop_x` / `route_x` / `station_x`，类型之间不重复） */
     val key: String
 
     /** 所在分组的颜色（issue #38），卡片左边画一条色条；不分组或分组没设颜色时为 null */
@@ -180,6 +180,27 @@ sealed interface FavoriteRowUi {
         override val groupColor: GroupColor? = null
     ) : FavoriteRowUi
 
+    /**
+     * 收藏的站（issue #47）：「科技园站 · 往北」+ 最先到的几条线「19 2 分 · 325 4 分」+ 最先到那辆的大字。
+     *
+     * @param lines 按到站先后最多 [com.trackr.feature.bus.home.BusHomeMapper.STATION_PREVIEW_LINES] 条
+     * @param lineCount 这个站台一共几条线；还没查到时为 0
+     * @param status 还在查 / 查到了 / 查不到这个站
+     * @param arrival 最先到那辆的大字；查不到时为 null
+     * @param spoken「读给我听」读的整句（长辈版）
+     */
+    data class Station(
+        override val key: String,
+        val title: String,
+        val lines: List<StationLineUi>,
+        val lineCount: Int,
+        val status: StationStatus,
+        val arrival: ArrivalUi?,
+        val open: StopTarget,
+        val spoken: String = "",
+        override val groupColor: GroupColor? = null
+    ) : FavoriteRowUi
+
     /** 收藏的路线：「家 → 公司」+「325 › 19 · 换乘 1 次」 */
     data class Route(
         override val key: String,
@@ -189,6 +210,17 @@ sealed interface FavoriteRowUi {
         override val groupColor: GroupColor? = null
     ) : FavoriteRowUi
 }
+
+/** 收藏的站有没有拿到数据 */
+enum class StationStatus { Loading, Ready, NotFound }
+
+/** 收藏的站里的一条线：「19」「2 分」（[short] 是到站的短写） */
+data class StationLineUi(
+    val lineName: String,
+    val direction: String,
+    val short: String,
+    val arrival: ArrivalUi
+)
 
 /** 附近的一个站 */
 data class NearbyStopUi(

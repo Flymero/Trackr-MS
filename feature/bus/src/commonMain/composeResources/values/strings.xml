@@ -24,6 +24,10 @@
     <string name="bus_home_location_action_enable">去开启</string>
     <string name="bus_favorites_title">收藏</string>
     <string name="bus_favorites_empty">在线路页点 ☆，常坐的车会出现在这里</string>
+    <!-- 收藏的站（issue #47） -->
+    <string name="bus_station_loading">正在查车…</string>
+    <string name="bus_station_not_found">这个站暂时查不到，可能临时改道</string>
+    <string name="bus_station_icon">收藏的站</string>
     <string name="bus_favorites_group_empty">这个分组还没有收藏</string>
     <string name="bus_favorites_all">全部</string>
     <string name="bus_nearby_title">附近</string>

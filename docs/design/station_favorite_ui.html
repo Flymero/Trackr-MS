@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>站点收藏 界面稿</title>
+<style>
+:root{
+  --primary:#1F5FD6; --on-primary:#fff; --primary-c:#DCE6FF; --on-primary-c:#0A2A6B;
+  --bg:#F5F6F8; --card:#FFFFFF; --variant:#EDF0F4; --outline:#D6DBE2;
+  --text:#15181D; --text2:#5B6470; --text3:#8A929D;
+  --go:#12924F; --go-c:#DDF5E7;
+  --warn:#B45F00; --warn-c:#FFEBCC;
+  --err:#D93025; --err-c:#FDE3E1;
+  --map:#E9EEF3; --road:#FFFFFF; --water:#CFE0F2;
+  --page:#E4E7EC; --doc:#1C2027;
+  --r-s:8px; --r-m:16px; --r-l:28px;
+}
+html.dark{
+  --primary:#8AB0FF; --on-primary:#082561; --primary-c:#1D3B80; --on-primary-c:#DCE6FF;
+  --bg:#0F1115; --card:#181B21; --variant:#22262E; --outline:#343A44;
+  --text:#E7EAEE; --text2:#9AA3AF; --text3:#6B7380;
+  --go:#4CD38A; --go-c:#13361F;
+  --warn:#FFB547; --warn-c:#3D2A00;
+  --err:#FF8A80; --err-c:#4A1612;
+  --map:#1B2028; --road:#2A313C; --water:#1A2B40;
+  --page:#0A0C10; --doc:#E7EAEE;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;background:var(--page);color:var(--doc);line-height:1.5;padding:32px 24px 80px}
+.wrap{max-width:1480px;margin:0 auto}
+h1{font-size:30px;margin-bottom:4px}
+h2{font-size:22px;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--outline)}
+h3{font-size:16px;margin:20px 0 8px}
+p.lead{color:var(--text2);margin-bottom:12px}
+.toggle{position:fixed;top:16px;right:16px;z-index:9;background:var(--primary);color:var(--on-primary);border:0;border-radius:999px;padding:10px 18px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px #0003}
+table.doc{border-collapse:collapse;width:100%;background:var(--card);color:var(--text);border-radius:12px;overflow:hidden;font-size:14px}
+table.doc th,table.doc td{padding:9px 12px;border-bottom:1px solid var(--outline);text-align:left;vertical-align:top}
+table.doc th{background:var(--variant);font-weight:600}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.box{background:var(--card);color:var(--text);border-radius:16px;padding:16px 18px}
+.box ul{padding-left:18px}.box li{margin:3px 0}
+.sw{display:flex;flex-wrap:wrap;gap:10px}
+.sw div{width:120px;border-radius:12px;overflow:hidden;background:var(--card);color:var(--text);font-size:12px}
+.sw b{display:block;height:56px}
+.sw span{display:block;padding:6px 8px}
+code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--variant);color:var(--text);padding:1px 5px;border-radius:4px}
+
+/* ===== phones ===== */
+.screens{display:grid;grid-template-columns:repeat(auto-fill,minmax(344px,1fr));gap:28px 20px}
+.shot figcaption{font-size:13px;color:var(--doc);margin-top:10px;padding:0 4px}
+.shot figcaption b{display:block;font-size:15px;margin-bottom:2px}
+.shot figcaption span{opacity:.75}
+.phone{width:340px;height:720px;border-radius:36px;background:var(--bg);color:var(--text);position:relative;overflow:hidden;border:8px solid #111;box-shadow:0 10px 30px #0003;font-size:14px}
+.sb{height:28px;display:flex;justify-content:space-between;align-items:center;padding:0 18px;font-size:12px;font-weight:600}
+.scroll{position:absolute;top:28px;left:0;right:0;bottom:0;overflow:hidden}
+.ic{width:22px;height:22px;fill:currentColor;flex:none;vertical-align:middle}
+.ic.s{width:16px;height:16px}.ic.xs{width:14px;height:14px}
+.bar{height:56px;display:flex;align-items:center;gap:4px;padding:0 6px}
+.bar .t{flex:1;font-size:20px;font-weight:600;padding-left:6px;white-space:nowrap;overflow:hidden}
+.iconbtn{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:var(--text)}
+.iconbtn.on{color:var(--primary)}
+.search{margin:4px 16px 12px;height:48px;border-radius:999px;background:var(--variant);display:flex;align-items:center;gap:10px;padding:0 16px;color:var(--text2)}
+.sec{display:flex;align-items:center;justify-content:space-between;padding:14px 18px 8px;font-size:15px;font-weight:600}
+.sec a{font-size:13px;font-weight:500;color:var(--primary)}
+.chips{display:flex;gap:8px;padding:0 16px 10px;overflow:hidden}
+.chip{height:32px;padding:0 14px;border-radius:var(--r-s);border:1px solid var(--outline);display:inline-flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap;color:var(--text)}
+.chip.on{background:var(--primary-c);color:var(--on-primary-c);border-color:transparent;font-weight:600}
+.card{background:var(--card);border-radius:var(--r-m);margin:0 12px 8px;overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;min-height:60px}
+.row+.row{border-top:1px solid var(--variant)}
+.row .m{flex:1;min-width:0}
+.row .m .a{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .m .b{font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{min-width:44px;height:28px;padding:0 6px;border-radius:var(--r-s);background:var(--primary-c);color:var(--on-primary-c);font-weight:700;font-size:14px;display:inline-grid;place-items:center;flex:none;font-variant-numeric:tabular-nums}
+.badge.sm{min-width:34px;height:22px;font-size:12px;border-radius:6px}
+.badge.off{background:var(--variant);color:var(--text2)}
+.eta{text-align:right;flex:none;font-variant-numeric:tabular-nums}
+.eta .n{font-size:17px;font-weight:700}
+.eta .n small{font-size:12px;font-weight:500}
+.eta .u{font-size:12px;color:var(--text2)}
+.go{color:var(--go)!important}.warn{color:var(--warn)!important}.mute{color:var(--text2)!important}
+.nav{position:absolute;left:0;right:0;bottom:0;height:72px;background:var(--card);display:flex;justify-content:space-around;align-items:center;border-top:1px solid var(--variant)}
+.nav div{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--text2);width:96px}
+.nav div i,.nav div svg{width:56px;height:30px;border-radius:999px;padding:4px 16px}
+.nav div.on{color:var(--text);font-weight:600}
+.nav div.on svg{background:var(--primary-c);color:var(--on-primary-c)}
+.btn{height:48px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:15px;font-weight:600;padding:0 22px;white-space:nowrap}
+.btn.f{background:var(--primary);color:var(--on-primary)}
+.btn.o{border:1px solid var(--outline);color:var(--primary)}
+.btn.t{color:var(--primary);padding:0 12px}
+.btn.tn{background:var(--primary-c);color:var(--on-primary-c)}
+.btn.d{color:var(--err)}
+.bottom{position:absolute;left:0;right:0;bottom:0;padding:12px 16px 20px;background:linear-gradient(transparent,var(--bg) 22%);display:flex;gap:10px;align-items:center}
+.bottom .btn.f{flex:1}
+.track{background:var(--primary);color:var(--on-primary);border-radius:var(--r-m);margin:0 12px 4px;padding:12px 14px}
+.track .k{font-size:12px;opacity:.85;display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block;animation:p 1.6s infinite}
+@keyframes p{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none}}
+.big{font-size:40px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.big small{font-size:18px;font-weight:600;letter-spacing:0}
+.hero{background:var(--card);border-radius:var(--r-m);margin:0 12px 10px;padding:16px}
+.hero .pick{display:inline-flex;align-items:center;gap:2px;font-size:13px;color:var(--text2);background:var(--variant);border-radius:999px;padding:4px 10px 4px 12px}
+.hero .sub{font-size:14px;color:var(--text2);margin-top:2px}
+.hero hr{border:0;border-top:1px solid var(--variant);margin:12px 0}
+.hero .line{display:flex;justify-content:space-between;font-size:13px;color:var(--text2)}
+.hero .line a{color:var(--primary);font-weight:500}
+.dir{padding:0 18px 10px}
+.dir .ft{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600}
+.dir .meta{font-size:12px;color:var(--text2);margin-top:2px}
+.dir .meta a{color:var(--primary)}
+.swapbtn{height:30px;border-radius:999px;background:var(--variant);display:inline-flex;align-items:center;gap:2px;padding:0 10px;font-size:12px;font-weight:500;color:var(--text)}
+/* rail */
+.rail{background:var(--card);border-radius:var(--r-m);margin:0 12px;padding:6px 0}
+.st{display:flex;align-items:center;height:40px;padding:0 14px;gap:12px;font-size:14px;position:relative}
+.st .ln{width:20px;align-self:stretch;position:relative;display:flex;justify-content:center}
+.st .ln:before{content:"";position:absolute;top:0;bottom:0;width:4px;background:var(--primary);opacity:.9}
+.st.past .ln:before{background:var(--outline)}
+.st:first-child .ln:before{top:50%}.st:last-child .ln:before{bottom:50%}
+.st .ln b{position:relative;margin-top:14px;width:12px;height:12px;border-radius:50%;background:var(--card);border:3px solid var(--primary)}
+.st.past .ln b{border-color:var(--outline)}
+.st.past{color:var(--text3)}
+.st.sel{background:var(--primary-c);color:var(--on-primary-c);font-weight:700}
+.st.sel .ln b{width:16px;height:16px;margin-top:12px;background:var(--primary)}
+.st .bus{margin-left:auto;font-size:11px;font-weight:600;background:var(--go-c);color:var(--go);border-radius:999px;padding:2px 8px;display:flex;align-items:center;gap:3px}
+.st .tag{margin-left:auto;font-size:11px}
+/* timeline */
+.tl{background:var(--card);border-radius:var(--r-m);margin:0 12px;padding:10px 14px}
+.tn{display:flex;gap:12px}
+.tn .g{width:16px;display:flex;flex-direction:column;align-items:center;flex:none}
+.tn .g b{width:14px;height:14px;border-radius:50%;border:3px solid var(--primary);background:var(--card);margin-top:3px;flex:none}
+.tn .g b.end{background:var(--text);border-color:var(--text)}
+.tn .g i{flex:1;width:4px;background:var(--primary);margin:2px 0;border-radius:2px}
+.tn .g i.walk{background:none;border-left:3px dotted var(--text3);width:0}
+.tn .g i.done{background:var(--outline)}
+.tn .c{flex:1;padding-bottom:12px;min-width:0}
+.tn .c .s{font-size:15px;font-weight:600}
+.tn .c .h{font-size:12px;color:var(--text2)}
+.opts{display:flex;gap:6px;margin:8px 0 4px;flex-wrap:wrap}
+.opt{border:1px solid var(--outline);border-radius:var(--r-s);padding:4px 8px;font-size:12px;display:flex;align-items:center;gap:6px}
+.opt.on{border:2px solid var(--primary);padding:3px 7px}
+.legcur{background:var(--primary-c);border-radius:12px;margin:0 -8px;padding:8px}
+/* sheet */
+.scrim{position:absolute;inset:0;background:#0007}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--card);border-radius:var(--r-l) var(--r-l) 0 0;padding:10px 18px 24px}
+.handle{width:32px;height:4px;border-radius:2px;background:var(--outline);margin:0 auto 14px}
+.field{border:1px solid var(--outline);border-radius:var(--r-s);height:48px;display:flex;align-items:center;padding:0 12px;font-size:15px;margin:6px 0 14px;position:relative}
+.field label{position:absolute;top:-9px;left:10px;background:var(--card);padding:0 4px;font-size:11px;color:var(--text2)}
+/* settings */
+.set{display:flex;align-items:center;gap:12px;padding:0 16px;min-height:58px}
+.set+.set{border-top:1px solid var(--variant)}
+.set .m{flex:1}.set .m .a{font-size:15px}.set .m .b{font-size:12px;color:var(--text2)}
+.set .v{font-size:13px;color:var(--text2);display:flex;align-items:center}
+.seg{display:flex;border:1px solid var(--outline);border-radius:999px;overflow:hidden;font-size:13px}
+.seg span{padding:6px 12px}.seg span.on{background:var(--primary-c);color:var(--on-primary-c);font-weight:600}
+.sw2{width:44px;height:26px;border-radius:999px;background:var(--primary);position:relative}
+.sw2:after{content:"";position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:var(--on-primary)}
+.grp{font-size:13px;color:var(--primary);font-weight:600;padding:16px 18px 6px}
+/* map */
+.map{position:absolute;inset:0;background:var(--map)}
+.plan{position:absolute;top:8px;left:12px;right:12px;background:var(--card);border-radius:var(--r-m);box-shadow:0 2px 10px #0002;display:flex;padding:6px 6px 6px 14px;gap:8px;align-items:center}
+.plan .ps{flex:1}
+.plan .pp{display:flex;align-items:center;gap:10px;height:40px;font-size:14px}
+.plan .pp+.pp{border-top:1px solid var(--variant)}
+.plan .o{width:10px;height:10px;border-radius:50%;border:2px solid var(--go)}
+.plan .x{width:10px;height:10px;border-radius:2px;background:var(--err)}
+.fab{position:absolute;right:14px;width:48px;height:48px;border-radius:16px;background:var(--card);display:grid;place-items:center;box-shadow:0 2px 8px #0002;color:var(--text)}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tab{flex:1;border-radius:12px;background:var(--variant);padding:8px 10px}
+.tab.on{background:var(--primary-c);color:var(--on-primary-c)}
+.tab .k{font-size:12px}.tab .n{font-size:18px;font-weight:700}
+.segbar{display:flex;height:28px;border-radius:8px;overflow:hidden;gap:2px;margin:10px 0 6px;font-size:12px;font-weight:700}
+.segbar div{display:grid;place-items:center}
+.segbar .w{background:var(--variant);color:var(--text2)}
+.segbar .b{background:var(--primary);color:var(--on-primary)}
+/* lock */
+.lock{background:linear-gradient(160deg,#1b2a4a,#0c1220 60%,#251a36);color:#fff}
+.lock .clock{text-align:center;font-size:64px;font-weight:300;margin-top:40px;letter-spacing:-1px}
+.lock .date{text-align:center;font-size:14px;opacity:.8}
+.noti{margin:28px 10px 0;background:#ffffffe8;color:#15181D;border-radius:22px;padding:12px 14px}
+.noti .hd{display:flex;align-items:center;gap:6px;font-size:12px;color:#5B6470}
+.noti .tt{font-size:16px;font-weight:700;margin-top:6px}
+.noti .bd{font-size:13px;color:#3a4049}
+.prog{height:6px;border-radius:3px;background:#DCE6FF;margin:10px 0 4px;position:relative}
+.prog b{position:absolute;left:0;top:0;bottom:0;width:66%;background:#1F5FD6;border-radius:3px}
+.prog i{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:#1F5FD6;border:2px solid #fff}
+.noti .ac{display:flex;gap:8px;margin-top:10px}
+.noti .ac span{flex:1;text-align:center;background:#EDF0F4;border-radius:999px;padding:7px 0;font-size:13px;font-weight:600;color:#1F5FD6}
+.pill{position:absolute;top:6px;left:50%;transform:translateX(-50%);background:#000;color:#fff;border-radius:999px;height:24px;padding:0 12px;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}
+.pill b{color:#4CD38A}
+.state{background:var(--card);color:var(--text);border-radius:16px;padding:14px 16px}
+.state .lb{font-size:11px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.statesgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.snack{position:absolute;left:12px;right:12px;bottom:84px;background:#2B3038;color:#fff;border-radius:8px;padding:12px 14px;font-size:14px;display:flex;justify-content:space-between}
+.snack a{color:#8AB0FF;font-weight:600}
+/* v3: 乘车码悬浮按钮 */
+.qfab{position:absolute;right:14px;bottom:86px;height:56px;border-radius:16px;background:var(--primary);color:var(--on-primary);display:flex;align-items:center;gap:8px;padding:0 18px 0 16px;font-size:15px;font-weight:600;box-shadow:0 4px 12px #0003;z-index:3}
+.qfab.mini{width:56px;padding:0;justify-content:center}
+.qbtn{width:48px;height:48px;border-radius:50%;background:var(--primary-c);color:var(--on-primary-c);display:grid;place-items:center;flex:none}
+/* v3: 一起等 */
+.cb{width:22px;height:22px;border-radius:6px;border:2px solid var(--outline);flex:none;display:grid;place-items:center}
+.cb.on{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.waitlist{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.waitlist div{display:flex;align-items:center;gap:8px;font-size:13px}
+.waitlist .badge.sm{background:#fff3;color:inherit}
+.new{display:inline-block;font-size:11px;font-weight:700;background:var(--warn-c);color:var(--warn);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle}
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.classList.toggle('dark')">切换深色 / 浅色</button>
+
+<svg width="0" height="0" style="position:absolute">
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z"/></symbol>
+<symbol id="i-starf" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></symbol>
+<symbol id="i-swap" viewBox="0 0 24 24"><path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></symbol>
+<symbol id="i-swapv" viewBox="0 0 24 24"><path d="M16 17.01V10h-2v7.01h-3L15 21l4-3.99h-3zM9 3L5 6.99h3V14h2V6.99h3L9 3z"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+<symbol id="i-qr" viewBox="0 0 24 24"><path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM13 13h2v2h-2zM15 15h2v2h-2zM13 17h2v2h-2zM17 17h2v2h-2zM19 19h2v2h-2zM15 19h2v2h-2zM17 13h2v2h-2zM19 15h2v2h-2z"/></symbol>
+<symbol id="i-bus" viewBox="0 0 24 24"><path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm9 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm1.5-6H6V6h12v5z"/></symbol>
+<symbol id="i-route" viewBox="0 0 24 24"><path d="M21.71 11.29l-9-9a1 1 0 00-1.41 0l-9 9a1 1 0 000 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a1 1 0 000-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></symbol>
+<symbol id="i-person" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></symbol>
+<symbol id="i-walk" viewBox="0 0 24 24"><path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6l1.8-.7"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></symbol>
+<symbol id="i-drag" viewBox="0 0 24 24"><path d="M20 9H4v2h16V9zM4 15h16v-2H4v2z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+<symbol id="i-loc" viewBox="0 0 24 24"><path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.94 3A8.99 8.99 0 0013 3.06V1h-2v2.06A8.99 8.99 0 003.06 11H1v2h2.06A8.99 8.99 0 0011 20.94V23h2v-2.06A8.99 8.99 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></symbol>
+<symbol id="i-del" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z"/></symbol>
+<symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92A11.8 11.8 0 0022.99 12C21.26 7.61 17 4.5 12 4.5c-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.8 11.8 0 001 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2z"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></symbol>
+</svg>
+<style>
+.badge.st{background:var(--go-c);color:var(--go)}
+.stline{display:flex;gap:8px;flex-wrap:nowrap;white-space:nowrap;overflow:hidden;font-size:12px;color:var(--text2);margin-top:2px}
+.stline b{color:var(--text);font-weight:600}
+.more{display:flex;align-items:center;justify-content:center;gap:2px;height:40px;font-size:13px;color:var(--primary);font-weight:500;border-top:1px solid var(--variant)}
+.hd{min-height:48px!important;background:var(--variant)}
+.radio{width:20px;height:20px;border-radius:50%;border:2px solid var(--outline);flex:none}
+.radio.on{border:6px solid var(--primary)}
+.cmp td:first-child{white-space:nowrap;font-weight:600}
+.alt{display:inline-block;font-size:11px;font-weight:700;background:var(--primary-c);color:var(--on-primary-c);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle}
+.p2{display:inline-block;font-size:11px;font-weight:700;background:var(--variant);color:var(--text2);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle}
+</style>
+
+<div class="wrap">
+<h1>站点收藏 界面稿</h1>
+<p class="lead">对应 issue #47「收藏某一个站点」。样式沿用 <code>redesign_v3.html</code>，右上角可切深色。标 <span class="p2">二期</span> 的第一期不做。</p>
+
+<h2 style="margin-top:24px">0. 要做的事</h2>
+<div class="cols">
+  <div class="box"><h3>收藏的是「站」，不是「线」</h3><ul>
+    <li>收藏的站只记住这个站。每次打开现查这个站有哪些线，新开的线会自动出现。</li>
+    <li>收藏时选的站台方向（全部 / 往北 / 往南）记成默认，下次打开直接是这个方向。</li>
+    <li>和车、路线排在同一个收藏列表里，共用分组和顺序。</li>
+  </ul></div>
+  <div class="box"><h3>三种收藏，各管各的</h3>
+  <table class="doc cmp" style="font-size:13px">
+    <tr><th></th><th>收藏什么</th><th>在哪收藏</th></tr>
+    <tr><td>车</td><td>一个站上的 1 条线</td><td>线路页顶栏 ☆、站点页每一行的 ☆</td></tr>
+    <tr><td>一起等路线</td><td>一个站上固定的几条线</td><td>站点页「选几条一起等」里的「收藏」</td></tr>
+    <tr><td>站 <span class="new">新</span></td><td>整个站，线路现查</td><td>站点页<b>顶栏</b> ☆</td></tr>
+  </table></div>
+</div>
+
+<h2>1. 站点页：收藏入口</h2>
+<div class="screens">
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">科技园站<div style="font-size:12px;font-weight:400;color:var(--text2)">120 米 · 8 条线</div></div><div class="iconbtn"><i data-i="star"></i></div></div>
+  <div class="chips"><span class="chip">全部</span><span class="chip on">往北</span><span class="chip">往南</span></div>
+  <div class="card">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">→ 科技园</div><div class="b">06:30–22:30</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div><i data-i="starf" style="color:var(--primary)"></i></div>
+    <div class="row"><span class="badge">19</span><div class="m"><div class="a">→ 蛇口港</div><div class="b">06:00–23:00</div></div><div class="eta"><div class="n go">2<small> 分钟</small></div><div class="u">1 站</div></div><i data-i="star" class="mute"></i></div>
+    <div class="row"><span class="badge">M194</span><div class="m"><div class="a">→ 西丽</div><div class="b">06:40–22:00</div></div><div class="eta"><div class="n">9<small> 分钟</small></div><div class="u">4 站</div></div><i data-i="star" class="mute"></i></div>
+    <div class="row"><span class="badge">204</span><div class="m"><div class="a">→ 南山中心</div><div class="b">06:00–22:30</div></div><div class="eta"><div class="n">11<small> 分钟</small></div><div class="u">5 站</div></div><i data-i="star" class="mute"></i></div>
+  </div>
+  <div class="sec" style="font-size:13px;color:var(--text2);font-weight:500">可换乘：地铁 1 号线 · 高新园站 340 米</div>
+</div>
+<div class="bottom"><span class="btn o" style="flex:1"><i data-i="check" class="s"></i>选几条一起等</span><span class="qbtn"><i data-i="qr"></i></span></div>
+</div>
+<figcaption><b>站点页 · 还没收藏 <span class="new">新</span></b><span>顶栏右边加一个 ☆，表示收藏整个站。每一行的 ☆ 不变，仍是收藏这条线。两处 ☆ 一个在顶栏、一个在行尾，不会混。</span></figcaption>
+</figure>
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">科技园站<div style="font-size:12px;font-weight:400;color:var(--text2)">120 米 · 8 条线</div></div><div class="iconbtn on"><i data-i="starf"></i></div></div>
+  <div class="chips"><span class="chip">全部</span><span class="chip on">往北<i data-i="pin" class="xs"></i></span><span class="chip">往南</span></div>
+  <div class="card">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">→ 科技园</div><div class="b">06:30–22:30</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div><i data-i="starf" style="color:var(--primary)"></i></div>
+    <div class="row"><span class="badge">19</span><div class="m"><div class="a">→ 蛇口港</div><div class="b">06:00–23:00</div></div><div class="eta"><div class="n go">2<small> 分钟</small></div><div class="u">1 站</div></div><i data-i="star" class="mute"></i></div>
+    <div class="row"><span class="badge">M194</span><div class="m"><div class="a">→ 西丽</div><div class="b">06:40–22:00</div></div><div class="eta"><div class="n">9<small> 分钟</small></div><div class="u">4 站</div></div><i data-i="star" class="mute"></i></div>
+    <div class="row"><span class="badge">204</span><div class="m"><div class="a">→ 南山中心</div><div class="b">06:00–22:30</div></div><div class="eta"><div class="n">11<small> 分钟</small></div><div class="u">5 站</div></div><i data-i="star" class="mute"></i></div>
+  </div>
+</div>
+<div class="snack" style="bottom:84px">已收藏 科技园站 · 往北<a>换分组</a></div>
+<div class="bottom"><span class="btn o" style="flex:1"><i data-i="check" class="s"></i>选几条一起等</span><span class="qbtn"><i data-i="qr"></i></span></div>
+</div>
+<figcaption><b>站点页 · 刚收藏 <span class="new">新</span></b><span>点 ☆ 直接收藏，和线路页一样弹提示条，可点「换分组」。当时选中的方向记成默认，方向标签上带一个小图钉。在「全部」下收藏，默认就是「全部」，适合随便上车的车迷。再点 ☆ 取消收藏。</span></figcaption>
+</figure>
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">科技园站<div style="font-size:12px;font-weight:400;color:var(--text2)">120 米 · 8 条线</div></div><div class="iconbtn on"><i data-i="starf"></i></div></div>
+  <div class="chips"><span class="chip">全部</span><span class="chip">往北<i data-i="pin" class="xs"></i></span><span class="chip on">往南</span></div>
+  <div class="card">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">→ 白石洲</div><div class="b">06:50–23:00</div></div><div class="eta"><div class="n">7<small> 分钟</small></div><div class="u">3 站</div></div><i data-i="star" class="mute"></i></div>
+    <div class="row"><span class="badge">B796</span><div class="m"><div class="a">→ 深圳湾</div><div class="b">07:00–20:00</div></div><div class="eta"><div class="n warn" style="font-size:15px">今天没车了</div><div class="u">明天 07:00</div></div><i data-i="star" class="mute"></i></div>
+  </div>
+</div>
+<div class="snack" style="bottom:84px;flex-direction:column;gap:6px"><span>默认方向改成「往南」？</span><span style="display:flex;gap:18px;justify-content:flex-end"><a style="color:#ffffffaa">不用</a><a>改成往南</a></span></div>
+<div class="bottom"><span class="btn o" style="flex:1"><i data-i="check" class="s"></i>选几条一起等</span><span class="qbtn"><i data-i="qr"></i></span></div>
+</div>
+<figcaption><b>站点页 · 已收藏、切到别的方向</b><span>切方向只是临时看，不改默认。切过去后提示一次「默认方向改成往南？」，点了才改；同一次打开只问一次。也可以在编辑收藏里改（见第 3 节）。</span></figcaption>
+</figure>
+
+</div>
+
+<h2>2. 首页：收藏的站长什么样</h2>
+<p class="lead">已定 <b>A 一行</b>：和其他收藏一样占一行。B 站卡没选，留着对照。</p>
+<div class="screens">
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="t" style="display:flex;align-items:center;gap:2px">深圳<i data-i="down"></i></div></div>
+  <div class="search"><i data-i="search"></i>搜线路、车站</div>
+  <div class="sec">收藏<a>编辑</a></div>
+  <div class="chips"><span class="chip on">全部</span><span class="chip">上班</span><span class="chip">回家</span></div>
+  <div class="card">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">科技园站上车</div><div class="b">白石洲 → 科技园</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div></div>
+    <div class="row"><span class="badge st"><i data-i="pin" class="s"></i></span><div class="m"><div class="a">科技园站 · 往北</div><div class="stline"><span><b>19</b> 2 分</span><span><b>325</b> 4 分</span><span><b>M194</b> 9 分</span></div></div><div class="eta"><div class="n go">2<small> 分钟</small></div><div class="u">8 条线</div></div></div>
+    <div class="row"><span class="badge st"><i data-i="pin" class="s"></i></span><div class="m"><div class="a">深大北门</div><div class="stline"><span><b>M194</b> 到站</span><span><b>26</b> 6 分</span><span><b>B828</b> 13 分</span></div></div><div class="eta"><div class="n go">到站了</div><div class="u">5 条线</div></div></div>
+    <div class="row"><span class="badge off" style="min-width:44px"><i data-i="route" class="s"></i></span><div class="m"><div class="a">家 → 公司</div><div class="b">325 › 19 · 换乘 1 次</div></div><div class="eta"><div class="n">6<small> 分钟</small></div><div class="u">后上车</div></div></div>
+  </div>
+  <div class="sec">附近<a style="color:var(--text2)">120 米 · 科技园站</a></div>
+</div>
+<div class="qfab"><i data-i="qr"></i>乘车码</div>
+<div class="nav"><div class="on"><i data-i="bus"></i>公交</div><div><i data-i="route"></i>路线</div><div><i data-i="person"></i>我的</div></div>
+</div>
+<figcaption><b>A · 一行 <span class="new">已定</span></b><span>绿色图钉标表示是站。小字列最先到的 3 条线，右边大字是最先到的那辆。高度和别的收藏一样，列表整齐；但看不到终点方向，线多时只露 3 条。整行点开站点页。</span></figcaption>
+</figure>
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="t" style="display:flex;align-items:center;gap:2px">深圳<i data-i="down"></i></div></div>
+  <div class="search"><i data-i="search"></i>搜线路、车站</div>
+  <div class="sec">收藏<a>编辑</a></div>
+  <div class="chips"><span class="chip on">全部</span><span class="chip">上班</span><span class="chip">回家</span></div>
+  <div class="card">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">科技园站上车</div><div class="b">白石洲 → 科技园</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div></div>
+  </div>
+  <div class="card">
+    <div class="row hd"><i data-i="pin" style="color:var(--go)"></i><div class="m"><div class="a">科技园站 · 往北</div></div><i data-i="chev" class="mute"></i></div>
+    <div class="row"><span class="badge">19</span><div class="m"><div class="a">→ 蛇口港</div></div><div class="eta"><div class="n go">2<small> 分钟</small></div><div class="u">1 站</div></div></div>
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">→ 科技园</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div></div>
+    <div class="row"><span class="badge">M194</span><div class="m"><div class="a">→ 西丽</div></div><div class="eta"><div class="n">9<small> 分钟</small></div><div class="u">4 站</div></div></div>
+    <div class="more">还有 5 条<i data-i="chev" class="s"></i></div>
+  </div>
+  <div class="card">
+    <div class="row"><span class="badge off" style="min-width:44px"><i data-i="route" class="s"></i></span><div class="m"><div class="a">家 → 公司</div><div class="b">325 › 19 · 换乘 1 次</div></div><div class="eta"><div class="n">6<small> 分钟</small></div><div class="u">后上车</div></div></div>
+  </div>
+</div>
+<div class="qfab mini"><i data-i="qr"></i></div>
+<div class="nav"><div class="on"><i data-i="bus"></i>公交</div><div><i data-i="route"></i>路线</div><div><i data-i="person"></i>我的</div></div>
+</div>
+<figcaption><b>B · 站卡 <span class="p2">没选</span></b><span>站名一行，下面按到站先后列 3 条，带终点方向；「还有 5 条」和站名行都进站点页，点某一条进线路页。信息全，一眼能挑车；但一个站占 4–5 行，收藏的站多了首页会很长。站卡前后的收藏断开成独立卡片。</span></figcaption>
+</figure>
+
+<figure class="shot">
+<div class="statesgrid" style="grid-template-columns:1fr">
+  <div class="state"><div class="lb">站上的车都没了</div>
+    <div class="row" style="padding:0;min-height:0"><span class="badge st"><i data-i="pin" class="s"></i></span><div class="m"><div class="a">科技园站 · 往北</div><div class="b">8 条线都收车了</div></div><div class="eta"><div class="n warn" style="font-size:15px">今天没车了</div><div class="u">明天首班 06:00</div></div></div></div>
+  <div class="state"><div class="lb">加载中</div>
+    <div class="row" style="padding:0;min-height:0"><span class="badge st"><i data-i="pin" class="s"></i></span><div class="m"><div class="a">科技园站 · 往北</div><div class="b">正在查车…</div></div><div class="eta"><div class="n mute">—<small> 分钟</small></div></div></div></div>
+  <div class="state"><div class="lb">没网</div>
+    <div class="row" style="padding:0;min-height:0"><span class="badge st"><i data-i="pin" class="s"></i></span><div class="m"><div class="a">科技园站 · 往北</div><div class="b warn">没网，显示的是 1 分钟前</div></div><div class="eta"><div class="n">2<small> 分钟</small></div></div></div></div>
+  <div class="state"><div class="lb">找不到这个站</div>
+    <div class="row" style="padding:0;min-height:0"><span class="badge off"><i data-i="pin" class="s"></i></span><div class="m"><div class="a mute">科技园站 · 往北</div><div class="b">这个站暂时查不到，可能临时改道</div></div><i data-i="chev" class="mute"></i></div></div>
+</div>
+<figcaption><b>站收藏的几种状态（按方案 A 画）</b><span>到站文字和其他收藏同一套。「找不到」：车来了按站 id 查不到、掌上公交按站名 + 位置也找不到时显示，不自动删收藏；点进站点页再试。</span></figcaption>
+</figure>
+
+</div>
+
+<h2>3. 编辑收藏</h2>
+<div class="screens">
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="close"></i></div><div class="t">编辑收藏</div><span class="btn t">完成</span></div>
+  <div class="grp">分组</div>
+  <div class="card">
+    <div class="set"><i data-i="drag" class="mute"></i><div class="m"><div class="a">上班</div></div><i data-i="edit" class="mute"></i></div>
+    <div class="set"><i data-i="drag" class="mute"></i><div class="m"><div class="a">回家</div></div><i data-i="edit" class="mute"></i></div>
+    <div class="set" style="color:var(--primary)"><i data-i="plus"></i><div class="m"><div class="a">新建分组</div></div></div>
+  </div>
+  <div class="grp">收藏</div>
+  <div class="card">
+    <div class="set"><i data-i="drag" class="mute"></i><span class="badge sm">325</span><div class="m"><div class="a">科技园站上车</div><div class="b">上班</div></div><i data-i="del" class="mute"></i></div>
+    <div class="set"><i data-i="drag" class="mute"></i><span class="badge sm st"><i data-i="pin" class="xs"></i></span><div class="m"><div class="a">科技园站</div><div class="b">往北 · 上班</div></div><i data-i="del" class="mute"></i></div>
+    <div class="set"><i data-i="drag" class="mute"></i><span class="badge sm st"><i data-i="pin" class="xs"></i></span><div class="m"><div class="a">深大北门</div><div class="b">全部方向 · 不分组</div></div><i data-i="del" class="mute"></i></div>
+    <div class="set"><i data-i="drag" class="mute"></i><span class="badge sm off"><i data-i="route" class="xs"></i></span><div class="m"><div class="a">家 → 公司</div><div class="b">上班</div></div><i data-i="del" class="mute"></i></div>
+  </div>
+  <div class="sec" style="font-size:12px;color:var(--text2);font-weight:400">点一条收藏可改分组；站还可以改默认方向。</div>
+</div>
+</div>
+<figcaption><b>编辑收藏 · 有站</b><span>站和车、路线混排，一样能拖动、删除。小字写默认方向和分组。</span></figcaption>
+</figure>
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="map" style="background:var(--bg)"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="handle"></div>
+    <div style="font-size:18px;font-weight:600">科技园站</div>
+    <div style="font-size:13px;color:var(--text2);margin:2px 0 12px">收藏的站</div>
+    <div style="font-size:13px;color:var(--primary);font-weight:600;margin:4px 0 6px">默认方向</div>
+    <div class="chips" style="padding:0 0 10px"><span class="chip">全部</span><span class="chip on">往北</span><span class="chip">往南</span></div>
+    <div style="font-size:13px;color:var(--primary);font-weight:600;margin:4px 0 2px">分组</div>
+    <div class="set" style="padding:0;min-height:44px"><span class="radio"></span><div class="m"><div class="a">不分组</div></div></div>
+    <div class="set" style="padding:0;min-height:44px"><span class="radio on"></span><div class="m"><div class="a">上班</div></div></div>
+    <div class="set" style="padding:0;min-height:44px"><span class="radio"></span><div class="m"><div class="a">回家</div></div></div>
+  </div>
+</div>
+</div>
+<figcaption><b>点一个站</b><span>和点车、路线弹的是同一个改分组弹层，站多一排「默认方向」。站台方向现查，只有一个站台时这一排不显示。</span></figcaption>
+</figure>
+
+</div>
+
+<h2>4. 以后可以加 <span class="p2">二期</span></h2>
+<div class="screens">
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="map" style="background:var(--bg)"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="handle"></div>
+    <div style="font-size:18px;font-weight:600">科技园站 · 往北</div>
+    <div style="font-size:13px;color:var(--text2);margin:2px 0 12px">置顶的线排最前；隐藏的线首页不显示，站点页里仍有</div>
+    <div class="card" style="margin:0;background:var(--variant)">
+      <div class="row"><span class="badge">325</span><div class="m"><div class="a">→ 科技园</div><div class="b">置顶</div></div><i data-i="up" style="color:var(--primary)"></i><i data-i="eyeoff" class="mute"></i></div>
+      <div class="row"><span class="badge">19</span><div class="m"><div class="a">→ 蛇口港</div></div><i data-i="up" class="mute"></i><i data-i="eyeoff" class="mute"></i></div>
+      <div class="row"><span class="badge">M194</span><div class="m"><div class="a">→ 西丽</div></div><i data-i="up" class="mute"></i><i data-i="eyeoff" class="mute"></i></div>
+      <div class="row" style="opacity:.5"><span class="badge">204</span><div class="m"><div class="a">→ 南山中心</div><div class="b">已隐藏</div></div><i data-i="up" class="mute"></i><i data-i="eyeoff" style="color:var(--primary)"></i></div>
+    </div>
+  </div>
+</div>
+</div>
+<figcaption><b>置顶 / 隐藏线路 <span class="p2">二期</span></b><span>从第 3 节的站弹层进入。对应 issue 里「不同时段坐不同的线」：常坐的置顶，从来不坐的隐藏。以后可以再按时段自动排序。</span></figcaption>
+</figure>
+
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">科技园站<div style="font-size:12px;font-weight:400;color:var(--text2)">120 米 · 8 条线</div></div><div class="iconbtn on"><i data-i="starf"></i></div></div>
+  <div class="chips"><span class="chip">全部</span><span class="chip on">往北<i data-i="pin" class="xs"></i></span><span class="chip">往南</span></div>
+  <div class="card">
+    <div class="row"><span class="badge">19</span><div class="m"><div class="a">→ 蛇口港</div></div><div class="eta"><div class="n go">2<small> 分钟</small></div><div class="u">1 站</div></div></div>
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">→ 科技园</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div></div>
+    <div class="row"><span class="badge">M194</span><div class="m"><div class="a">→ 西丽</div></div><div class="eta"><div class="n">9<small> 分钟</small></div><div class="u">4 站</div></div></div>
+    <div class="row"><span class="badge">204</span><div class="m"><div class="a">→ 南山中心</div></div><div class="eta"><div class="n">11<small> 分钟</small></div><div class="u">5 站</div></div></div>
+  </div>
+</div>
+<div class="bottom"><span class="btn f"><i data-i="play" class="s"></i>一起等这个方向 4 条</span><span class="btn o" style="padding:0 14px"><i data-i="check" class="s"></i>挑几条</span></div>
+</div>
+<figcaption><b>一键一起等整站 <span class="p2">二期</span></b><span>收藏的站，站点页底部主按钮变成「一起等这个方向 N 条」，直接复用一起等追踪；想挑的点「挑几条」进原来的选线。车迷随便上车正好用。乘车码按钮这时移到顶栏或省掉，要再定。</span></figcaption>
+</figure>
+
+</div>
+
+<h2>5. 我替你定了、你可以改的</h2>
+<table class="doc">
+<tr><th>点</th><th>我的选择</th><th>另一种</th></tr>
+<tr><td>收藏多大</td><td>整个站（同名的几个站台一起），另记一个默认方向</td><td>一个站台算一个收藏，往北、往南要收两次</td></tr>
+<tr><td>入口</td><td>站点页顶栏 ☆</td><td>底部按钮加「收藏这个站」（底部已有一起等 + 乘车码，太挤）</td></tr>
+<tr><td>首页样子</td><td>A 一行（已定）</td><td>B 站卡（一个站占 4–5 行）</td></tr>
+<tr><td>首页显示几条线</td><td>按到站先后取前 3 条</td><td>全部列出</td></tr>
+<tr><td>图标颜色</td><td>绿色图钉，和蓝色线路号、灰色路线区分</td><td>都用灰色</td></tr>
+<tr><td>切方向后改默认</td><td>问一次，点了才改</td><td>记住最后一次看的方向（容易被误改）</td></tr>
+<tr><td>站查不到</td><td>保留收藏，显示「暂时查不到」</td><td>自动删掉</td></tr>
+<tr><td>一起等整站、置顶/隐藏</td><td>二期</td><td>第一期一起做</td></tr>
+<tr><td>长辈版</td><td>第一期站收藏照常显示，样式跟着长辈版放大；站点页同样加顶栏 ☆</td><td>长辈版先不显示站收藏</td></tr>
+</table>
+</div>
+
+<script>
+document.querySelectorAll('i[data-i]').forEach(function(el){
+  var cls = 'ic ' + el.className;
+  var st = el.getAttribute('style');
+  el.outerHTML = '<svg class="' + cls + '"' + (st ? ' style="' + st + '"' : '') + '><use href="#i-' + el.dataset.i + '"/></svg>';
+});
+</script>
+</body>
+</html>

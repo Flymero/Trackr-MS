@@ -2,6 +2,7 @@ package com.trackr.core.data.local
 
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItemRecord
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitGroup
@@ -84,6 +85,7 @@ interface TransitLocalStore {
  * @param routes 路线，按存的顺序；从没存过时为 null。旧实现里 JSON 损坏时先备份原文再给空列表
  * @param groups 收藏分组；没存过或损坏时为 null
  * @param items 合一索引（顺序 + 分组）；没存过时为 null（仓库按车和路线现有的顺序推出来，见 FavoriteItemOrder）
+ * @param stations 收藏的站（issue #47），按存的顺序
  * @param groupsInitialized 收藏分组建过没有（写过默认分组，或者用户自己建过 / 删过分组）。为 true 时 [groups] 空就是
  *   「用户把分组删光了」，仓库不再补默认分组（见 [com.trackr.core.data.repository.DefaultFavoritesRepository.create]）
  */
@@ -92,7 +94,8 @@ data class FavoritesSnapshot(
     val routes: List<TransitGroup>? = null,
     val groups: List<FavoriteGroup>? = null,
     val items: List<FavoriteItemRecord>? = null,
-    val groupsInitialized: Boolean = false
+    val groupsInitialized: Boolean = false,
+    val stations: List<FavoriteStation> = emptyList()
 )
 
 /**
@@ -107,6 +110,8 @@ data class FavoritesWrite(
     val groups: List<FavoriteGroup>? = null,
     val items: List<FavoriteItemRecord>? = null,
     val itemUpdates: List<FavoriteItemRecord> = emptyList(),
+    /** 收藏的站（issue #47），按合一顺序排好；null = 不动 */
+    val stations: List<FavoriteStation>? = null,
     /**
      * 顺手记下「分组建过了」（[FavoritesSnapshot.groupsInitialized]）。仓库每次写入都带上，
      * 所以 [groups] 写成空列表之后，下次启动读回来就知道那是用户删空的，不是没建过。
@@ -114,7 +119,7 @@ data class FavoritesWrite(
     val markGroupsInitialized: Boolean = false
 )
 
-/** DefaultFavoritesRepository 的存储：收藏的车、路线、收藏分组、合一索引 */
+/** DefaultFavoritesRepository 的存储：收藏的车、路线、收藏的站、收藏分组、合一索引 */
 interface FavoritesStore {
     suspend fun load(): FavoritesSnapshot
     suspend fun write(change: FavoritesWrite)

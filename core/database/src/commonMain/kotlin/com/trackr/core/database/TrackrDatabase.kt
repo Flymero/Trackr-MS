@@ -17,6 +17,7 @@ import com.trackr.core.database.entity.CandidateLineEntity
 import com.trackr.core.database.entity.FavoriteGroupEntity
 import com.trackr.core.database.entity.FavoriteItemEntity
 import com.trackr.core.database.entity.FavoriteLineEntity
+import com.trackr.core.database.entity.FavoriteStationEntity
 import com.trackr.core.database.entity.LineStopsCacheEntity
 import com.trackr.core.database.entity.ReminderEntity
 import com.trackr.core.database.entity.RouteEntity
@@ -34,6 +35,7 @@ import kotlinx.coroutines.IO
  * - 版本 1（第 9 步）：车、路线、分组、提醒、搜索历史、站表缓存、迁移标记。
  * - 版本 2（第 14 步）：加 `favorite_item`（收藏合一的顺序和分组），见 [MIGRATION_1_2]。
  * - 版本 3（issue #38）：`favorite_group` 加 `color`（分组颜色），见 [MIGRATION_2_3]。
+ * - 版本 4（issue #47）：加 `favorite_station`（收藏的站），见 [MIGRATION_3_4]。
  *
  * 新版本的包装到手机上之后，不能再装库版本更低的包（Room 不认更高的版本，会打不开库）。
  */
@@ -48,7 +50,8 @@ import kotlinx.coroutines.IO
         SearchHistoryEntity::class,
         LineStopsCacheEntity::class,
         StoreMetaEntity::class,
-        FavoriteItemEntity::class
+        FavoriteItemEntity::class,
+        FavoriteStationEntity::class
     ],
     version = TrackrDatabase.VERSION,
     exportSchema = true
@@ -69,8 +72,8 @@ abstract class TrackrDatabase : RoomDatabase() {
         /** Android 上的库文件名（`databases/` 下），备份规则按这个名字写 */
         const val FILE_NAME = "trackr.db"
 
-        /** 当前库版本（issue #38：3） */
-        const val VERSION = 3
+        /** 当前库版本（issue #47：4） */
+        const val VERSION = 4
     }
 }
 

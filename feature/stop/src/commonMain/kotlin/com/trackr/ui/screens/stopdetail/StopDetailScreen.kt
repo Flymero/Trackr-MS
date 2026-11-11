@@ -33,6 +33,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -42,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +70,8 @@ import com.trackr.feature.stop.resources.Res as StopRes
 import com.trackr.feature.stop.resources.stop_add_line
 import com.trackr.feature.stop.resources.stop_boarded_kicker
 import com.trackr.feature.stop.resources.stop_exit_select
+import com.trackr.feature.stop.resources.stop_favorite_station
+import com.trackr.feature.stop.resources.stop_unfavorite_station
 import com.trackr.feature.stop.resources.stop_first_arrives
 import com.trackr.feature.stop.resources.stop_loading
 import com.trackr.feature.stop.resources.stop_no_lines
@@ -204,8 +208,33 @@ private fun StopDetailTopBar(state: StopDetailUiState, watch: WatchTogetherUi?, 
                     Icon(TrackrIcons.Back, contentDescription = stringResource(Res.string.action_back))
                 }
             }
+        },
+        actions = {
+            // 顶栏 ☆ = 收藏整个站（issue #47）；每一行的 ☆ 仍是收藏那条线。选线模式里不放，免得和底部「收藏」混
+            if (!state.selecting && state.stops.isNotEmpty()) {
+                StationFavoriteButton(isFavorite = state.isStationFavorite, onClick = { onEvent(StopDetailEvent.ToggleStationFavorite) })
+            }
         }
     )
+}
+
+/** 顶栏 ☆：收藏 / 取消收藏整个站（长辈版站点页按它的设计不放收藏星标） */
+@Composable
+internal fun StationFavoriteButton(isFavorite: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    IconButton(onClick = onClick, modifier = modifier.testTag(StopDetailTags.STATION_FAVORITE)) {
+        Icon(
+            imageVector = if (isFavorite) TrackrIcons.StarFilled else TrackrIcons.Star,
+            contentDescription = stringResource(
+                if (isFavorite) StopRes.string.stop_unfavorite_station else StopRes.string.stop_favorite_station
+            ),
+            tint = if (isFavorite) MaterialTheme.colorScheme.primary else LocalContentColor.current
+        )
+    }
+}
+
+/** 站点页的测试 tag */
+object StopDetailTags {
+    const val STATION_FAVORITE = "stop_station_favorite"
 }
 
 @Composable
