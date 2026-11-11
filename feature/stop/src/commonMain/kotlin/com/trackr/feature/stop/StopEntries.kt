@@ -19,7 +19,7 @@ import org.koin.dsl.module
 fun EntryProviderScope<NavKey>.stopEntries(navigator: TrackrNavigator) {
     entry<ScreenKey.StopDetail> { key ->
         val stopDetailViewModel: StopDetailViewModel = koinViewModel(
-            key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}"
+            key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}_${key.source}"
         ) { parametersOf(key) }
 
         StopDetailRoute(viewModel = stopDetailViewModel, navigator = navigator)
@@ -38,7 +38,7 @@ fun EntryProviderScope<NavKey>.stopEntries(navigator: TrackrNavigator) {
 fun EntryProviderScope<NavKey>.elderStopEntries(navigator: TrackrNavigator) {
     entry<ScreenKey.StopDetail> { key ->
         val stopDetailViewModel: StopDetailViewModel = koinViewModel(
-            key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}"
+            key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}_${key.source}"
         ) { parametersOf(key) }
 
         StopDetailRoute(viewModel = stopDetailViewModel, navigator = navigator) { state, onEvent, messageHost ->
@@ -69,6 +69,9 @@ val stopModule = module {
             namesakeStId = key.namesakeStId,
             stationLat = key.lat,
             stationLng = key.lng,
+            initialSource = key.source,
+            initialCityName = key.cityName,
+            initialMygolbsCityCode = key.mygolbsCityCode,
             settings = get(),
             favorites = get(),
             realtime = get(),

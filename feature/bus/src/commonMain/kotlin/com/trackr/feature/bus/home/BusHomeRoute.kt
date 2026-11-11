@@ -73,5 +73,8 @@ private fun StopTarget.toKey(): ScreenKey.StopDetail = ScreenKey.StopDetail(
     physicalStId = physicalStId,
     namesakeStId = namesakeStId,
     lat = lat,
-    lng = lng
+    lng = lng,
+    source = source,
+    cityName = cityName,
+    mygolbsCityCode = mygolbsCityCode
 )

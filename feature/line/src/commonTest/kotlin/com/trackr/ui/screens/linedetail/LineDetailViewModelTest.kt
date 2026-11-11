@@ -251,14 +251,19 @@ class LineDetailViewModelTest {
         source: DataSourceType = DataSourceType.CHELAILE,
         pushRepository: MeishanPushRepository? = null,
         enableAutoPolling: Boolean = false,
-        clockMillis: () -> Long = { 0L }
+        clockMillis: () -> Long = { 0L },
+        lineId: String = "line_001",
+        boardStopName: String = "",
+        alightStopName: String = ""
     ): LineDetailViewModel {
         return LineDetailViewModel(
             cityId = "034",
-            initialLineId = "line_001",
+            initialLineId = lineId,
             initialTargetOrder = targetOrder,
             initialStationId = stationId,
             initialSource = source,
+            entryBoardStopName = boardStopName,
+            entryAlightStopName = alightStopName,
             settings = fakeRepository.settings,
             favorites = fakeRepository.favoritesRepo,
             realtime = realtime,
@@ -2039,4 +2044,100 @@ class LineDetailViewModelTest {
             assertEquals(original.live, state.live)
         }
     }
+
+    // ---------- 从路线规划进来：按上车站名定站和方向 ----------
+
+    /** 高德方案没对齐时站序是占位的 1：按站名停在上车站，不停首站，并按该站再请求一次拿准 ETA */
+    @Test
+    fun entryStopName_overridesPlaceholderOrder() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 1, boardStopName = "人民广场", alightStopName = "上海体育馆")
+        testScheduler.runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals("人民广场", state.selectedStop?.name)
+        assertEquals(2, state.entryStopOrder)
+        assertEquals("line_001", state.static?.line?.lineId)
+        assertEquals(listOf<Int?>(1, 2), fakeRepository.realtime.lineDetailTargetOrders)
+    }
+
+    /** 当前方向上车站在下车站后面：换到反向，停在反向的上车站 */
+    @Test
+    fun entryStopName_wrongDirection_switchesToReverse() = runTest(main.dispatcher) {
+        val reverseStops = listOf(
+            BusStop(stopId = "r1", name = "上海体育馆", order = 1),
+            BusStop(stopId = "r2", name = "人民广场", order = 2),
+            BusStop(stopId = "r3", name = "汉口路", order = 3)
+        )
+        fakeRepository.realtime.lineDetailsMap["line_001"] = BusLineDetail(
+            line = forwardDirection, reverseDirection = reverseDirection, stops = stops, buses = buses
+        )
+        fakeRepository.realtime.lineDetailsMap["line_002"] = BusLineDetail(
+            line = reverseDirection, reverseDirection = forwardDirection, stops = reverseStops, buses = emptyList()
+        )
+
+        val viewModel = createViewModel(targetOrder = 1, boardStopName = "人民广场", alightStopName = "汉口路")
+        testScheduler.runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals("line_002", state.static?.line?.lineId)
+        assertEquals("r2", state.selectedStop?.stopId)
+        assertEquals(2, state.entryStopOrder)
+        // 之后的请求（含轮询）都走反向
+        assertEquals("line_002", fakeRepository.realtime.lineDetailCalls.last())
+        assertEquals(2, fakeRepository.realtime.lineDetailTargetOrders.last())
+    }
+
+    /** 两个方向都找不到这个站名：退回原来的站序逻辑 */
+    @Test
+    fun entryStopName_notFound_fallsBackToOrder() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 3, boardStopName = "不存在的站")
+        testScheduler.runCurrent()
+
+        assertEquals("上海体育馆", viewModel.uiState.value.selectedStop?.name)
+        assertEquals("line_001", viewModel.uiState.value.static?.line?.lineId)
+    }
+
+    @Test
+    fun entryStopName_lateReverseLookup_doesNotOverwriteNewRefresh() = runTest(main.dispatcher) {
+        val reverseStops = listOf(stops[2].copy(order = 1), stops[1].copy(order = 2), stops[0].copy(order = 3))
+        fakeRepository.realtime.lineDetailsMap["line_002"] = BusLineDetail(
+            line = reverseDirection, reverseDirection = forwardDirection, stops = reverseStops, buses = emptyList()
+        )
+        val realtime = CountingLineRepository(fakeRepository.realtime)
+        val reverseGate = CompletableDeferred<Unit>()
+        realtime.lineGates["line_002"] = reverseGate
+        val vm = createViewModel(targetOrder = 1, boardStopName = "人民广场", alightStopName = "汉口路", realtime = realtime)
+        testScheduler.runCurrent()
+        assertEquals(listOf("line_001", "line_002"), realtime.lineIds)
+        vm.refreshNow()
+        testScheduler.runCurrent()
+        val latest = vm.uiState.value
+        assertEquals("line_001", latest.static?.line?.lineId)
+        reverseGate.complete(Unit)
+        testScheduler.runCurrent()
+        assertEquals(latest.static, vm.uiState.value.static)
+        assertEquals(latest.selectedStop, vm.uiState.value.selectedStop)
+        assertEquals(3, realtime.lineIds.size)
+    }
+
+    @Test
+    fun entryStopName_userPicksStationDuringReverseLookup_keepsUserChoice() = runTest(main.dispatcher) {
+        fakeRepository.realtime.lineDetailsMap["line_002"] = BusLineDetail(
+            line = reverseDirection, reverseDirection = forwardDirection,
+            stops = listOf(stops[2].copy(order = 1), stops[1].copy(order = 2), stops[0].copy(order = 3)), buses = emptyList()
+        )
+        val realtime = CountingLineRepository(fakeRepository.realtime)
+        val reverseGate = CompletableDeferred<Unit>()
+        realtime.lineGates["line_002"] = reverseGate
+        val vm = createViewModel(targetOrder = 1, boardStopName = "人民广场", alightStopName = "汉口路", realtime = realtime)
+        testScheduler.runCurrent()
+        vm.selectStop(stops[2])
+        testScheduler.runCurrent()
+        reverseGate.complete(Unit)
+        testScheduler.runCurrent()
+        assertEquals("line_001", vm.uiState.value.static?.line?.lineId)
+        assertEquals(stops[2], vm.uiState.value.selectedStop)
+        assertEquals(3, realtime.lineIds.size)
+    }
+
 }

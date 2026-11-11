@@ -335,4 +335,56 @@ class StorageBackendTest {
         // 会把这次并未主动使用旧存储的数据重新导入并覆盖用户改动。
         assertEquals(0, StoreSwitch.generation(context))
     }
+
+    @Test
+    fun stationFavorites_newOldNewSwitch_preservesOrderGroupsAndEdits() = runBlocking {
+        writeLegacy()
+        val official = com.trackr.core.model.FavoriteStation(
+            id = "眉山_MEISHAN_ms-st:10", cityId = "", cityName = "眉山", stopName = "苏祠路口",
+            stopId = "ms-st:10", source = DataSourceType.MEISHAN, addedAtMillis = 1L
+        )
+        val first = RouteGroupRepository.openFavorites(open().favoritesStore)
+        val originalKeys = first.favoriteItems.value.map { it.key }
+        first.toggleStation(official)
+        first.setGroup(com.trackr.core.model.FavoriteItem.stationKey(official.id), "gym")
+        val savedItems = normalizedItems(first.favoriteItems.value)
+        closeAll()
+        val reopened = RouteGroupRepository.openFavorites(open().favoritesStore)
+        assertEquals(savedItems, reopened.favoriteItems.value)
+        closeAll()
+        File(context.filesDir, StoreSwitch.OVERRIDE_FILE).writeText("old")
+        val oldBackend = open()
+        assertFalse(oldBackend.usesNewStore)
+        val old = RouteGroupRepository.openFavorites(oldBackend.favoritesStore)
+        // Like existing old-store semantics, changes made since the switch are imported as a new generation.
+        old.toggleStation(official)
+        old.setGroup(com.trackr.core.model.FavoriteItem.stationKey(official.id), "gym")
+        old.updateStation(official.copy(platformLabel = "官方站台"))
+        old.move(listOf(originalKeys.first(), com.trackr.core.model.FavoriteItem.stationKey(official.id)))
+        val expected = normalizedItems(old.favoriteItems.value)
+        closeAll()
+        File(context.filesDir, StoreSwitch.OVERRIDE_FILE).writeText("new")
+        val newBackend = open()
+        assertTrue(newBackend.usesNewStore)
+        val back = RouteGroupRepository.openFavorites(newBackend.favoritesStore)
+        assertEquals(expected, back.favoriteItems.value)
+        assertEquals("官方站台", back.favoriteStations.value.single().platformLabel)
+        back.deleteGroup("gym")
+        back.removeStation(official.id)
+        assertEquals(originalKeys, back.favoriteItems.value.map { it.key })
+        closeAll()
+        val again = RouteGroupRepository.openFavorites(open().favoritesStore)
+        assertTrue(again.favoriteStations.value.isEmpty())
+        assertTrue(again.favoriteItems.value.none { it.groupId == "gym" })
+    }
+
+    // Repository reopen compacts sparse ranks without changing list order, content, or grouping.
+    private fun normalizedItems(items: List<com.trackr.core.model.FavoriteItem>) = items.mapIndexed { index, item ->
+        when (item) {
+            is com.trackr.core.model.FavoriteItem.Stop -> item.copy(sortOrder = index)
+            is com.trackr.core.model.FavoriteItem.Route -> item.copy(sortOrder = index)
+            is com.trackr.core.model.FavoriteItem.Station -> item.copy(sortOrder = index)
+        }
+    }
+
 }

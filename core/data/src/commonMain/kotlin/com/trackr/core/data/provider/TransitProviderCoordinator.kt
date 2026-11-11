@@ -244,8 +244,14 @@ class TransitProviderCoordinator(
     suspend fun getStopDetail(
         city: TransitCity,
         request: StopDetailRequest,
-        mode: EngineMode
+        mode: EngineMode,
+        source: DataSourceType? = null
     ): List<NearbyStop> {
+        // Saved station identity belongs to its original provider, not the currently selected engine.
+        if (source != null) {
+            val provider = providers[source] ?: error("No provider found for station source: $source")
+            return provider.getStopDetail(city, request)
+        }
         val chelaileProvider = providers[DataSourceType.CHELAILE]
         val mygolbsProvider = providers[DataSourceType.MYGOLBS]
         val meishanProvider = providers[DataSourceType.MEISHAN]

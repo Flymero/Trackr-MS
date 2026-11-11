@@ -96,4 +96,18 @@ class NavigationKeyTest {
         assertEquals(31.22, detail.lat, 0.0001)
         assertEquals(121.45, detail.lng, 0.0001)
     }
+
+    @Test
+    fun stationFavoriteNavigation_roundTripsSourceAndOriginalCity_oldKeysUseDefaults() {
+        val key: ScreenKey = ScreenKey.StopDetail(cityId = "saved-city", stopId = "s1", source = DataSourceType.MYGOLBS,
+            cityName = "旧城市", mygolbsCityCode = "old-code")
+        assertEquals(key, json.decodeFromString<ScreenKey>(json.encodeToString(key)))
+        val old = json.decodeFromString<ScreenKey.StopDetail>("""{"cityId":"034","stopId":"s1"}""")
+        assertEquals(null, old.source)
+        assertEquals("", old.mygolbsCityCode)
+        val line = json.decodeFromString<ScreenKey.LineDetail>("""{"cityId":"034","lineId":"line_001"}""")
+        assertEquals("", line.boardStopName)
+        assertEquals("", line.alightStopName)
+    }
+
 }

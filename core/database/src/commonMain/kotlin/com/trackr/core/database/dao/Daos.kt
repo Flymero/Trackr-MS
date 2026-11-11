@@ -10,6 +10,7 @@ import com.trackr.core.database.entity.CandidateLineEntity
 import com.trackr.core.database.entity.FavoriteGroupEntity
 import com.trackr.core.database.entity.FavoriteItemEntity
 import com.trackr.core.database.entity.FavoriteLineEntity
+import com.trackr.core.database.entity.FavoriteStationEntity
 import com.trackr.core.database.entity.LineStopsCacheEntity
 import com.trackr.core.database.entity.ReminderEntity
 import com.trackr.core.database.entity.RouteEntity
@@ -148,6 +149,8 @@ interface RouteDao {
 /** 收藏合一要的全部行：车、路线（连同程和候选线）、收藏分组、合一索引。一个事务里读出 */
 data class FavoritesRows(
     val stops: List<FavoriteLineEntity>,
+    /** 收藏的站（issue #47） */
+    val stations: List<FavoriteStationEntity> = emptyList(),
     val routes: List<RouteRows>,
     val groups: List<FavoriteGroupEntity>,
     val items: List<FavoriteItemEntity>,
@@ -199,6 +202,15 @@ interface FavoritesDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStops(items: List<FavoriteLineEntity>)
 
+    @Query("SELECT * FROM favorite_station ORDER BY position")
+    suspend fun getStations(): List<FavoriteStationEntity>
+
+    @Query("DELETE FROM favorite_station")
+    suspend fun deleteAllStations()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStations(items: List<FavoriteStationEntity>)
+
     @Query("SELECT * FROM route ORDER BY position")
     suspend fun getRoutes(): List<RouteEntity>
 
@@ -248,6 +260,7 @@ interface FavoritesDao {
         }
         return FavoritesRows(
             stops = getStops(),
+            stations = getStations(),
             routes = routes,
             groups = getGroups(),
             items = getItems(),
@@ -268,6 +281,8 @@ interface FavoritesDao {
         routes: List<RouteRows>? = null,
         groups: List<FavoriteGroupEntity>? = null,
         items: List<FavoriteItemEntity>? = null,
+        /** 收藏的站（issue #47）；null = 不动，给了整份替换 */
+        stations: List<FavoriteStationEntity>? = null,
         itemUpdates: List<FavoriteItemEntity> = emptyList(),
         /** 记下分组建过了：`favorite_group` 表空之后就不再是「从没建过」 */
         markGroupsInitialized: Boolean = false
@@ -275,6 +290,10 @@ interface FavoritesDao {
         stops?.let {
             deleteAllStops()
             insertStops(it)
+        }
+        stations?.let {
+            deleteAllStations()
+            insertStations(it)
         }
         routes?.let { rows ->
             // 不靠外键级联，三张表都显式清空

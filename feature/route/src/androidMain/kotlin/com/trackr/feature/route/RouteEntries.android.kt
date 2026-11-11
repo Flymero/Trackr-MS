@@ -38,18 +38,10 @@ actual fun EntryProviderScope<NavKey>.routeEntries(navigator: TrackrNavigator) {
             onNavigateToFavorites = dropUnlessResumed {
                 navigator.showInTab(ScreenKey.Home, ScreenKey.FavoritesEdit)
             },
-            onNavigateToLineDetail = { line, targetOrder ->
+            onNavigateToLineDetail = { line, _ ->
                 // 只在 RESUMED 时跳，防连点重复入栈（同 dropUnlessResumed）
                 if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                    val key = ScreenKey.LineDetail(
-                        cityId = line.cityId,
-                        lineId = line.lineId,
-                        targetOrder = targetOrder,
-                        stopId = "",
-                        source = line.source,
-                        lineName = line.lineName
-                    )
-                    navigator.open(key)
+                    navigator.open(line.toLineDetailKey())
                 }
             }
         )

@@ -110,7 +110,10 @@ class FavoritesEditViewModel(
         }
     }
 
-    /** 删掉一条收藏：车走 [FavoritesRepository.removeFavorite]，路线走 [FavoritesRepository.removeRoute] */
+    /**
+     * 删掉一条收藏：车走 [FavoritesRepository.removeFavorite]，路线走 [FavoritesRepository.removeRoute]，
+     * 站走 [FavoritesRepository.removeStation]
+     */
     fun removeItem(key: String) {
         viewModelScope.launch {
             when {
@@ -118,6 +121,8 @@ class FavoritesEditViewModel(
                     favorites.removeFavorite(key.removePrefix(FavoriteItem.STOP_KEY_PREFIX))
                 key.startsWith(FavoriteItem.ROUTE_KEY_PREFIX) ->
                     favorites.removeRoute(key.removePrefix(FavoriteItem.ROUTE_KEY_PREFIX))
+                key.startsWith(FavoriteItem.STATION_KEY_PREFIX) ->
+                    favorites.removeStation(key.removePrefix(FavoriteItem.STATION_KEY_PREFIX))
             }
         }
     }

@@ -63,5 +63,21 @@ val MIGRATION_2_3: Migration = object : Migration(2, 3) {
     }
 }
 
+/**
+ * 3 -> 4（issue #47，收藏的站）：加一张空的 `favorite_station`，别的表不动。站在合一列表里的顺序和分组照样记在
+ * `favorite_item`（type = `STATION`）。
+ */
+val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `favorite_station` (`id` TEXT NOT NULL, `position` INTEGER NOT NULL, " +
+                "`cityId` TEXT NOT NULL, `cityName` TEXT NOT NULL, `stopName` TEXT NOT NULL, `stopId` TEXT NOT NULL, " +
+                "`physicalStId` TEXT NOT NULL, `namesakeStId` TEXT NOT NULL, `platformLabel` TEXT NOT NULL, " +
+                "`wgsLat` REAL NOT NULL, `wgsLng` REAL NOT NULL, `source` TEXT NOT NULL, `mygolbsCityCode` TEXT NOT NULL, " +
+                "`addedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+        )
+    }
+}
+
 /** 全部迁移，按版本顺序。建库的地方统一加（[buildTrackrDatabase]） */
-val TRACKR_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+val TRACKR_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)

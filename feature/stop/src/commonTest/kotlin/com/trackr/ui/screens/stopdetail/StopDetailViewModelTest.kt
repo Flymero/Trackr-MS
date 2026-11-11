@@ -9,6 +9,7 @@ import com.trackr.core.model.BoardChoice
 import com.trackr.core.model.BoardOption
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.DataSourceType
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.LegPhase
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.NearbyStop
@@ -58,11 +59,12 @@ private class CountingStopRepository(
         stationLat: Double?,
         stationLng: Double?,
         userLat: Double?,
-        userLng: Double?
+        userLng: Double?,
+        source: DataSourceType?
     ): Result<List<NearbyStop>> {
         stopDetailPhysicalIds += physicalStId
         gate?.await()
-        return delegate.getStopDetail(city, stopId, stopName, physicalStId, namesakeStId, stationLat, stationLng, userLat, userLng)
+        return delegate.getStopDetail(city, stopId, stopName, physicalStId, namesakeStId, stationLat, stationLng, userLat, userLng, source)
     }
 }
 
@@ -242,6 +244,124 @@ class StopDetailViewModelTest {
 
         assertFalse(viewModel.uiState.value.favoriteIds.contains(expectedFavId))
         assertFalse(viewModel.uiState.value.rows.first().isFavorite)
+    }
+
+    // ================================================================ 收藏整个站（issue #47）
+
+    private fun existingStation(): FavoriteStation = FavoriteStation(
+        id = FavoriteStation.idOf("034", DataSourceType.CHELAILE, "人民广场（广东路）", ""),
+        cityId = "034", cityName = "上海", stopName = "人民广场（广东路）", stopId = "stop_001", physicalStId = "phy_01",
+        platformLabel = "往北", addedAtMillis = 1L
+    )
+
+    @Test
+    fun stationFavorite_toggle_savesCurrentPlatformAsDefault_thenRemoves() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertFalse(viewModel.uiState.value.isStationFavorite)
+
+        viewModel.onEvent(StopDetailEvent.ToggleStationFavorite)
+        testScheduler.runCurrent()
+
+        val saved = favorites.favoriteStations.value.single()
+        val state = viewModel.uiState.value
+        assertTrue(state.isStationFavorite)
+        assertEquals("stop_001", saved.stopId)
+        assertEquals("phy_01", saved.physicalStId)
+        assertEquals("人民广场（广东路）", saved.stopName)
+        assertEquals(state.platformLabels[0], saved.platformLabel)
+        assertEquals("034", saved.cityId)
+        assertEquals("上海", saved.cityName)
+        assertEquals(31.23, saved.wgsLat)
+        assertEquals("已收藏 人民广场（广东路） · ${state.platformLabels[0]}", viewModel.userMessages.first())
+        // 刚收藏：当前站台就是默认，切站台也不问
+        viewModel.selectStopIndex(1)
+        testScheduler.runCurrent()
+        assertNull(viewModel.uiState.value.defaultPlatformPrompt)
+
+        viewModel.onEvent(StopDetailEvent.ToggleStationFavorite)
+        testScheduler.runCurrent()
+        assertTrue(favorites.favoriteStations.value.isEmpty())
+        assertFalse(viewModel.uiState.value.isStationFavorite)
+    }
+
+    @Test
+    fun stationFavorite_rowStarsStillFavoriteSingleLines() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.onEvent(StopDetailEvent.ToggleStationFavorite)
+        testScheduler.runCurrent()
+
+        // 收藏整个站不会把每条线都标成收藏
+        assertTrue(viewModel.uiState.value.rows.none { it.isFavorite })
+        assertTrue(favorites.favorites.value.isEmpty())
+    }
+
+    @Test
+    fun stationFavorite_switchPlatform_asksOnce_acceptUpdatesDefault() = runTest(main.dispatcher) {
+        favorites = FakeFavoritesRepository(initialStations = listOf(existingStation()))
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.isStationFavorite)
+        // 刚打开、还在默认站台：不问
+        assertNull(viewModel.uiState.value.defaultPlatformPrompt)
+
+        viewModel.selectStopIndex(1)
+        testScheduler.runCurrent()
+        val label = viewModel.uiState.value.platformLabels[1]
+        assertEquals(label, viewModel.uiState.value.defaultPlatformPrompt)
+
+        viewModel.onEvent(StopDetailEvent.AcceptDefaultPlatform)
+        testScheduler.runCurrent()
+
+        val updated = favorites.favoriteStations.value.single()
+        assertEquals(existingStation().id, updated.id)
+        assertEquals("stop_002", updated.stopId)
+        assertEquals("phy_02", updated.physicalStId)
+        assertEquals(label, updated.platformLabel)
+        assertNull(viewModel.uiState.value.defaultPlatformPrompt)
+        assertTrue(viewModel.uiState.value.isStationFavorite)
+
+        // 同一次打开不再问
+        viewModel.selectStopIndex(0)
+        testScheduler.runCurrent()
+        assertNull(viewModel.uiState.value.defaultPlatformPrompt)
+    }
+
+    @Test
+    fun stationFavorite_dismissPrompt_keepsDefault_andDoesNotAskAgain() = runTest(main.dispatcher) {
+        favorites = FakeFavoritesRepository(initialStations = listOf(existingStation()))
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.selectStopIndex(1)
+        testScheduler.runCurrent()
+        assertNotNull(viewModel.uiState.value.defaultPlatformPrompt)
+
+        viewModel.onEvent(StopDetailEvent.DismissDefaultPlatformPrompt)
+        testScheduler.runCurrent()
+        assertNull(viewModel.uiState.value.defaultPlatformPrompt)
+        assertEquals(existingStation(), favorites.favoriteStations.value.single())
+
+        viewModel.selectStopIndex(0)
+        testScheduler.runCurrent()
+        viewModel.selectStopIndex(1)
+        testScheduler.runCurrent()
+        assertNull(viewModel.uiState.value.defaultPlatformPrompt)
+    }
+
+    @Test
+    fun openedOnAPlatform_selectsThatPlatformFirst() = runTest(main.dispatcher) {
+        val viewModel = StopDetailViewModel(
+            cityId = "034", stopId = "stop_002", initialStopName = "人民广场", physicalStId = "phy_02",
+            settings = settings, favorites = favorites, realtime = fakeRepository, userLocationStore = userLocationStore,
+            trackingRepository = useRealTracking(), trackingController = controller, transitCodeLauncher = launcher,
+            enableAutoPolling = false
+        )
+        testScheduler.runCurrent()
+
+        assertEquals(1, viewModel.uiState.value.selectedStopIndex)
     }
 
     @Test
@@ -872,4 +992,45 @@ class StopDetailViewModelTest {
         assertFalse(viewModel.uiState.value.isPullRefreshing)
         assertEquals(2, repo.stopDetailPhysicalIds.size)
     }
+
+    @Test
+    fun stationFavoriteEntry_passesOriginalSourceAndCityToEveryRefresh() = runTest(main.dispatcher) {
+        val vm = StopDetailViewModel(
+            cityId = "saved-city", stopId = "saved-stop", initialStopName = "保存的站",
+            initialSource = DataSourceType.MYGOLBS, initialCityName = "保存的城市", initialMygolbsCityCode = "saved-code",
+            settings = settings, favorites = favorites, realtime = fakeRepository, userLocationStore = userLocationStore,
+            trackingRepository = useRealTracking(), trackingController = controller, transitCodeLauncher = launcher, enableAutoPolling = false
+        )
+        testScheduler.runCurrent()
+        vm.refreshNow()
+        testScheduler.runCurrent()
+        assertEquals<List<DataSourceType?>>(listOf(DataSourceType.MYGOLBS, DataSourceType.MYGOLBS), fakeRepository.stopDetailSources)
+        assertTrue(fakeRepository.stopDetailCities.all { it.cityId == "saved-city" && it.mygolbsCityCode == "saved-code" })
+    }
+
+    @Test
+    fun officialStationFavorite_emptyCityIds_doNotMatchSameSidInAnotherArea() = runTest(main.dispatcher) {
+        val otherArea = FavoriteStation(
+            id = "仁寿_MEISHAN_ms-st:10", cityId = "", cityName = "仁寿", stopName = "科技园", stopId = "ms-st:10",
+            source = DataSourceType.MEISHAN, addedAtMillis = 1L
+        )
+        favorites = FakeFavoritesRepository(initialStations = listOf(otherArea))
+        fakeRepository.stopDetailResult = Result.success(listOf(NearbyStop(
+            stopId = "ms-st:10", name = "科技园", source = DataSourceType.MEISHAN
+        )))
+        val vm = StopDetailViewModel(
+            cityId = "", stopId = "ms-st:10", initialStopName = "科技园", initialCityName = "眉山",
+            initialSource = DataSourceType.MEISHAN, settings = settings, favorites = favorites, realtime = fakeRepository,
+            userLocationStore = userLocationStore, trackingRepository = useRealTracking(), trackingController = controller,
+            transitCodeLauncher = launcher, enableAutoPolling = false
+        )
+        testScheduler.runCurrent()
+        assertFalse(vm.uiState.value.isStationFavorite)
+        vm.onEvent(StopDetailEvent.ToggleStationFavorite)
+        testScheduler.runCurrent()
+        assertEquals(setOf(otherArea.id, "眉山_MEISHAN_ms-st:10"), favorites.favoriteStations.value.map { it.id }.toSet())
+        assertEquals("眉山", favorites.favoriteStations.value.first { it.id != otherArea.id }.cityName)
+        assertTrue(vm.uiState.value.isStationFavorite)
+    }
+
 }

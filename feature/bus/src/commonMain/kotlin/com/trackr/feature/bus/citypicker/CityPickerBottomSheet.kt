@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -93,16 +94,19 @@ fun CityPickerItemRow(
         },
         shape = shape
     ) {
-        Row(
+        // 城市名在前、标签在后；放不下一行时整组标签换到下一行，标签多了自己再换行。
+        // 以前标签行不占权重、先量，大字体下把城市名挤成一字一行（#44）。
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(contentPadding),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            itemVerticalAlignment = Alignment.CenterVertically
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f, fill = false)
+                modifier = Modifier.padding(end = 8.dp)
             ) {
                 Text(
                     text = city.cityName,
@@ -145,11 +149,10 @@ fun CityPickerItemRow(
                 }
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                itemVerticalAlignment = Alignment.CenterVertically
             ) {
                 // 当前城市不加「当前」徽章：名字加粗 + 主色已经是足够强的强调
                 if (isLocated) {

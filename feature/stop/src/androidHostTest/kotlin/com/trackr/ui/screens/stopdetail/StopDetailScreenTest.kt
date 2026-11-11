@@ -19,6 +19,8 @@ import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.NearbyStop
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.onNodeWithTag
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -124,6 +126,23 @@ class StopDetailScreenTest {
             ),
             events
         )
+    }
+
+    @Test
+    fun stationStar_inTopBar_togglesWholeStation_hiddenWhileSelecting() {
+        val state = mutableStateOf(base)
+        composeTestRule.setContent {
+            TrackrTheme { StopDetailScreen(state = state.value, onEvent = { events += it }) }
+        }
+
+        composeTestRule.onNodeWithContentDescription("收藏这个站").performClick()
+        assertEquals(listOf<StopDetailEvent>(StopDetailEvent.ToggleStationFavorite), events)
+
+        state.value = base.copy(isStationFavorite = true)
+        composeTestRule.onNodeWithContentDescription("取消收藏这个站").assertIsDisplayed()
+
+        state.value = base.copy(isStationFavorite = true, selecting = true)
+        composeTestRule.onNodeWithTag(StopDetailTags.STATION_FAVORITE).assertDoesNotExist()
     }
 
     @Test

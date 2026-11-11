@@ -300,9 +300,10 @@ class TransitRepository(
         stationLat: Double?,
         stationLng: Double?,
         userLat: Double?,
-        userLng: Double?
+        userLng: Double?,
+        source: DataSourceType?
     ): Result<List<NearbyStop>> = realtime.getStopDetail(
-        city, stopId, stopName, physicalStId, namesakeStId, stationLat, stationLng, userLat, userLng
+        city, stopId, stopName, physicalStId, namesakeStId, stationLat, stationLng, userLat, userLng, source
     )
 
     override suspend fun search(

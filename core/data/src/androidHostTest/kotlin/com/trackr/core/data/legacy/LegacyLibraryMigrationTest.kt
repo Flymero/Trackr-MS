@@ -476,4 +476,26 @@ class LegacyLibraryMigrationTest {
         assertEquals(reminders.reversed().map { it.id }, db.reminders().getAll().map { it.id })
         assertEquals(reminders[0].toEntity(1).copy(lastScheduledTriggerAt = 1_800_000_000_000L), db.reminders().getAll()[1])
     }
+
+    @Test
+    fun stationFavoritesAndUnifiedIndex_importedWithoutDeletingOldJson() = runBlocking {
+        LegacyFixtures.writeAll(context)
+        val station = com.trackr.core.model.FavoriteStation(
+            id = "眉山_MEISHAN_ms-st:10", cityId = "", cityName = "眉山", stopName = "苏祠路口",
+            stopId = "ms-st:10", source = com.trackr.core.model.DataSourceType.MEISHAN, addedAtMillis = 1L
+        )
+        val raw = json.encodeToString(listOf(station))
+        val record = FavoriteItemRecord(FavoriteItemType.STATION, station.id, null, 0)
+        val prefs = LegacyFixtures.prefs(context, LegacyPrefs.ROUTE_GROUPS)
+        prefs.edit().putString(LegacyPrefs.KEY_FAVORITE_STATIONS, raw)
+            .putString(LegacyPrefs.KEY_FAVORITE_ITEMS, json.encodeToString(listOf(record))).commit()
+        val report = migrate()
+        assertEquals(1, report.imported["favoriteStations"])
+        assertEquals(listOf(station), RoomFavoritesStore(db).load().stations)
+        assertEquals(raw, prefs.getString(LegacyPrefs.KEY_FAVORITE_STATIONS, null))
+        assertTrue(db.favorites().getItems().any { it.type == "STATION" && it.refId == station.id })
+        assertEquals(station, com.trackr.core.data.repository.DefaultFavoritesRepository.create(
+            RoomFavoritesStore(db), Dispatchers.IO).favoriteStations.value.single())
+    }
+
 }
