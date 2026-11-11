@@ -250,7 +250,9 @@ class StopDetailViewModelTest {
     private fun existingStation(): FavoriteStation = FavoriteStation(
         id = FavoriteStation.idOf("034", DataSourceType.CHELAILE, "人民广场（广东路）", ""),
         cityId = "034", cityName = "上海", stopName = "人民广场（广东路）", stopId = "stop_001", physicalStId = "phy_01",
-        platformLabel = "往北"
+        platformLabel = "往北",
+        // 固定时间戳：默认值是 defaultNowMillis()，两次调用会差几毫秒，相等性断言就假失败了
+        addedAtMillis = 0L
     )
 
     @Test
