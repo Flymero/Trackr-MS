@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.trackr.core.designsystem.component.TrackrBottomActionBar
 import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.action_back
 import com.trackr.core.designsystem.resources.action_cancel
@@ -134,13 +135,12 @@ fun ReminderEditScreen(
         },
         bottomBar = {
             if (draft != null) {
-                Surface(color = MaterialTheme.colorScheme.surface) {
+                TrackrBottomActionBar {
                     Button(
                         onClick = { onEvent(ReminderEditEvent.Save) },
                         enabled = state.changed && !state.saving,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
                             .height(48.dp)
                             .testTag("btn_save_reminder")
                     ) {

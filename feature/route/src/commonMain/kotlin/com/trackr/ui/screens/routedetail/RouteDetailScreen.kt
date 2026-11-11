@@ -55,6 +55,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
+import com.trackr.core.designsystem.component.TrackrBottomActionBar
 import com.trackr.core.designsystem.resources.Res
 import com.trackr.ui.components.message.HostMessage
 import com.trackr.ui.components.message.UserMessageHost
@@ -412,64 +413,56 @@ private fun BottomBar(
     onEvent: (RouteDetailEvent) -> Unit,
     onSave: () -> Unit
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            if (session == null) {
-                if (group.isTemporary) {
-                    TextButton(onClick = onSave, modifier = Modifier.height(48.dp)) {
-                        Text(stringResource(Res.string.action_favorite))
-                    }
+    TrackrBottomActionBar {
+        if (session == null) {
+            if (group.isTemporary) {
+                TextButton(onClick = onSave, modifier = Modifier.height(48.dp)) {
+                    Text(stringResource(Res.string.action_favorite))
                 }
+            }
+            Button(
+                onClick = { onEvent(RouteDetailEvent.StartTracking) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+            ) {
+                Text(stringResource(Res.string.action_start_tracking))
+            }
+        } else {
+            val waiting = session.trackingSessionState?.legPhase != LegPhase.ON_BOARD
+            if (waiting) {
                 Button(
-                    onClick = { onEvent(RouteDetailEvent.StartTracking) },
+                    onClick = { onEvent(RouteDetailEvent.ConfirmBoarded) },
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
                 ) {
-                    Text(stringResource(Res.string.action_start_tracking))
+                    Text(stringResource(Res.string.action_boarded))
+                }
+            } else if (session.activeLegIndex < session.totalLegs - 1) {
+                Button(
+                    onClick = { onEvent(RouteDetailEvent.NextLeg) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                ) {
+                    Text(stringResource(RouteRes.string.route_detail_next_leg))
                 }
             } else {
-                val waiting = session.trackingSessionState?.legPhase != LegPhase.ON_BOARD
-                if (waiting) {
-                    Button(
-                        onClick = { onEvent(RouteDetailEvent.ConfirmBoarded) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                    ) {
-                        Text(stringResource(Res.string.action_boarded))
-                    }
-                } else if (session.activeLegIndex < session.totalLegs - 1) {
-                    Button(
-                        onClick = { onEvent(RouteDetailEvent.NextLeg) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                    ) {
-                        Text(stringResource(RouteRes.string.route_detail_next_leg))
-                    }
-                } else {
-                    Button(
-                        onClick = { onEvent(RouteDetailEvent.StopTracking) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                    ) {
-                        Text(stringResource(Res.string.action_end_tracking))
-                    }
-                }
-                TextButton(
+                Button(
                     onClick = { onEvent(RouteDetailEvent.StopTracking) },
-                    modifier = Modifier.height(48.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
                 ) {
-                    Text(stringResource(Res.string.action_end), color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(Res.string.action_end_tracking))
                 }
+            }
+            TextButton(
+                onClick = { onEvent(RouteDetailEvent.StopTracking) },
+                modifier = Modifier.height(48.dp)
+            ) {
+                Text(stringResource(Res.string.action_end), color = MaterialTheme.colorScheme.error)
             }
         }
     }
