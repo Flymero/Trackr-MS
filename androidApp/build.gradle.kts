@@ -37,7 +37,6 @@ android {
 
     defaultConfig {
         applicationId = "com.github.u5151561.trackr"
-        resValue("string", "shortcut_target_package", applicationId!!)
         versionCode = 16
         versionName = "0.1.12"
 
@@ -81,7 +80,6 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            resValue("string", "shortcut_target_package", "${defaultConfig.applicationId}$applicationIdSuffix")
             enableUnitTestCoverage = true
             buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKeyDebug\"")
             manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKeyDebug
@@ -115,7 +113,6 @@ android {
 
     buildFeatures {
         buildConfig = true
-        resValues = true
     }
 
     packaging {
