@@ -2140,4 +2140,24 @@ class LineDetailViewModelTest {
         assertEquals(3, realtime.lineIds.size)
     }
 
+    @Test
+    fun entryStopName_firstFetchFails_retryStillResolvesEntry() = runTest(main.dispatcher) {
+        // 评审 P3-2：入口首次请求失败 → 用户点重试（isInitial=false）——按名定站不能只在 isInitial 做，
+        // 否则定向/定站永久退化回旧行为（落占位首站、entryStopOrder 一直为 null）
+        fakeRepository.lineDetailResult = Result.failure(IllegalStateException("网络失败"))
+        val viewModel = createViewModel(targetOrder = 1, boardStopName = "人民广场", alightStopName = "上海体育馆")
+        testScheduler.runCurrent()
+        assertNull(viewModel.uiState.value.entryStopOrder, "首次失败：尚未按名定站")
+        assertNull(viewModel.uiState.value.static)
+
+        fakeRepository.lineDetailResult = Result.success(officialDetail())
+        viewModel.refreshNow()
+        testScheduler.runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals("人民广场", state.selectedStop?.name)
+        assertEquals(2, state.entryStopOrder)
+        assertEquals("line_001", state.static?.line?.lineId)
+    }
+
 }

@@ -223,6 +223,9 @@ class LineDetailViewModel(
 
     /** 入口按站名定候车站（见 [entryBoardStopName]） */
     private val hasEntryStopName: Boolean = entryBoardStopName.isNotBlank()
+
+    /** 按名定站在反向查找中挂起时为 true：防止刷新重入、重复发起同一查找 */
+    private var entryResolveInFlight = false
     val uiState: StateFlow<LineDetailUiState> = _uiState.asStateFlow()
 
     private val entryLineId: String = initialLineId
@@ -519,8 +522,19 @@ class LineDetailViewModel(
             result.onSuccess { fetched ->
                 // Resolving the route entry may suspend for the reverse direction. Revalidate after that await,
                 // including a station picked while the lookup was in flight; never revive an old request.
-                val byName = if (isInitial && !userPickedStop && hasEntryStopName) {
-                    resolveEntryDirection(fetched, currentCity)
+                // 评审 P3-2：按名定站不限于 isInitial——入口首次请求失败后走重试/下拉（isInitial=false），
+                // 若只在 isInitial 做，定向/定站会永久退化回旧行为。以「尚未按名定过站且没有在途查找」为准：
+                // entryStopOrder 非空即已定过，不再重复；在途挂起（反向查找未完成）不重入；
+                // 用户手动选站仍由 userPickedStop 挡住
+                val byName = if (!userPickedStop && hasEntryStopName &&
+                    _uiState.value.entryStopOrder == null && !entryResolveInFlight
+                ) {
+                    entryResolveInFlight = true
+                    try {
+                        resolveEntryDirection(fetched, currentCity)
+                    } finally {
+                        entryResolveInFlight = false
+                    }
                 } else null
                 if (!requestIsCurrent() || (byName != null && userPickedStop)) return false
                 if (byName != null && byName.first.line.lineId != requestedLineId) {
