@@ -38,9 +38,8 @@ android {
 
     defaultConfig {
         applicationId = "com.github.u5151561.trackr.ms"
-        resValue("string", "shortcut_target_package", applicationId!!)
-        versionCode = 15
-        versionName = "0.1.11-ms.1"
+        versionCode = 16
+        versionName = "0.1.12-ms.1"
 
         buildConfigField("String", "AMAP_WEB_KEY", "\"$amapWebServiceKey\"")
         // 第 9 步存储开关 USE_NEW_STORE 的默认值（true = Room + DataStore）；运行时可用 files/store_switch 覆盖，见 StoreSwitch
@@ -81,8 +80,9 @@ android {
 
     buildTypes {
         debug {
-            // Fork 刻意不加 .debug 后缀（偏离上游 6d6cfda）：debug 包就是日常主用包（ms 身份），
-            // 改后缀等于换应用身份，设备上的收藏/设置等数据会被清空。
+            // Fork 刻意不加 .debug 后缀（偏离上游 6d6cfda / 0.1.12 的 src/debug 覆盖方案）：debug 包就是
+            // 日常主用包（ms 身份），改后缀等于换应用身份，设备上的收藏/设置等数据会被清空。
+            // shortcuts.xml 的 targetPackage 因此直接写 .ms 字面量（issue #50），无需 src/debug 覆盖文件。
             enableUnitTestCoverage = true
             buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKeyDebug\"")
             manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKeyDebug
@@ -115,7 +115,6 @@ android {
 
     buildFeatures {
         buildConfig = true
-        resValues = true
     }
 
     packaging {

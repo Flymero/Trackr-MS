@@ -251,7 +251,7 @@ class StopDetailViewModelTest {
     private fun existingStation(): FavoriteStation = FavoriteStation(
         id = FavoriteStation.idOf("034", DataSourceType.CHELAILE, "人民广场（广东路）", ""),
         cityId = "034", cityName = "上海", stopName = "人民广场（广东路）", stopId = "stop_001", physicalStId = "phy_01",
-        platformLabel = "往北", addedAtMillis = 1L
+        platformLabel = "往北", addedAtMillis = 1L // 固定时间戳（fork 既有口径）：两次 defaultNowMillis() 会差几毫秒
     )
 
     @Test
