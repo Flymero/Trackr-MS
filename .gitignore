@@ -66,6 +66,9 @@ iosApp/DerivedData/
 iosApp/Configuration/Local.xcconfig
 iosApp/Pods/
 
+# AGENTS.md 本地维护（不上传 git；磁盘文件保留）
+/AGENTS.md
+
 # Local review and investigation notes（模式覆盖：`git add -A` 不得带上）
 /docs/fork-bug-fixes-*.md
 /docs/fork-bug-review-*.md
