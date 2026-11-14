@@ -289,6 +289,19 @@ internal object BusHomeMapper {
                 arrival = ArrivalUi.of(display)
             )
         }
+        // 评审 P3-6：站点接口只回了占位空壳行（补全失败）时，ranked 会全部被滤空——
+        // 不能以 Ready + 零条线渲染成整行空白，按「查不到」兜底
+        if (ranked.isEmpty()) {
+            return FavoriteRowUi.Station(
+                key = item.key,
+                title = title,
+                lines = emptyList(),
+                lineCount = 0,
+                status = StationStatus.NotFound,
+                arrival = null,
+                open = open
+            )
+        }
         val first = ranked.firstOrNull()
         return FavoriteRowUi.Station(
             key = item.key,

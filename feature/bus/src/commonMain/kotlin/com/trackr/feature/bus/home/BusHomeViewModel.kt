@@ -27,6 +27,7 @@ import com.trackr.ui.util.FixedDelayPollingStrategy
 import com.trackr.ui.util.PollingCoordinator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -105,12 +106,15 @@ class BusHomeViewModel(
                 state.currentLng,
                 limit = NEARBY_STOPS_LIMIT
             )
+            val favSeq = ++favoritesRealtimeSeq
             val favResult = realtime.refreshFavoritesRealtime()
             edit {
                 it.copy(
                     nearbyStops = if (isCurrentNearbyQuery(state.currentCity, state.currentLat, state.currentLng, state.engineMode))
                         nearbyResult.getOrNull() ?: it.nearbyStops else it.nearbyStops,
-                    favoritesRealtime = favResult.getOrNull() ?: it.favoritesRealtime
+                    // 乱序保护：不是最新发起的取数结果不落地（评审 P3-3）
+                    favoritesRealtime = favResult.getOrNull()?.takeIf { favSeq == favoritesRealtimeSeq }
+                        ?: it.favoritesRealtime
                 )
             }
             lastRealtimeRefreshAtMs = elapsedRealtimeMillis()
@@ -367,9 +371,18 @@ class BusHomeViewModel(
         }
     }
 
+    /**
+     * 收藏实时刷新的启动序号：只有最后一次发起的结果才落地。
+     * 并发触发（新收藏站立刻刷新、轮询、整体刷新）完成顺序不定，乱序落地会把
+     * 新收藏的站卡打回「正在查车」（评审 P3-3）。
+     */
+    private var favoritesRealtimeSeq = 0L
+
     private fun refreshFavoritesRealtime() {
+        val seq = ++favoritesRealtimeSeq
         viewModelScope.launch {
             val result = realtime.refreshFavoritesRealtime()
+            if (seq != favoritesRealtimeSeq || !isActive) return@launch
             val map = result.getOrNull().orEmpty()
             if (map.isNotEmpty()) {
                 edit { it.copy(favoritesRealtime = map) }
@@ -389,8 +402,10 @@ class BusHomeViewModel(
             val cityBefore = _uiState.value.currentCity
             edit { it.copy(isRefreshing = true, isLocating = true, locationIssue = null) }
 
+            val favSeq = ++favoritesRealtimeSeq
             val favJob = launch {
                 val favResult = realtime.refreshFavoritesRealtime()
+                if (favSeq != favoritesRealtimeSeq || !isActive) return@launch
                 edit { it.copy(favoritesRealtime = favResult.getOrNull().orEmpty()) }
             }
 
