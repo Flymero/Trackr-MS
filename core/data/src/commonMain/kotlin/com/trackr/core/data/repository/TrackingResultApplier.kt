@@ -21,7 +21,9 @@ fun TrackingSession.withResolvedWaitingStop(detail: BusLineDetail): TrackingSess
     val hasCoords = stop.wgsLat > 0.0 && stop.wgsLng > 0.0
     val anchored = state.copy(
         targetOrder = stop.order,
-        targetStopId = stop.stopId,
+        // 站序未变（含按站序兜底命中的情形）时不改写 targetStopId：命中站可能与原目标 id 不同，
+        // 改写会让 TCP 订阅/后续锚定悄悄切到别的物理站；等按 id 找回（moved）时才跟随
+        targetStopId = if (moved) stop.stopId else state.targetStopId,
         targetStopLat = if (hasCoords) stop.wgsLat else state.targetStopLat,
         targetStopLng = if (hasCoords) stop.wgsLng else state.targetStopLng
     )

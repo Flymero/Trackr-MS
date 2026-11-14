@@ -44,6 +44,20 @@ class TrackingResultApplierTest {
         assertNull(next.state.currentBusId)
     }
 
+    @Test fun orderFallbackWhenIdMissing_keepsOriginalTargetStopId() = runTest {
+        // 评审 P3-1：改道删站后 ms-st:5 不在站表，站序 5 上是别的物理站——
+        // 站序未变（moved=false）时不得改写 targetStopId，否则 TCP 订阅/后续锚定悄悄切到别的物理站
+        val repo = DefaultTrackingRepository(InMemoryTrackingSessionStore(), backgroundScope, FakeClock())
+        val session = assertNotNull(repo.start(target))
+        val detail = BusLineDetail(line = BusLineDirection(lineId = target.lineId, name = "1路", startStop = "start", endStop = "end", source = DataSourceType.MEISHAN),
+            buses = emptyList(),
+            stops = listOf(BusStop("ms-st:other", "临时站", 5, wgsLat = 31.20, wgsLng = 121.47), BusStop("ms-st:7", "站7", 7)))
+        val next = session.withResolvedWaitingStop(detail)
+        assertEquals(5, next.state.targetOrder)
+        assertEquals("ms-st:5", next.state.targetStopId, "站序兜底命中别的物理站时保留原目标站 id")
+        assertEquals(31.20, next.state.targetStopLat)
+    }
+
     @Test fun commonCompletionStopsSameWaitingStationButRetainsOppositeAndOldGeneration() = runTest {
         val repo = DefaultTrackingRepository(InMemoryTrackingSessionStore(), backgroundScope, FakeClock())
         val a = assertNotNull(repo.start(target))
