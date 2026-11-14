@@ -24,6 +24,8 @@ object DeepLinkUris {
     internal const val Q_NAME = "name"
     internal const val Q_SESSION = "session"
     internal const val Q_PROVIDER = "provider"
+    internal const val Q_CITY = "city"
+    internal const val Q_CITY_CODE = "cityCode"
 
     /** `trackr://line/{cityId}/{lineId}?source=&stop=&order=&name=`：线路详情。空的可选参数不写。 */
     fun line(
@@ -47,9 +49,28 @@ object DeepLinkUris {
     /** `trackr://route/{groupId}`：路线详情。 */
     fun route(groupId: String): String = build(HOST_ROUTE, listOf(groupId))
 
-    /** `trackr://stop/{cityId}/{stopId}?name=`：站点详情。 */
-    fun stop(cityId: String, stopId: String, stopName: String = ""): String =
-        build(HOST_STOP, listOf(cityId, stopId), listOf(Q_NAME to stopName))
+    /**
+     * `trackr://stop/{cityId}/{stopId}?name=&source=&city=&cityCode=`：站点详情。
+     * 眉山/仁寿官方源的 cityId 为空：空段会被解析端过滤，城市身份改由 city/cityCode 查询参数承载，
+     * 此时 path 只有一段（stopId），解析端按 MEISHAN + 非空 city 校验信任边界。
+     */
+    fun stop(
+        cityId: String,
+        stopId: String,
+        stopName: String = "",
+        source: DataSourceType? = null,
+        cityName: String = "",
+        mygolbsCityCode: String = "",
+    ): String = build(
+        HOST_STOP,
+        path = listOf(cityId, stopId).filter { it.isNotEmpty() },
+        query = buildList {
+            add(Q_NAME to stopName)
+            if (source != null) add(Q_SOURCE to source.name)
+            if (cityName.isNotBlank()) add(Q_CITY to cityName)
+            if (mygolbsCityCode.isNotBlank()) add(Q_CITY_CODE to mygolbsCityCode)
+        },
+    )
 
     /** `trackr://tracking/board?session=`：「上了哪辆？」弹层。 */
     fun chooseBoardedBus(sessionId: String): String =

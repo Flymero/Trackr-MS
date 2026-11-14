@@ -14,6 +14,8 @@ import com.trackr.core.navigation.deeplink.DeepLinkUris.Q_NAME
 import com.trackr.core.navigation.deeplink.DeepLinkUris.Q_ORDER
 import com.trackr.core.navigation.deeplink.DeepLinkUris.Q_PROVIDER
 import com.trackr.core.navigation.deeplink.DeepLinkUris.Q_SESSION
+import com.trackr.core.navigation.deeplink.DeepLinkUris.Q_CITY
+import com.trackr.core.navigation.deeplink.DeepLinkUris.Q_CITY_CODE
 import com.trackr.core.navigation.deeplink.DeepLinkUris.Q_SOURCE
 import com.trackr.core.navigation.deeplink.DeepLinkUris.Q_STOP
 
@@ -79,10 +81,34 @@ object DeepLinkParser {
     }
 
     private fun parseStop(parts: UriParts): DeepLink? {
-        if (parts.path.size != 2) return null
-        val cityId = parts.path[0].validId() ?: return null
-        val stopId = parts.path[1].validId() ?: return null
-        val key = ScreenKey.StopDetail(cityId = cityId, stopId = stopId, stopName = parts.query[Q_NAME].displayName())
+        val q = parts.query
+        // 数据源不认识就不设置（沿用当前引擎模式），与线路深链的 CHELAILE 默认不同：站点页来源敏感
+        val source = q[Q_SOURCE]?.let { name -> DataSourceType.entries.firstOrNull { it.name == name } }
+        val cityName = q[Q_CITY].displayName()
+        val cityCode = q[Q_CITY_CODE]?.validId().orEmpty()
+        val cityId: String
+        val stopId: String
+        when (parts.path.size) {
+            2 -> {
+                cityId = parts.path[0].validId() ?: return null
+                stopId = parts.path[1].validId() ?: return null
+            }
+            1 -> {
+                // 眉山/仁寿官方源 cityId 为空：城市身份由 city/cityCode 查询参数承载，只认官方源 + 非空城市名
+                if (source != DataSourceType.MEISHAN || cityName.isBlank()) return null
+                cityId = ""
+                stopId = parts.path[0].validId() ?: return null
+            }
+            else -> return null
+        }
+        val key = ScreenKey.StopDetail(
+            cityId = cityId,
+            stopId = stopId,
+            stopName = q[Q_NAME].displayName(),
+            source = source,
+            cityName = cityName,
+            mygolbsCityCode = cityCode,
+        )
         return DeepLink.Stack(TopLevel.start, listOf(key))
     }
 

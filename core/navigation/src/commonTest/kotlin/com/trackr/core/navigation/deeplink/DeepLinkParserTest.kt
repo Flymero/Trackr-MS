@@ -84,6 +84,70 @@ class DeepLinkParserTest {
     }
 
     @Test
+    fun stop_meishanEmptyCityId_carriesIdentityInQuery() {
+        // 眉山/仁寿官方源 cityId 为空：城市身份走 city/cityCode 查询参数，path 只剩 stopId
+        val uri = DeepLinkUris.stop(
+            cityId = "",
+            stopId = "ms-st:10",
+            stopName = "眉山东站",
+            source = DataSourceType.MEISHAN,
+            cityName = "眉山",
+            mygolbsCityCode = "",
+        )
+        assertEquals(
+            homeStack(
+                ScreenKey.StopDetail(
+                    cityId = "",
+                    stopId = "ms-st:10",
+                    stopName = "眉山东站",
+                    source = DataSourceType.MEISHAN,
+                    cityName = "眉山",
+                )
+            ),
+            DeepLinkParser.parse(uri),
+        )
+        // 信任边界：单段 path 只认官方源 + 非空城市名
+        assertNull(DeepLinkParser.parse("trackr://stop/ms-st%3A10"), "没有来源与城市名：不解析")
+        assertNull(
+            DeepLinkParser.parse(
+                DeepLinkUris.stop("", "ms-st:10", "眉山东站", source = DataSourceType.CHELAILE, cityName = "眉山")
+            ),
+            "非官方源不接受单段 path",
+        )
+        assertNull(
+            DeepLinkParser.parse(
+                DeepLinkUris.stop("", "ms-st:10", "眉山东站", source = DataSourceType.MEISHAN, cityName = "")
+            ),
+            "官方源但城市名为空：不解析",
+        )
+    }
+
+    @Test
+    fun stop_thirdPartyWithSourceAndCity_roundTripsContext() {
+        val uri = DeepLinkUris.stop(
+            cityId = "021",
+            stopId = "mg:0755:深圳:M492:0",
+            stopName = "深大",
+            source = DataSourceType.MYGOLBS,
+            cityName = "深圳",
+            mygolbsCityCode = "0755",
+        )
+        assertEquals(
+            homeStack(
+                ScreenKey.StopDetail(
+                    cityId = "021",
+                    stopId = "mg:0755:深圳:M492:0",
+                    stopName = "深大",
+                    source = DataSourceType.MYGOLBS,
+                    cityName = "深圳",
+                    mygolbsCityCode = "0755",
+                )
+            ),
+            DeepLinkParser.parse(uri),
+        )
+    }
+
+    @Test
     fun trackingBoard_parsesToChooseBoardedBus() {
         assertEquals(DeepLink.ChooseBoardedBus("s-1"), DeepLinkParser.parse(DeepLinkUris.chooseBoardedBus("s-1")))
         assertNull(DeepLinkParser.parse("trackr://tracking/board"), "没有会话 id")

@@ -10,7 +10,14 @@ import platform.Foundation.*
 internal fun FavoriteItem.destination(): String = when (this) {
     is FavoriteItem.Stop -> DeepLinkUris.line(stop.cityId, stop.lineId, stop.source, stop.targetStopId, stop.targetOrder, stop.lineName)
     is FavoriteItem.Route -> DeepLinkUris.route(route.id)
-    is FavoriteItem.Station -> DeepLinkUris.stop(station.cityId, station.stopId, station.stopName)
+    is FavoriteItem.Station -> DeepLinkUris.stop(
+        cityId = station.cityId,
+        stopId = station.stopId,
+        stopName = station.stopName,
+        source = station.source,
+        cityName = station.cityName,
+        mygolbsCityCode = station.mygolbsCityCode,
+    )
 }
 
 internal data class IosFavoriteSnapshot(val updatedAt: Long = 0L, val stops: Map<String, NearbyStop> = emptyMap())
