@@ -66,6 +66,7 @@ iosApp/DerivedData/
 iosApp/Configuration/Local.xcconfig
 iosApp/Pods/
 
-# Local review and investigation notes
-/docs/fork-bug-fixes-20261109.md
-/docs/meishan-followup-20261109.md
+# Local review and investigation notes（模式覆盖：`git add -A` 不得带上）
+/docs/fork-bug-fixes-*.md
+/docs/fork-bug-review-*.md
+/docs/meishan-followup-*.md

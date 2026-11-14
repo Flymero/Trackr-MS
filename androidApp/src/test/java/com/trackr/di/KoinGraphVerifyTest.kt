@@ -61,7 +61,7 @@ class KoinGraphVerifyTest {
         // HttpClient 的构造参数（Koin 里用 createTrackrHttpClient() 现建）
         HttpClientEngine::class,
         HttpClientConfig::class,
-        // verify 会检查所有公开构造函数：TransitProviderCoordinator 主构造函数收 Map，次构造函数收两个 ITransitProvider；
+        // verify 会检查所有公开构造函数：TransitProviderCoordinator 主构造函数收 Map，次构造函数收三个 ITransitProvider（车来了 / 掌上公交 / 眉山）；
         // Koin 里用次构造函数，传的是具体的 ChelaileTransitProvider / MygolbsTransitProvider
         Map::class,
         ITransitProvider::class,

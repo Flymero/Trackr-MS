@@ -813,7 +813,8 @@ class LiveProgressNotifier(
          * 「乘车码」按钮在 [NotificationAction] 里的标识。第 18 步起按钮发的是 `trackr://transit-code` 链接，
          * 这个 action 只剩旧版兼容（已发出的旧通知，`DeepLinkIntents` 还认它）。
          */
-        const val ACTION_OPEN_TRANSIT_CODE = "com.github.u5151561.trackr.action.OPEN_TRANSIT_CODE"
+        // 带 .ms：MainActivity 的 intent 解析只认带后缀的 action（fork 包名是 com.github.u5151561.trackr.ms）
+        const val ACTION_OPEN_TRANSIT_CODE = "com.github.u5151561.trackr.ms.action.OPEN_TRANSIT_CODE"
     }
 }
 
